@@ -1,6 +1,4 @@
-@import "../styles/variables";
-
-@import '../styles/mixins/';
+@import '../styles/mixins';
 
 .containerInner {
   overflow: hidden;
@@ -11,6 +9,8 @@
 
 .appSlide {
   --background-color: var(--color-background-second);
+
+  z-index: 0;
 
   background: var(--color-background-second);
 
@@ -23,6 +23,10 @@
   @include respond-below(xs) {
     overflow: auto;
     overflow-x: hidden;
+  }
+
+  &_fastTransition {
+    animation-duration: 200ms !important;
   }
 }
 

@@ -1,5 +1,5 @@
 .calendarIconStroke {
-  stroke: var(--color-blue);
+  stroke: var(--color-accent);
 }
 
 .calendarIconFill {
@@ -7,7 +7,7 @@
 }
 
 .failed .calendarIconStroke {
-  stroke: var(--color-red);
+  stroke: var(--color-activity-red-text);
 }
 
 .failed .calendarIconFill {

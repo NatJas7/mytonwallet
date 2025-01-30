@@ -3,7 +3,7 @@ import React, { memo, useEffect, useState } from '../../lib/teact/teact';
 import { ANIMATED_STICKER_BIG_SIZE_PX } from '../../config';
 import renderText from '../../global/helpers/renderText';
 import buildClassName from '../../util/buildClassName';
-import resolveModalTransitionName from '../../util/resolveModalTransitionName';
+import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
@@ -71,7 +71,9 @@ function LedgerConfirmOperation({
             <span className={styles.text}>{text}</span>
           </div>
           <div className={buildClassName(styles.actionBlock, styles.actionBlock_single)}>
-            <Button onClick={onClose} className={styles.button}>{lang('Cancel')}</Button>
+            <Button onClick={onClose} className={buildClassName(styles.button, styles.button_single)}>
+              {lang('Cancel')}
+            </Button>
           </div>
         </div>
       </>
@@ -79,7 +81,10 @@ function LedgerConfirmOperation({
   }
 
   function renderTryAgain(isActiveSlide: boolean) {
-    const isErrorDetailed = error === '$hardware_blind_sign_not_enabled';
+    const isErrorDetailed = error && [
+      '$hardware_blind_sign_not_enabled',
+      '$hardware_blind_sign_not_enabled_internal',
+    ].includes(error);
 
     return (
       <>
@@ -118,7 +123,7 @@ function LedgerConfirmOperation({
 
   return (
     <Transition
-      name={resolveModalTransitionName()}
+      name={resolveSlideTransitionName()}
       className={buildClassName(modalStyles.transition, 'custom-scroll')}
       slideClassName={buildClassName(modalStyles.transitionSlide, styles.slide)}
       activeKey={activeState}

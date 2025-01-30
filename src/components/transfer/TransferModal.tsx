@@ -18,7 +18,7 @@ import buildClassName from '../../util/buildClassName';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { toDecimal } from '../../util/decimals';
 import { formatCurrency } from '../../util/formatNumber';
-import resolveModalTransitionName from '../../util/resolveModalTransitionName';
+import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
 import { shortenAddress } from '../../util/shortenAddress';
 
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
@@ -68,7 +68,7 @@ function TransferModal({
     tokenSlug,
     nfts,
     sentNftsCount,
-    dieselStatus,
+    diesel,
   },
   tokens, savedAddresses, hardwareState, isLedgerConnected, isTonAppConnected, isMediaViewerOpen, isMultichainAccount,
 }: StateProps) {
@@ -146,8 +146,7 @@ function TransferModal({
         return (
           <TransferConfirm
             isActive={isActive}
-            symbol={symbol}
-            decimals={selectedToken?.decimals}
+            token={selectedToken}
             savedAddresses={savedAddresses}
             onBack={isPortrait ? handleBackClick : handleModalClose}
             onClose={handleModalCloseWithReset}
@@ -162,7 +161,7 @@ function TransferModal({
             error={error}
             onSubmit={handleTransferSubmit}
             onCancel={handleModalCloseWithReset}
-            isGaslessWithStars={dieselStatus === 'stars-fee'}
+            isGaslessWithStars={diesel?.status === 'stars-fee'}
           >
             <TransactionBanner
               tokenIn={selectedToken}
@@ -233,7 +232,7 @@ function TransferModal({
       onCloseAnimationEnd={handleModalClose}
     >
       <Transition
-        name={resolveModalTransitionName()}
+        name={resolveSlideTransitionName()}
         className={buildClassName(modalStyles.transition, 'custom-scroll')}
         slideClassName={modalStyles.transitionSlide}
         activeKey={renderingKey}

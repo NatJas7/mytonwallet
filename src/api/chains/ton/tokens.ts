@@ -6,7 +6,7 @@ import type {
   AnyPayload, ApiTransactionExtra, JettonMetadata, TonTransferParams,
 } from './types';
 
-import { TINY_TOKENS } from '../../../config';
+import { TON_USDT_SLUG } from '../../../config';
 import { parseAccountId } from '../../../util/account';
 import { fetchJsonWithProxy } from '../../../util/fetch';
 import { logDebugError } from '../../../util/logs';
@@ -20,20 +20,23 @@ import {
 import { fetchJettonBalances } from './util/tonapiio';
 import {
   buildTokenTransferBody,
+  getTokenBalance,
   getTonClient,
   resolveTokenAddress,
   resolveTokenWalletAddress,
   toBase64Address, toRawAddress,
 } from './util/tonCore';
-import { JettonWallet } from './contracts/JettonWallet';
 import { fetchStoredTonWallet } from '../../common/accounts';
 import { buildTokenSlug, getTokenByAddress } from '../../common/tokens';
 import {
   CLAIM_MINTLESS_AMOUNT,
   DEFAULT_DECIMALS,
+  TINIEST_TOKEN_TRANSFER_REAL_AMOUNT,
   TINY_TOKEN_TRANSFER_AMOUNT,
+  TINY_TOKEN_TRANSFER_REAL_AMOUNT,
   TOKEN_TRANSFER_AMOUNT,
   TOKEN_TRANSFER_FORWARD_AMOUNT,
+  TOKEN_TRANSFER_REAL_AMOUNT,
 } from './constants';
 import { isActiveSmartContract } from './wallet';
 
@@ -52,11 +55,6 @@ export async function getAccountTokenBalances(accountId: string) {
 }
 
 export async function getTokenBalances(network: ApiNetwork, address: string) {
-  const balancesRaw = await fetchJettonBalances(network, address);
-  return balancesRaw.map((balance) => parseTokenBalance(network, balance)).filter(Boolean);
-}
-
-export async function getAddressTokenBalances(address: string, network: ApiNetwork) {
   const balancesRaw = await fetchJettonBalances(network, address);
   return balancesRaw.map((balance) => parseTokenBalance(network, balance)).filter(Boolean);
 }
@@ -100,7 +98,12 @@ export function parseTokenTransaction(
   }
 
   const {
-    operation, jettonAmount, address, comment, encryptedComment,
+    operation,
+    jettonAmount,
+    address,
+    comment,
+    encryptedComment,
+    type,
   } = parsedData;
   const isIncoming = operation === 'InternalTransfer';
 
@@ -110,6 +113,7 @@ export function parseTokenTransaction(
 
   return {
     ...tx,
+    type,
     slug,
     fromAddress,
     toAddress,
@@ -181,6 +185,7 @@ export async function buildTokenTransfer(options: {
   amount: bigint;
   payload?: AnyPayload;
   shouldSkipMintless?: boolean;
+  forwardAmount?: bigint;
 }) {
   const {
     network,
@@ -189,15 +194,15 @@ export async function buildTokenTransfer(options: {
     toAddress,
     amount,
     shouldSkipMintless,
+    forwardAmount = TOKEN_TRANSFER_FORWARD_AMOUNT,
   } = options;
   let { payload } = options;
 
   const tokenWalletAddress = await resolveTokenWalletAddress(network, fromAddress, tokenAddress);
-  const tokenWallet = getTokenWallet(network, tokenWalletAddress);
   const token = getTokenByAddress(tokenAddress)!;
 
   const {
-    isTokenWalletDeployed,
+    isTokenWalletDeployed = !!(await isActiveSmartContract(network, tokenWalletAddress)),
     isMintlessClaimed,
     mintlessTokenBalance,
     customPayload,
@@ -216,23 +221,24 @@ export async function buildTokenTransfer(options: {
   payload = buildTokenTransferBody({
     tokenAmount: amount,
     toAddress,
-    forwardAmount: TOKEN_TRANSFER_FORWARD_AMOUNT,
+    forwardAmount,
     forwardPayload: payload,
     responseAddress: fromAddress,
     customPayload: customPayload ? Cell.fromBase64(customPayload) : undefined,
   });
 
-  let toncoinAmount = TINY_TOKENS.has(tokenAddress)
-    ? TINY_TOKEN_TRANSFER_AMOUNT
-    : TOKEN_TRANSFER_AMOUNT;
+  // eslint-disable-next-line prefer-const
+  let { amount: toncoinAmount, realAmount } = getToncoinAmountForTransfer(
+    token, Boolean(mintlessTokenBalance) && !isMintlessClaimed,
+  );
 
-  if (mintlessTokenBalance && !isMintlessClaimed) {
-    toncoinAmount += CLAIM_MINTLESS_AMOUNT;
+  if (forwardAmount > TOKEN_TRANSFER_FORWARD_AMOUNT) {
+    toncoinAmount += forwardAmount;
   }
 
   return {
-    tokenWallet,
     amount: toncoinAmount,
+    realAmount,
     toAddress: tokenWalletAddress,
     payload,
     stateInit: stateInit ? Cell.fromBase64(stateInit) : undefined,
@@ -241,7 +247,37 @@ export async function buildTokenTransfer(options: {
   };
 }
 
-export async function getMintlessParams(options: {
+export async function getTokenBalanceWithMintless(network: ApiNetwork, accountAddress: string, tokenAddress: string) {
+  const tokenWalletAddress = await resolveTokenWalletAddress(network, accountAddress, tokenAddress);
+  const token = getTokenByAddress(tokenAddress)!;
+
+  const {
+    isTokenWalletDeployed = !!(await isActiveSmartContract(network, tokenWalletAddress)),
+    mintlessTokenBalance,
+  } = await getMintlessParams({
+    network, fromAddress: accountAddress, token, tokenWalletAddress,
+  });
+
+  return calculateTokenBalanceWithMintless(network, tokenWalletAddress, isTokenWalletDeployed, mintlessTokenBalance);
+}
+
+export async function calculateTokenBalanceWithMintless(
+  network: ApiNetwork,
+  tokenWalletAddress: string,
+  isTokenWalletDeployed?: boolean,
+  mintlessTokenBalance = 0n,
+) {
+  let balance = 0n;
+  if (isTokenWalletDeployed) {
+    balance += await getTokenBalance(network, tokenWalletAddress);
+  }
+  if (mintlessTokenBalance) {
+    balance += mintlessTokenBalance;
+  }
+  return balance;
+}
+
+async function getMintlessParams(options: {
   network: ApiNetwork;
   fromAddress: string;
   token: ApiToken;
@@ -252,11 +288,11 @@ export async function getMintlessParams(options: {
     network, fromAddress, token, tokenWalletAddress, shouldSkipMintless,
   } = options;
 
-  let isTokenWalletDeployed = true;
+  const isMintlessToken = !!token.customPayloadApiUrl;
+  let isTokenWalletDeployed: boolean | undefined;
   let customPayload: string | undefined;
   let stateInit: string | undefined;
 
-  const isMintlessToken = !!token.customPayloadApiUrl;
   let isMintlessClaimed: boolean | undefined;
   let mintlessTokenBalance: bigint | undefined;
 
@@ -310,10 +346,6 @@ async function fetchMintlessTokenWalletData(customPayloadApiUrl: string, address
   } | undefined;
 }
 
-export function getTokenWallet(network: ApiNetwork, tokenAddress: string) {
-  return getTonClient(network).open(new JettonWallet(Address.parse(tokenAddress)));
-}
-
 export async function fetchToken(network: ApiNetwork, address: string) {
   const metadata = await fetchJettonMetadata(network, address);
 
@@ -340,4 +372,36 @@ function buildTokenByMetadata(address: string, metadata: JettonMetadata): ApiTok
     image: (image && fixIpfsUrl(image)) || (imageData && fixBase64ImageData(imageData)) || undefined,
     customPayloadApiUrl,
   };
+}
+
+/**
+ * A pure function guessing the "fee" that needs to be attached to the token transfer.
+ * In contrast to the blockchain fee, this fee is a part of the transfer itself.
+ *
+ * `amount` is what should be attached (acts as a fee for the user);
+ * `realAmount` is approximately what will be actually spent (the rest will return in the excess).
+ */
+export function getToncoinAmountForTransfer(token: ApiToken, willClaimMintless: boolean) {
+  let amount = 0n;
+  let realAmount = 0n;
+
+  if (token.isTiny) {
+    amount += TINY_TOKEN_TRANSFER_AMOUNT;
+
+    if (token.slug === TON_USDT_SLUG) {
+      realAmount += TINIEST_TOKEN_TRANSFER_REAL_AMOUNT;
+    } else {
+      realAmount += TINY_TOKEN_TRANSFER_REAL_AMOUNT;
+    }
+  } else {
+    amount += TOKEN_TRANSFER_AMOUNT;
+    realAmount += TOKEN_TRANSFER_REAL_AMOUNT;
+  }
+
+  if (willClaimMintless) {
+    amount += CLAIM_MINTLESS_AMOUNT;
+    realAmount += CLAIM_MINTLESS_AMOUNT;
+  }
+
+  return { amount, realAmount };
 }

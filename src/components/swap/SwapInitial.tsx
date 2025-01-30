@@ -4,7 +4,12 @@ import React, {
 import { getActions, getGlobal, withGlobal } from '../../global';
 
 import type { ApiChain } from '../../api/types';
-import type { Account, GlobalState, UserSwapToken } from '../../global/types';
+import type {
+  Account, ActionPayloads, AssetPairs, GlobalState, UserSwapToken,
+} from '../../global/types';
+import type { LangFn } from '../../hooks/useLang';
+import type { ExplainedSwapFee } from '../../util/fee/swapFee';
+import type { FeePrecision, FeeTerms } from '../../util/fee/types';
 import { SwapInputSource, SwapState, SwapType } from '../../global/types';
 
 import {
@@ -15,19 +20,15 @@ import {
   CHANGELLY_PRIVACY_POLICY,
   CHANGELLY_TERMS_OF_USE,
   DEFAULT_SWAP_SECOND_TOKEN_SLUG,
-  DIESEL_TOKENS,
   TONCOIN,
-  TRX,
 } from '../../config';
 import { selectCurrentAccount, selectIsMultichainAccount, selectSwapTokens } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { vibrate } from '../../util/capacitor';
-import { findChainConfig, getChainConfig } from '../../util/chain';
+import { findChainConfig } from '../../util/chain';
 import { fromDecimal, toDecimal } from '../../util/decimals';
+import { explainSwapFee, getMaxSwapAmount, isBalanceSufficientForSwap } from '../../util/fee/swapFee';
 import { formatCurrency } from '../../util/formatNumber';
-import getSwapRate from '../../util/swap/getSwapRate';
-import { getIsNativeToken } from '../../util/tokens';
-import { ONE_TRX } from '../../api/chains/tron/constants';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import { isBackgroundModeActive } from '../../hooks/useBackgroundMode';
@@ -39,11 +40,14 @@ import usePrevious from '../../hooks/usePrevious';
 import useSyncEffect from '../../hooks/useSyncEffect';
 import useThrottledCallback from '../../hooks/useThrottledCallback';
 
+import FeeDetailsModal from '../common/FeeDetailsModal';
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
+import FeeLine from '../ui/FeeLine';
 import RichNumberInput from '../ui/RichNumberInput';
 import Transition from '../ui/Transition';
 import SwapSelectToken from './components/SwapSelectToken';
 import SwapSubmitButton from './components/SwapSubmitButton';
+import SwapDexChooser from './SwapDexChooser';
 import SwapSettingsModal, { MAX_PRICE_IMPACT_VALUE } from './SwapSettingsModal';
 
 import modalStyles from '../ui/Modal.module.scss';
@@ -74,17 +78,18 @@ function SwapInitial({
     errorType,
     isEstimating,
     shouldEstimate,
-    networkFee = 0,
-    realNetworkFee = 0,
+    networkFee,
+    realNetworkFee,
     priceImpact = 0,
     inputSource,
     swapType,
     limits,
     isLoading,
     pairs,
-    isSettingsModalOpen,
     dieselStatus,
-    swapFee,
+    ourFee,
+    ourFeePercent,
+    dieselFee,
   },
   accountId,
   addressByChain,
@@ -96,6 +101,7 @@ function SwapInitial({
   const {
     setDefaultSwapParams,
     setSwapAmountIn,
+    setSwapIsMaxAmount,
     setSwapAmountOut,
     switchSwapTokens,
     estimateSwap,
@@ -104,8 +110,8 @@ function SwapInitial({
     loadSwapPairs,
     setSwapType,
     setSwapCexAddress,
-    toggleSwapSettingsModal,
     authorizeDiesel,
+    showNotification,
   } = getActions();
   const lang = useLang();
 
@@ -115,8 +121,6 @@ function SwapInitial({
   const inputOutRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line no-null/no-null
   const estimateIntervalId = useRef<number>(null);
-
-  const [hasAmountInError, setHasAmountInError] = useState(false);
 
   const currentTokenInSlug = tokenInSlug ?? TONCOIN.slug;
   const currentTokenOutSlug = tokenOutSlug ?? DEFAULT_SWAP_SECOND_TOKEN_SLUG;
@@ -141,72 +145,80 @@ function SwapInitial({
     () => tokens?.find((token) => token.slug === nativeTokenInSlug),
     [nativeTokenInSlug, tokens],
   );
-  const isNativeIn = currentTokenInSlug && currentTokenInSlug === nativeTokenInSlug;
-  const chainConfigIn = nativeUserTokenIn ? getChainConfig(nativeUserTokenIn.chain as ApiChain) : undefined;
-  const isTonIn = tokenIn?.chain === 'ton';
-  const visibleNetworkFee = isTonIn ? realNetworkFee : networkFee;
+  const nativeBalance = nativeUserTokenIn?.amount ?? 0n;
 
-  const amountInBigint = amountIn && tokenIn ? fromDecimal(amountIn, tokenIn.decimals) : 0n;
-  const amountOutBigint = amountOut && tokenOut ? fromDecimal(amountOut, tokenOut.decimals) : 0n;
-  const balanceIn = useMemo(() => {
-    let value = tokenIn?.amount ?? 0n;
-    if (tokenIn?.slug === TRX.slug && isMultichainAccount) {
-      // We always need to leave 1 TRX on balance
-      value = value > ONE_TRX ? value - ONE_TRX : 0n;
-    }
-    return value;
-  }, [tokenIn, isMultichainAccount]);
-  const networkFeeBigint = useMemo(() => {
-    let value = 0n;
+  const amountInBigint = amountIn && tokenIn ? fromDecimal(amountIn, tokenIn.decimals) : undefined;
+  const amountOutBigint = amountOut && tokenOut ? fromDecimal(amountOut, tokenOut.decimals) : undefined;
+  const balanceIn = tokenIn?.amount ?? 0n;
 
-    if (!chainConfigIn) {
-      return value;
-    }
+  const explainedFee = useMemo(
+    () => explainSwapFee({
+      swapType,
+      tokenInSlug,
+      networkFee,
+      realNetworkFee,
+      ourFee,
+      dieselStatus,
+      dieselFee,
+      nativeTokenInBalance: nativeBalance,
+    }),
+    [swapType, tokenInSlug, networkFee, realNetworkFee, ourFee, dieselStatus, dieselFee, nativeBalance],
+  );
 
-    if (networkFee > 0) {
-      value = fromDecimal(networkFee, nativeUserTokenIn?.decimals);
-    } else if (swapType === SwapType.OnChain) {
-      value = chainConfigIn?.gas.maxSwap ?? 0n;
-    } else if (swapType === SwapType.CrosschainFromWallet) {
-      value = getIsNativeToken(tokenInSlug) ? chainConfigIn.gas.maxTransfer : chainConfigIn.gas.maxTransferToken;
-    }
+  const maxAmount = getMaxSwapAmount({
+    swapType,
+    tokenInBalance: balanceIn,
+    tokenIn,
+    fullNetworkFee: explainedFee.fullFee?.networkTerms,
+    ourFeePercent,
+  });
 
-    return value;
-  }, [networkFee, nativeUserTokenIn, chainConfigIn, swapType, tokenInSlug]);
-  const totalNativeAmount = networkFeeBigint + (isNativeIn ? amountInBigint : 0n);
-  const isEnoughNative = nativeUserTokenIn && nativeUserTokenIn.amount >= totalNativeAmount;
-  const amountOutValue = amountInBigint <= 0n && inputSource === SwapInputSource.In
+  // Note: this constant has 3 distinct meaningful values
+  const isEnoughBalance = isBalanceSufficientForSwap({
+    swapType,
+    tokenInBalance: balanceIn,
+    tokenIn,
+    fullNetworkFee: explainedFee.fullFee?.networkTerms,
+    ourFeePercent,
+    amountIn,
+    nativeTokenInBalance: nativeBalance,
+  });
+
+  const networkFeeBigint = networkFee !== undefined && nativeUserTokenIn
+    ? fromDecimal(networkFee, nativeUserTokenIn.decimals)
+    : 0n;
+  const isEnoughNative = nativeBalance >= networkFeeBigint;
+
+  const isDieselNotAuthorized = explainedFee.isGasless && dieselStatus === 'not-authorized';
+
+  const canSubmit = isDieselNotAuthorized || (
+    (amountInBigint ?? 0n) > 0n
+    && (amountOutBigint ?? 0n) > 0n
+    && isEnoughBalance
+    && (!explainedFee.isGasless || dieselStatus === 'available')
+    && !isEstimating
+    && errorType === undefined
+  );
+
+  const hasAmountInError = amountInBigint !== undefined && maxAmount !== undefined && amountInBigint > maxAmount;
+  const amountOutValue = (amountInBigint ?? 0n) <= 0n && inputSource === SwapInputSource.In
     ? ''
     : amountOut?.toString();
-
-  const isErrorExist = errorType !== undefined;
-
-  const isDieselSwap = swapType === SwapType.OnChain
-    && !isEnoughNative
-    && tokenIn?.tokenAddress
-    && DIESEL_TOKENS.has(tokenIn.tokenAddress);
-
-  const isCorrectAmountIn = Boolean(
-    amountIn
-    && tokenIn
-    && amountInBigint > 0
-    && amountInBigint <= balanceIn,
-  ) || (tokenIn && !nativeTokenInSlug);
-
-  const isEnoughFee = swapType !== SwapType.CrosschainToWallet
-    ? (isEnoughNative && (swapType === SwapType.CrosschainFromWallet || swapType === SwapType.OnChain))
-    || (swapType === SwapType.OnChain && dieselStatus && ['available', 'not-authorized'].includes(dieselStatus))
-    : true;
-
-  const isCorrectAmountOut = amountOut && amountOutBigint > 0;
-  const canSubmit = Boolean(isCorrectAmountIn && isCorrectAmountOut && isEnoughFee && !isEstimating && !isErrorExist);
+  const isAmountGreaterThanBalance = balanceIn !== undefined && amountInBigint !== undefined
+    && amountInBigint > balanceIn;
+  const isInsufficientFee = isEnoughBalance === false && !isAmountGreaterThanBalance;
 
   const isPriceImpactError = priceImpact >= MAX_PRICE_IMPACT_VALUE;
   const isCrosschain = swapType === SwapType.CrosschainFromWallet || swapType === SwapType.CrosschainToWallet;
 
-  const isReverseProhibited = useMemo(() => {
-    return isCrosschain || pairs?.bySlug?.[currentTokenInSlug]?.[currentTokenOutSlug]?.isReverseProhibited;
-  }, [currentTokenInSlug, currentTokenOutSlug, isCrosschain, pairs?.bySlug]);
+  const [isBuyAmountInputDisabled, handleBuyAmountInputClick] = useReverseProhibited(
+    isCrosschain,
+    pairs?.bySlug,
+    currentTokenInSlug,
+    currentTokenOutSlug,
+    showNotification,
+    lang,
+  );
 
   const handleEstimateSwap = useLastCallback((shouldBlock: boolean) => {
     if (!isActive || isBackgroundModeActive()) return;
@@ -215,7 +227,12 @@ function SwapInitial({
       estimateSwapCex({ shouldBlock });
       return;
     }
-    estimateSwap({ shouldBlock, isEnoughToncoin: isEnoughNative });
+
+    estimateSwap({
+      shouldBlock,
+      isEnoughToncoin: isEnoughNative,
+      toncoinBalance: nativeBalance,
+    });
   });
 
   const throttledEstimateSwap = useThrottledCallback(
@@ -232,6 +249,8 @@ function SwapInitial({
       throttledEstimateSwap(false);
     }, ESTIMATE_REQUEST_INTERVAL);
   });
+
+  const [currentSubModal, openSettingsModal, openFeeModal, closeSubModal] = useSubModals(explainedFee);
 
   useEffect(() => {
     if (!tokenInSlug && !tokenOutSlug) {
@@ -292,67 +311,33 @@ function SwapInitial({
     }
   }, [tokenIn, tokenOut, isMultichainAccount]);
 
-  const validateAmountIn = useLastCallback((amount: string | undefined) => {
-    if (swapType === SwapType.CrosschainToWallet || !amount || !tokenIn) {
-      setHasAmountInError(false);
-      return;
-    }
-
-    const hasError = fromDecimal(amount, tokenIn.decimals) > balanceIn;
-    setHasAmountInError(hasError);
-  });
-
-  useEffect(() => {
-    validateAmountIn(amountIn);
-  }, [amountIn, tokenIn, validateAmountIn, swapType]);
-
   const handleAmountInChange = useLastCallback(
-    (amount: string | undefined, noReset = false) => {
-      if (!noReset) {
-        setHasAmountInError(false);
-      }
-
-      if (!amount) {
-        debounceSetAmountIn({ amount: undefined });
-        return;
-      }
-
-      validateAmountIn(amount);
-      debounceSetAmountIn({ amount });
+    (amount: string | undefined) => {
+      setSwapIsMaxAmount({ isMaxAmount: false });
+      debounceSetAmountIn({ amount: amount || undefined });
     },
   );
 
   const handleAmountOutChange = useLastCallback(
     (amount: string | undefined) => {
+      setSwapIsMaxAmount({ isMaxAmount: false });
       debounceSetAmountOut({ amount });
     },
   );
 
-  const handleMaxAmountClick = useLastCallback(
-    (e: React.MouseEvent<HTMLElement>) => {
-      e.preventDefault();
+  const handleMaxAmountClick = (e: React.MouseEvent<HTMLElement>) => {
+    e.preventDefault();
 
-      vibrate();
+    if (maxAmount === undefined) {
+      return;
+    }
 
-      let maxAmount = balanceIn;
+    void vibrate();
 
-      if (isNativeIn) {
-        maxAmount -= networkFeeBigint;
-
-        if (swapType === SwapType.OnChain) {
-          const amountForNextSwap = chainConfigIn?.gas.maxSwap ?? 0n;
-          const shouldIgnoreNextSwap = amountInBigint > 0n && (maxAmount - amountInBigint) <= amountForNextSwap;
-          if (!shouldIgnoreNextSwap && maxAmount > amountForNextSwap) {
-            maxAmount -= amountForNextSwap;
-          }
-        }
-      }
-
-      const amount = toDecimal(maxAmount, tokenIn!.decimals);
-      validateAmountIn(amount);
-      setSwapAmountIn({ amount });
-    },
-  );
+    const amount = toDecimal(maxAmount, tokenIn!.decimals);
+    setSwapIsMaxAmount({ isMaxAmount: true });
+    setSwapAmountIn({ amount });
+  };
 
   const handleSubmit = useLastCallback((e) => {
     e.preventDefault();
@@ -361,7 +346,7 @@ function SwapInitial({
       return;
     }
 
-    if (isDieselSwap && dieselStatus === 'not-authorized') {
+    if (isDieselNotAuthorized) {
       authorizeDiesel();
       return;
     }
@@ -372,8 +357,12 @@ function SwapInitial({
       setSwapCexAddress({ toAddress: '' });
       if (swapType === SwapType.CrosschainToWallet) {
         setSwapScreen({ state: SwapState.Password });
-      } else if (isMultichainAccount && addressByChain![tokenIn!.chain as ApiChain]) {
-        setSwapCexAddress({ toAddress: addressByChain![tokenIn!.chain as ApiChain] });
+      } else if (
+        isMultichainAccount
+        && addressByChain![tokenIn!.chain as ApiChain]
+        && addressByChain![tokenOut!.chain as ApiChain]
+      ) {
+        setSwapCexAddress({ toAddress: addressByChain![tokenOut!.chain as ApiChain] });
         setSwapScreen({ state: SwapState.Password });
       } else {
         setSwapScreen({ state: SwapState.Blockchain });
@@ -389,23 +378,13 @@ function SwapInitial({
     switchSwapTokens();
   });
 
-  const openSettingsModal = useLastCallback(() => {
-    toggleSwapSettingsModal({ isOpen: true });
-  });
-
-  const closeSettingsModal = useLastCallback(() => {
-    toggleSwapSettingsModal({ isOpen: false });
-  });
-
   function renderBalance() {
-    const isBalanceVisible = Boolean(isMultichainAccount ? nativeTokenInSlug : isTonIn);
-
     return (
       <Transition
         name="fade"
         activeKey={tokenInTransitionKey}
       >
-        {isBalanceVisible && (
+        {maxAmount !== undefined && (
           <div className={styles.balanceContainer}>
             <span className={styles.balance}>
               {lang('$max_balance', {
@@ -416,7 +395,7 @@ function SwapInitial({
                     onClick={handleMaxAmountClick}
                     className={styles.balanceLink}
                   >
-                    {formatCurrency(toDecimal(tokenIn!.amount, tokenIn?.decimals), tokenIn!.symbol)}
+                    {formatCurrency(toDecimal(maxAmount, tokenIn?.decimals), tokenIn!.symbol)}
                   </div>
                 ),
               })}
@@ -427,29 +406,30 @@ function SwapInitial({
     );
   }
 
-  function renderPrice() {
-    const isPriceVisible = Boolean(amountIn && amountOut);
-    const shouldBeRendered = isPriceVisible && !isEstimating;
+  function renderFee() {
+    const shouldShow = (amountIn && amountOut) // We aim to synchronize the disappearing of the fee with the DEX chooser disappearing
+      || ((amountIn || amountOut) && errorType); // Without this sub-condition the fee wouldn't be shown when the amount is outside the Changelly limits
 
-    if (!shouldBeRendered) return undefined;
+    let terms: FeeTerms | undefined;
+    let precision: FeePrecision = 'exact';
 
-    const rate = getSwapRate(
-      amountIn ? String(amountIn) : undefined,
-      amountOut ? String(amountOut) : undefined,
-      tokenIn,
-      tokenOut,
-      true,
-    );
-
-    if (!rate) return undefined;
+    if (shouldShow) {
+      const actualFee = isInsufficientFee ? explainedFee.fullFee : explainedFee.realFee;
+      if (actualFee) {
+        ({ terms, precision } = actualFee);
+      }
+    }
 
     return (
-      <span className={styles.tokenPrice}>
-        {rate.firstCurrencySymbol}{' ≈ '}
-        <span className={styles.tokenPriceBold}>
-          {rate.price}{' '}{rate.secondCurrencySymbol}
-        </span>
-      </span>
+      <FeeLine
+        isStatic={isStatic}
+        terms={terms}
+        token={tokenIn}
+        precision={precision}
+        keepDetailsButtonWithoutFee
+        onDetailsClick={openSettingsModal}
+        className={styles.feeLine}
+      />
     );
   }
 
@@ -492,102 +472,28 @@ function SwapInitial({
 
     return (
       <div className={buildClassName(styles.changellyInfo, isStatic && styles.changellyInfoStatic)}>
-        <div className={styles.changellyInfoContent}>
-          <span className={styles.changellyInfoTitle}>
-            <i className={buildClassName('icon-changelly', styles.changellyIcon)} aria-hidden />
-            {lang('Cross-chain exchange provided by Changelly')}
-          </span>
-          <span className={styles.changellyInfoDescription}>
-            {
-              lang('$swap_changelly_agreement_message', {
-                terms: (
-                  <a href={CHANGELLY_TERMS_OF_USE} target="_blank" rel="noreferrer">
-                    {lang('$swap_changelly_terms_of_use')}
-                  </a>
-                ),
-                policy: (
-                  <a href={CHANGELLY_PRIVACY_POLICY} target="_blank" rel="noreferrer">
-                    {lang('$swap_changelly_privacy_policy')}
-                  </a>
-                ),
-                kyc: <a href={CHANGELLY_AML_KYC} target="_blank" rel="noreferrer">Changelly AML/KYC</a>,
-              })
-            }
-          </span>
-        </div>
-      </div>
-    );
-  }
-
-  function renderFee() {
-    const isFeeEqualZero = realNetworkFee === 0;
-
-    let feeBlock: React.JSX.Element | undefined;
-    const shouldRenderDieselSwapFee = Boolean(
-      swapType === SwapType.OnChain
-      && isDieselSwap
-      && !isLoading
-      && swapFee
-      && tokenIn
-      && tokenIn.slug !== TONCOIN.slug
-      && tokenOut?.slug === TONCOIN.slug,
-    );
-
-    if (shouldRenderDieselSwapFee) {
-      feeBlock = (
-        <span className={styles.feeText}>
-          {lang('$fee_value', { fee: formatCurrency(swapFee!, tokenIn!.symbol, undefined, true) })}
+        <span className={styles.changellyInfoTitle}>
+          <i className={buildClassName('icon-changelly', styles.changellyIcon)} aria-hidden />
+          {lang('Cross-chain exchange provided by Changelly')}
         </span>
-      );
-    } else if (nativeUserTokenIn) {
-      if (!isEnoughNative && isTonIn && !isFeeEqualZero) {
-        feeBlock = (
-          <span className={styles.feeText}>{lang('$fee_value_less', {
-            fee: formatCurrency(
-              toDecimal(totalNativeAmount, nativeUserTokenIn.decimals),
-              nativeUserTokenIn.symbol,
-              undefined,
-              true,
-            ),
-          })}
-          </span>
-        );
-      } else {
-        feeBlock = (
-          <span className={styles.feeText}>{lang(isFeeEqualZero ? '$fee_value' : '$fee_value_almost_equal', {
-            fee: formatCurrency(visibleNetworkFee, nativeUserTokenIn.symbol, undefined, true),
-          })}
-          </span>
-        );
-      }
-    }
-
-    const priceBlock = renderPrice();
-    const activeKey = (isFeeEqualZero ? 0 : 1) + (priceBlock ? 2 : 3);
-
-    return (
-      <Transition
-        name="fade"
-        activeKey={activeKey}
-        className={styles.feeWrapper}
-      >
-        <div
-          className={buildClassName(
-            styles.feeContent,
-            !isCrosschain && styles.feeContentClickable,
-          )}
-          onClick={isCrosschain ? undefined : openSettingsModal}
-        >
-          {priceBlock}
-          {feeBlock}
-
+        <span className={styles.changellyInfoDescription}>
           {
-            isCrosschain
-              ? undefined
-              : <i className={buildClassName(styles.feeIcon, 'icon-params')} aria-hidden />
+            lang('$swap_changelly_agreement_message', {
+              terms: (
+                <a href={CHANGELLY_TERMS_OF_USE} target="_blank" rel="noreferrer">
+                  {lang('$swap_changelly_terms_of_use')}
+                </a>
+              ),
+              policy: (
+                <a href={CHANGELLY_PRIVACY_POLICY} target="_blank" rel="noreferrer">
+                  {lang('$swap_changelly_privacy_policy')}
+                </a>
+              ),
+              kyc: <a href={CHANGELLY_AML_KYC} target="_blank" rel="noreferrer">Changelly AML/KYC</a>,
+            })
           }
-        </div>
-      </Transition>
+        </span>
+      </div>
     );
   }
 
@@ -627,9 +533,10 @@ function SwapInitial({
               className={styles.amountInputBuy}
               value={amountOutValue}
               isLoading={isEstimating && inputSource === SwapInputSource.In}
-              disabled={isReverseProhibited}
+              disabled={isBuyAmountInputDisabled}
               onChange={handleAmountOutChange}
               onPressEnter={handleSubmit}
+              onInputClick={handleBuyAmountInputClick}
               decimals={tokenOut?.decimals}
               labelClassName={styles.inputLabel}
               inputClassName={styles.amountInputInner}
@@ -640,10 +547,10 @@ function SwapInitial({
             </RichNumberInput>
           </div>
         </div>
+        {!isCrosschain && <SwapDexChooser tokenIn={tokenIn} tokenOut={tokenOut} isStatic={isStatic} />}
 
         <div className={buildClassName(styles.footerBlock, isStatic && styles.footerBlockStatic)}>
           {renderFee()}
-
           {renderPriceImpactWarning()}
           {renderChangellyInfo()}
 
@@ -666,10 +573,20 @@ function SwapInitial({
         </div>
       </form>
       <SwapSettingsModal
-        isOpen={Boolean(isSettingsModalOpen)}
-        tokenOut={tokenOut}
-        fee={realNetworkFee}
-        onClose={closeSettingsModal}
+        isOpen={currentSubModal === 'settings'}
+        onClose={closeSubModal}
+        onNetworkFeeClick={openFeeModal}
+        showFullNetworkFee={isInsufficientFee}
+      />
+      <FeeDetailsModal
+        isOpen={currentSubModal === 'feeDetails'}
+        onClose={closeSubModal}
+        fullFee={explainedFee.fullFee?.networkTerms}
+        realFee={explainedFee.realFee?.networkTerms}
+        realFeePrecision={explainedFee.realFee?.precision}
+        excessFee={explainedFee.excessFee}
+        excessFeePrecision="approximate"
+        token={tokenIn}
       />
     </>
   );
@@ -700,6 +617,30 @@ function useTokenTransitionKey(tokenSlug: string) {
   }, [tokenSlug]);
 
   return transitionKeyRef.current;
+}
+
+function useReverseProhibited(
+  isCrosschain: boolean,
+  pairsBySlug: Record<string, AssetPairs> | undefined,
+  currentTokenInSlug: string,
+  currentTokenOutSlug: string,
+  showNotification: (arg: ActionPayloads['showNotification']) => void,
+  lang: LangFn,
+) {
+  const isReverseProhibited = isCrosschain
+    || pairsBySlug?.[currentTokenInSlug]?.[currentTokenOutSlug]?.isReverseProhibited;
+  const isBuyAmountInputDisabled = isReverseProhibited;
+
+  const handleBuyAmountInputClick = useMemo(() => {
+    return isReverseProhibited
+      ? () => {
+        void vibrate();
+        showNotification({ message: lang('$swap_reverse_prohibited') });
+      }
+      : undefined;
+  }, [isReverseProhibited, lang, showNotification]);
+
+  return [isBuyAmountInputDisabled, handleBuyAmountInputClick] as const;
 }
 
 function AnimatedArrows({ onClick }: { onClick?: NoneToVoidFunction }) {
@@ -740,4 +681,18 @@ function AnimatedArrows({ onClick }: { onClick?: NoneToVoidFunction }) {
       {renderArrow(true)}
     </div>
   );
+}
+
+function useSubModals(explainedFee: ExplainedSwapFee) {
+  const isFeeModalAvailable = explainedFee.realFee?.precision !== 'exact';
+  const [currentModal, setCurrentModal] = useState<'settings' | 'feeDetails'>();
+
+  const openSettings = useLastCallback(() => setCurrentModal('settings'));
+  const openFeeDetailsIfAvailable = useMemo(
+    () => (isFeeModalAvailable ? () => setCurrentModal('feeDetails') : undefined),
+    [isFeeModalAvailable],
+  );
+  const close = useLastCallback(() => setCurrentModal(undefined));
+
+  return [currentModal, openSettings, openFeeDetailsIfAvailable, close] as const;
 }

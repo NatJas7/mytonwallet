@@ -12,13 +12,15 @@ import {
 import {
   ANIMATION_LEVEL_DEFAULT,
   DEFAULT_SLIPPAGE_VALUE,
+  DEFAULT_STAKING_STATE,
+  DEFAULT_TRANSFER_TOKEN_SLUG,
   INIT_SWAP_ASSETS,
   THEME_DEFAULT,
   TOKEN_INFO,
 } from '../config';
 import { IS_IOS_APP, USER_AGENT_LANG_CODE } from '../util/windowEnvironment';
 
-export const STATE_VERSION = 28;
+export const STATE_VERSION = 32;
 
 export const INITIAL_STATE: GlobalState = {
   appState: AppState.Auth,
@@ -35,6 +37,7 @@ export const INITIAL_STATE: GlobalState = {
 
   currentTransfer: {
     state: TransferState.None,
+    tokenSlug: DEFAULT_TRANSFER_TOKEN_SLUG,
   },
 
   currentSwap: {
@@ -46,11 +49,11 @@ export const INITIAL_STATE: GlobalState = {
     state: TransferState.None,
   },
 
-  staking: {
+  currentStaking: {
     state: StakingState.None,
   },
 
-  stakingInfo: {},
+  stakingDefault: DEFAULT_STAKING_STATE,
 
   tokenInfo: {
     bySlug: TOKEN_INFO,
@@ -86,7 +89,12 @@ export const INITIAL_STATE: GlobalState = {
     isLimitedRegion: false,
     isSwapDisabled: IS_IOS_APP,
     isOnRampDisabled: IS_IOS_APP,
+    isNftBuyingDisabled: IS_IOS_APP,
   },
 
   mediaViewer: {},
+
+  pushNotifications: {
+    enabledAccounts: {},
+  },
 };

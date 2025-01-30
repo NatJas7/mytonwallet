@@ -3,7 +3,7 @@ import type {
 } from '../types';
 
 import { TOKEN_INFO } from '../../config';
-import { apiDb } from '../db';
+import { tokenRepository } from '../db';
 import { getPricesCache } from './cache';
 
 const tokensCache = {
@@ -11,25 +11,35 @@ const tokensCache = {
 } as Record<string, ApiToken>;
 
 export async function loadTokensCache() {
-  const tokens = await apiDb.tokens.toArray();
+  const tokens = await tokenRepository.all();
   return addTokens(tokens);
 }
 
 export async function addTokens(tokens: ApiToken[], onUpdate?: OnApiUpdate, shouldForceSend?: boolean) {
   const newTokens: ApiToken[] = [];
 
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const mergedToken = mergeTokenWithCache(token);
+
     if (!(token.slug in tokensCache)) {
-      newTokens.push(token);
+      newTokens.push(mergedToken);
     }
-    tokensCache[token.slug] = token;
+
+    tokensCache[token.slug] = mergedToken;
+    tokens[i] = mergedToken;
   }
 
-  await apiDb.tokens.bulkPut(tokens);
-
+  await tokenRepository.bulkPut(tokens);
   if ((shouldForceSend || newTokens.length) && onUpdate) {
     sendUpdateTokens(onUpdate);
   }
+}
+
+export function mergeTokenWithCache(token: ApiToken): ApiToken {
+  const cacheToken = tokensCache[token.slug] || {};
+
+  return { ...cacheToken, ...token };
 }
 
 export function getTokensCache() {
@@ -41,7 +51,7 @@ export function getTokenBySlug(slug: string) {
 }
 
 export function getTokenByAddress(tokenAddress: string) {
-  return Object.values(tokensCache).find((token) => token.tokenAddress === tokenAddress);
+  return getTokenBySlug(buildTokenSlug('ton', tokenAddress));
 }
 
 export function sendUpdateTokens(onUpdate: OnApiUpdate) {

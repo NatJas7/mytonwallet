@@ -1,7 +1,8 @@
 import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { GlobalState, SavedAddress } from '../../global/types';
+import type { ApiToken } from '../../api/types';
+import type { GlobalState, SavedAddress, UserToken } from '../../global/types';
 
 import {
   ANIMATED_STICKER_SMALL_SIZE_PX,
@@ -16,9 +17,8 @@ import renderText from '../../global/helpers/renderText';
 import buildClassName from '../../util/buildClassName';
 import { vibrate } from '../../util/capacitor';
 import { toDecimal } from '../../util/decimals';
-import { formatCurrencySimple } from '../../util/formatNumber';
-import { getNativeToken } from '../../util/tokens';
-import { NFT_TRANSFER_AMOUNT } from '../../api/chains/ton/constants';
+import { explainApiTransferFee } from '../../util/fee/transferFee';
+import { getChainBySlug } from '../../util/tokens';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
@@ -28,6 +28,7 @@ import useLastCallback from '../../hooks/useLastCallback';
 import AmountWithFeeTextField from '../ui/AmountWithFeeTextField';
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
 import Button from '../ui/Button';
+import Fee from '../ui/Fee';
 import IconWithTooltip from '../ui/IconWithTooltip';
 import InteractiveTextField from '../ui/InteractiveTextField';
 import ModalHeader from '../ui/ModalHeader';
@@ -40,8 +41,7 @@ import styles from './Transfer.module.scss';
 interface OwnProps {
   isActive: boolean;
   savedAddresses?: SavedAddress[];
-  symbol: string;
-  decimals?: number;
+  token?: UserToken | ApiToken;
   onBack: NoneToVoidFunction;
   onClose: NoneToVoidFunction;
 }
@@ -52,11 +52,12 @@ interface StateProps {
 
 function TransferConfirm({
   currentTransfer: {
+    tokenSlug,
     amount,
     toAddress,
-    chain,
     resolvedAddress,
     fee,
+    realFee,
     comment,
     shouldEncrypt,
     promiseId,
@@ -66,13 +67,11 @@ function TransferConfirm({
     isScam,
     binPayload,
     nfts,
-    withDiesel,
     isGaslessWithStars,
-    dieselAmount,
+    diesel,
     stateInit,
   },
-  symbol,
-  decimals,
+  token,
   isActive,
   savedAddresses,
   onBack,
@@ -82,16 +81,26 @@ function TransferConfirm({
 
   const lang = useLang();
 
+  const isNftTransfer = Boolean(nfts?.length);
+  if (isNftTransfer) {
+    tokenSlug = TONCOIN.slug;
+  }
+
+  const chain = getChainBySlug(tokenSlug);
   const savedAddressName = useMemo(() => {
-    return toAddress && chain && savedAddresses?.find((item) => {
+    return toAddress && savedAddresses?.find((item) => {
       return item.address === toAddress && item.chain === chain;
     })?.name;
   }, [toAddress, chain, savedAddresses]);
   const addressName = savedAddressName || toAddressName;
-  const isNftTransfer = Boolean(nfts?.length);
   const isBurning = resolvedAddress === BURN_ADDRESS;
   const isNotcoinBurning = resolvedAddress === NOTCOIN_EXCHANGERS[0];
-  const nativeToken = chain ? getNativeToken(chain) : undefined;
+  const explainedFee = explainApiTransferFee({
+    fee,
+    realFee,
+    diesel,
+    tokenSlug,
+  });
 
   useHistoryBack({
     isActive,
@@ -111,28 +120,31 @@ function TransferConfirm({
     return <NftChips nfts={nfts!} />;
   }
 
-  function renderFeeForNft() {
-    const totalFee = (NFT_TRANSFER_AMOUNT + (fee ?? 0n)) * BigInt(Math.ceil(nfts!.length / NFT_BATCH_SIZE));
+  function renderFee() {
+    if (!explainedFee.realFee || !token) {
+      return undefined;
+    }
 
-    return (
+    const feeText = (
+      <Fee
+        terms={explainedFee.realFee.terms}
+        precision={explainedFee.realFee.precision}
+        token={token}
+        symbolClassName={styles.currencySymbol}
+      />
+    );
+
+    return isNftTransfer ? (
       <>
         <div className={styles.label}>{lang('Fee')}</div>
-        <div className={styles.inputReadOnly}>
-          ≈ {formatCurrencySimple(totalFee, '')}
-          <span className={styles.currencySymbol}>{TONCOIN.symbol}</span>
-        </div>
+        <div className={styles.inputReadOnly}>{feeText}</div>
       </>
-    );
-  }
-
-  function renderFeeWithDiesel() {
-    return (
+    ) : (
       <AmountWithFeeTextField
         label={lang('Amount')}
-        amount={toDecimal(amount ?? 0n, decimals)}
-        symbol={symbol}
-        fee={dieselAmount ? toDecimal(dieselAmount, decimals) : undefined}
-        feeSymbol={isGaslessWithStars ? STARS_SYMBOL : symbol}
+        amount={toDecimal(amount ?? 0n, token?.decimals)}
+        symbol={token?.symbol ?? ''}
+        feeText={feeText}
       />
     );
   }
@@ -231,20 +243,7 @@ function TransferConfirm({
           className={styles.addressWidget}
         />
 
-        {
-          isNftTransfer ? renderFeeForNft()
-            : withDiesel ? renderFeeWithDiesel()
-              : (
-                <AmountWithFeeTextField
-                  label={lang('Amount')}
-                  amount={toDecimal(amount ?? 0n, decimals)}
-                  symbol={symbol}
-                  fee={fee ? toDecimal(fee, nativeToken?.decimals) : undefined}
-                  feeSymbol={nativeToken?.symbol}
-                />
-              )
-        }
-
+        {renderFee()}
         {renderComment()}
 
         {nfts && (isBurning || (isNotcoinBurning && nfts?.length > 1)) && (

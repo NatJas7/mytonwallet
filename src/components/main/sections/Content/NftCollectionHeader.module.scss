@@ -1,3 +1,5 @@
+@import "../../../../styles/mixins";
+
 .root {
   display: flex;
   align-items: center;
@@ -8,19 +10,10 @@
   background: var(--color-background-first);
   border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
-  &::after {
-    content: '';
+  transition: background-color 150ms;
 
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    transform: translate(-50%, -0.03125rem);
-
-    width: 100vw;
-    height: 0.0625rem;
-
-    /* stylelint-disable-next-line plugin/whole-pixel */
-    box-shadow: 0 0.025rem 0 0 var(--color-separator);
+  :global(html.animation-level-0) & {
+    transition: none !important;
   }
 }
 
@@ -38,7 +31,7 @@
   padding: 0.125rem 0.5rem 0;
 
   font-size: 0.9375rem;
-  color: var(--color-blue);
+  color: var(--color-accent);
 }
 
 .backIcon {
@@ -80,11 +73,11 @@
   padding-right: 0.125rem;
 
   font-size: 1rem;
-  color: var(--color-blue);
+  color: var(--color-accent);
 
   &:hover,
   &:focus-visible {
-    color: var(--color-blue-button-background-hover);
+    color: var(--color-accent-button-background-hover);
   }
 }
 
@@ -119,7 +112,7 @@
   width: 2.25rem !important;
   height: 2.75rem !important;
 
-  color: var(--color-blue);
+  color: var(--color-accent);
 }
 
 .burnAllButton {

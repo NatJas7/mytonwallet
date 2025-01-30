@@ -11,6 +11,7 @@ import { ANIMATION_LEVEL_MIN } from '../../config';
 import { requestForcedReflow, requestMutation } from '../../lib/fasterdom/fasterdom';
 import buildClassName from '../../util/buildClassName';
 import { waitForAnimationEnd, waitForTransitionEnd } from '../../util/cssAnimationEndListeners';
+import { SECOND } from '../../util/dateFormat';
 import forceReflow from '../../util/forceReflow';
 import { allowSwipeControlForTransition } from '../../util/swipeController';
 
@@ -45,10 +46,12 @@ export type TransitionProps = {
   withSwipeControl?: boolean;
   onStart?: NoneToVoidFunction;
   onStop?: NoneToVoidFunction;
+  onContainerClick?: NoneToVoidFunction;
+  // Should be not a falsy value, otherwise some transitions will be delayed
   children: React.ReactNode | ChildrenFn;
 };
 
-const FALLBACK_ANIMATION_END = 1000;
+const FALLBACK_ANIMATION_END = SECOND;
 const CLASSES = {
   slide: 'Transition_slide',
   active: 'Transition_slide-active',
@@ -79,6 +82,7 @@ function Transition({
   withSwipeControl,
   onStart,
   onStop,
+  onContainerClick,
   children,
 }: TransitionProps) {
   const currentKeyRef = useRef<number>();
@@ -363,6 +367,7 @@ function Transition({
   return (
     <div
       ref={containerRef}
+      onClick={onContainerClick}
       id={id}
       className={buildClassName('Transition', className)}
       teactFastList={asFastList}

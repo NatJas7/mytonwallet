@@ -31,7 +31,11 @@ export interface ApiToken {
   keywords?: string[];
   cmcSlug?: string;
   color?: string;
+  isGaslessEnabled?: boolean;
+  isStarsEnabled?: boolean;
+  isTiny?: boolean;
   customPayloadApiUrl?: string;
+  codeHash?: string;
 }
 
 export interface ApiTokenWithPrice extends ApiToken {
@@ -79,8 +83,22 @@ export interface ApiTransaction {
 export interface ApiTransactionMetadata extends ApiAddressInfo {
 }
 
+export type ApiMtwCardType = 'black' | 'platinum' | 'gold' | 'silver' | 'standard';
+export type ApiMtwCardTextType = 'light' | 'dark';
+export type ApiMtwCardBorderShineType = 'up' | 'down' | 'left' | 'right' | 'radioactive';
+
+export interface ApiNftMetadata {
+  lottie?: string;
+  imageUrl?: string;
+  mtwCardId?: number;
+  mtwCardType?: ApiMtwCardType;
+  mtwCardTextType?: ApiMtwCardTextType;
+  mtwCardBorderShineType?: ApiMtwCardBorderShineType;
+}
+
 export interface ApiNft {
   index: number;
+  ownerAddress?: string;
   name?: string;
   address: string;
   thumbnail: string;
@@ -92,25 +110,52 @@ export interface ApiNft {
   isHidden?: boolean;
   isOnFragment?: boolean;
   isScam?: boolean;
+  metadata: ApiNftMetadata;
 }
 
 export type ApiHistoryList = Array<[number, number]>;
 
-export type ApiStakingType = 'nominators' | 'liquid';
+export type ApiStakingType = 'nominators' | 'liquid' | 'jetton';
 
-export type ApiStakingState = {
+type BaseStakingState = {
+  id: string;
+  tokenSlug: string;
+  annualYield: number;
+  yieldType: ApiYieldType;
+  balance: bigint;
+  pool: string;
+  isUnstakeRequested?: boolean;
+};
+
+export type ApiNominatorsStakingState = BaseStakingState & {
   type: 'nominators';
-  amount: bigint;
+  start: number;
+  end: number;
   pendingDepositAmount: bigint;
-  isUnstakeRequested: boolean;
-} | {
+};
+
+export type ApiLiquidStakingState = BaseStakingState & {
   type: 'liquid';
-  tokenAmount: bigint;
-  amount: bigint;
+  tokenBalance: bigint;
   unstakeRequestAmount: bigint;
-  apy: number;
   instantAvailable: bigint;
 };
+
+export type ApiJettonStakingState = BaseStakingState & {
+  type: 'jetton';
+  tokenAddress: string;
+  unclaimedRewards: bigint;
+  stakeWalletAddress: string;
+  tokenAmount: bigint;
+  period: number;
+  tvl: bigint;
+  dailyReward: bigint;
+  poolWallets?: string[];
+};
+
+export type ApiYieldType = 'APY' | 'APR';
+export type ApiStakingState = ApiNominatorsStakingState | ApiLiquidStakingState | ApiJettonStakingState;
+export type ApiToncoinStakingState = ApiNominatorsStakingState | ApiLiquidStakingState;
 
 export interface ApiNominatorsPool {
   address: string;
@@ -164,6 +209,9 @@ export interface ApiSignedTransfer {
   params: Omit<ApiLocalTransactionParams, 'inMsgHash'>;
 }
 
+/**
+ * The `fee` field should contain the final (real) fee, because we want to show the real fee in local transactions
+ */
 export type ApiLocalTransactionParams = Omit<
 ApiTransaction, 'txId' | 'timestamp' | 'isIncoming' | 'normalizedAddress'
 > & {
@@ -182,7 +230,6 @@ export enum ApiLiquidUnstakeMode {
 export type ApiLoyaltyType = 'black' | 'platinum' | 'gold' | 'silver' | 'standard';
 
 export type ApiBalanceBySlug = Record<string, bigint>;
-export type ApiMaybeBalanceBySlug = Record<string, bigint | undefined>;
 
 export type ApiWalletInfo = {
   address: string;

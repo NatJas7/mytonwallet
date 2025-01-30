@@ -4,17 +4,21 @@ import React, {
 import { getActions } from '../../../../global';
 
 import type { ApiNft } from '../../../../api/types';
+import type { ObserveFn } from '../../../../hooks/useIntersectionObserver';
 import { type IAnchorPosition, MediaType } from '../../../../global/types';
 
 import buildClassName from '../../../../util/buildClassName';
 import { vibrate } from '../../../../util/capacitor';
-import { preloadImage } from '../../../../util/preloadImage';
 import { shortenAddress } from '../../../../util/shortenAddress';
+import { IS_ANDROID, IS_IOS } from '../../../../util/windowEnvironment';
 
+import useFlag from '../../../../hooks/useFlag';
+import { useIsIntersecting } from '../../../../hooks/useIntersectionObserver';
 import useLang from '../../../../hooks/useLang';
 import useLastCallback from '../../../../hooks/useLastCallback';
 import useShowTransition from '../../../../hooks/useShowTransition';
 
+import AnimatedIconWithPreview from '../../../ui/AnimatedIconWithPreview';
 import Image from '../../../ui/Image';
 import Radio from '../../../ui/Radio';
 import NftMenu from './NftMenu';
@@ -24,14 +28,29 @@ import styles from './Nft.module.scss';
 interface OwnProps {
   nft: ApiNft;
   selectedAddresses?: string[];
+  observeIntersection: ObserveFn;
 }
 
-function Nft({ nft, selectedAddresses }: OwnProps) {
+interface UseLottieReturnType {
+  isLottie: boolean;
+  shouldPlay?: boolean;
+  noLoop?: boolean;
+  markHover?: NoneToVoidFunction;
+  unmarkHover?: NoneToVoidFunction;
+}
+
+function Nft({ nft, selectedAddresses, observeIntersection }: OwnProps) {
   const { openMediaViewer, selectNfts, clearNftSelection } = getActions();
 
   const lang = useLang();
+
   // eslint-disable-next-line no-null/no-null
   const ref = useRef<HTMLDivElement>(null);
+
+  const {
+    isLottie, shouldPlay, noLoop, markHover, unmarkHover,
+  } = useLottie(nft, ref, observeIntersection);
+
   const [menuPosition, setMenuPosition] = useState<IAnchorPosition>();
   const isSelectionEnabled = !!selectedAddresses && selectedAddresses.length > 0;
   const isSelected = useMemo(() => selectedAddresses?.includes(nft.address), [selectedAddresses, nft.address]);
@@ -40,6 +59,7 @@ function Nft({ nft, selectedAddresses }: OwnProps) {
     shouldRender: shouldRenderWarning,
     transitionClassNames: warningTransitionClassNames,
   } = useShowTransition(isSelectionEnabled && nft.isOnSale);
+
   const fullClassName = buildClassName(
     styles.item,
     !isSelectionEnabled && nft.isOnSale && styles.item_onSale,
@@ -70,18 +90,15 @@ function Nft({ nft, selectedAddresses }: OwnProps) {
     setMenuPosition(undefined);
   });
 
-  const handleIntersect = useLastCallback(() => {
-    preloadImage(nft.image).catch(() => {
-    });
-  });
-
   return (
     <div
       key={nft.address}
       ref={ref}
       data-nft-address={nft.address}
-      onClick={!isSelectionEnabled || !nft.isOnSale ? handleClick : undefined}
       className={fullClassName}
+      onMouseEnter={markHover}
+      onMouseLeave={unmarkHover}
+      onClick={!isSelectionEnabled || !nft.isOnSale ? handleClick : undefined}
     >
       {isSelectionEnabled && !nft.isOnSale && (
         <Radio
@@ -99,12 +116,27 @@ function Nft({ nft, selectedAddresses }: OwnProps) {
           onClose={handleCloseMenu}
         />
       )}
-      <Image
-        url={nft.thumbnail}
-        className={styles.imageWrapper}
-        imageClassName={buildClassName(styles.image, isSelected && styles.imageSelected)}
-        onIntersect={handleIntersect}
-      />
+      {isLottie ? (
+        <div
+          className={styles.imageWrapper}
+        >
+          <AnimatedIconWithPreview
+            shouldStretch
+            play={shouldPlay}
+            noLoop={noLoop}
+            tgsUrl={nft.metadata!.lottie}
+            previewUrl={nft.thumbnail}
+            noPreviewTransition
+            className={buildClassName(styles.image, isSelected && styles.imageSelected)}
+          />
+        </div>
+      ) : (
+        <Image
+          url={nft.thumbnail}
+          className={styles.imageWrapper}
+          imageClassName={buildClassName(styles.image, isSelected && styles.imageSelected)}
+        />
+      )}
       {shouldRenderWarning && (
         <div className={buildClassName(styles.warning, warningTransitionClassNames)}>
           {lang('For sale. Cannot be sent and burned')}
@@ -119,3 +151,31 @@ function Nft({ nft, selectedAddresses }: OwnProps) {
 }
 
 export default memo(Nft);
+
+function useLottie(
+  nft: ApiNft,
+  ref: React.RefObject<HTMLDivElement>,
+  observeIntersection: ObserveFn,
+): UseLottieReturnType {
+  const isLottie = Boolean(nft.metadata?.lottie);
+
+  const isIntersecting = useIsIntersecting(ref, isLottie ? observeIntersection : undefined);
+  const [isHover, markHover, unmarkHover] = useFlag();
+
+  if (!isLottie) {
+    return { isLottie };
+  }
+
+  const shouldPlay = isIntersecting || isHover;
+  const noLoop = !isHover;
+
+  return {
+    isLottie,
+    shouldPlay,
+    noLoop,
+    ...!(IS_IOS || IS_ANDROID) && {
+      markHover,
+      unmarkHover,
+    },
+  };
+}

@@ -1,8 +1,7 @@
 import type { Wallet } from '@tonconnect/sdk';
 import React, { memo } from '../../lib/teact/teact';
 
-import type { JettonMetadataInfo } from '../components/App';
-import type { Giveaway } from '../utils/giveaway';
+import type { Giveaway, JettonMetadataInfo } from '../utils/giveaway';
 
 import { toDecimal } from '../../util/decimals';
 import { DEFAULT_DECIMALS } from '../../api/chains/ton/constants';
@@ -31,7 +30,7 @@ function GiveawayInfoPage({
   function renderAwaitingPageContent() {
     return (
       <>
-        <ImageSection status={ImageSectionStatus.AwaitingResults} />
+        <ImageSection key={ImageSectionStatus.AwaitingResults} status={ImageSectionStatus.AwaitingResults} />
         <div className={titleStyles.title}>You are all set!</div>
         <div className={styles.giveawayInfoText}>Please wait for the results. Good luck!</div>
         <GiveawayInfo giveaway={giveaway} />
@@ -46,7 +45,7 @@ function GiveawayInfoPage({
 
     return (
       <>
-        <ImageSection status={ImageSectionStatus.Paid} />
+        <ImageSection key={ImageSectionStatus.Paid} status={ImageSectionStatus.Paid} />
         <div className={titleStyles.title}>Congratulations!</div>
         <div className={styles.giveawayInfoText}>
           <div>Your Reward</div>
@@ -79,7 +78,7 @@ function GiveawayInfoPage({
 
     return (
       <>
-        <ImageSection status={ImageSectionStatus.Lost} />
+        <ImageSection key={ImageSectionStatus.Lost} status={ImageSectionStatus.Lost} />
         <div className={titleStyles.title}>Giveaway Finished</div>
         <div className={styles.giveawayInfoText}>Unfortunately, you did not receive a<br />reward in it.</div>
       </>
@@ -87,7 +86,7 @@ function GiveawayInfoPage({
   }
 
   return (
-    <CommonPage wallet={wallet}>
+    <CommonPage wallet={wallet} isGiveawayFinished={giveaway.status === GiveawayStatus.Finished}>
       {renderPage()}
     </CommonPage>
   );

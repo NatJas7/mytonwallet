@@ -1,23 +1,23 @@
 import React, { memo, useEffect, useLayoutEffect } from '../lib/teact/teact';
 import { getActions, withGlobal } from '../global';
 
-import { AppState } from '../global/types';
+import type { Theme } from '../global/types';
+import { AppState, ContentTab } from '../global/types';
 
 import { INACTIVE_MARKER, IS_ANDROID_DIRECT, IS_CAPACITOR } from '../config';
+import { selectCurrentAccountSettings, selectCurrentAccountState } from '../global/selectors';
+import { useAccentColor } from '../util/accentColor';
 import { setActiveTabChangeListener } from '../util/activeTabMonitor';
 import buildClassName from '../util/buildClassName';
+import { MINUTE } from '../util/dateFormat';
 import { resolveRender } from '../util/renderPromise';
 import {
-  IS_ANDROID,
-  IS_DELEGATED_BOTTOM_SHEET,
-  IS_DELEGATING_BOTTOM_SHEET,
-  IS_ELECTRON,
-  IS_IOS,
-  IS_LINUX,
+  IS_ANDROID, IS_DELEGATED_BOTTOM_SHEET, IS_ELECTRON, IS_IOS, IS_LINUX,
 } from '../util/windowEnvironment';
 import { updateSizes } from '../util/windowSize';
 import { callApi } from '../api';
 
+import useAppTheme from '../hooks/useAppTheme';
 import useBackgroundMode from '../hooks/useBackgroundMode';
 import { useDeviceScreen } from '../hooks/useDeviceScreen';
 import useFlag from '../hooks/useFlag';
@@ -26,11 +26,13 @@ import useSyncEffect from '../hooks/useSyncEffect';
 import useTimeout from '../hooks/useTimeout';
 
 import AppInactive from './AppInactive';
+import AppLocked from './AppLocked';
 import Auth from './auth/Auth';
 import DappConnectModal from './dapps/DappConnectModal';
 import DappTransferModal from './dapps/DappTransferModal';
 import Dialogs from './Dialogs';
 import ElectronHeader from './electron/ElectronHeader';
+import Explore from './explore/Explore';
 import LedgerModal from './ledger/LedgerModal';
 import Main from './main/Main';
 import AddAccountModal from './main/modals/AddAccountModal';
@@ -42,6 +44,7 @@ import SwapActivityModal from './main/modals/SwapActivityModal';
 import TransactionModal from './main/modals/TransactionModal';
 import UnhideNftModal from './main/modals/UnhideNftModal';
 import Notifications from './main/Notifications';
+import BottomBar from './main/sections/Actions/BottomBar';
 import MediaViewer from './mediaViewer/MediaViewer';
 import Settings from './settings/Settings';
 import SettingsModal from './settings/SettingsModal';
@@ -61,15 +64,20 @@ interface StateProps {
   isBackupWalletModalOpen?: boolean;
   isQrScannerOpen?: boolean;
   isHardwareModalOpen?: boolean;
+  isExploreOpen?: boolean;
   areSettingsOpen?: boolean;
-  isMediaViewerOpen?: boolean;
+  theme: Theme;
+  accentColorIndex?: number;
 }
 
+const APP_STATES_WITH_BOTTOM_BAR = new Set([AppState.Main, AppState.Settings, AppState.Explore]);
 const APP_UPDATE_INTERVAL = (IS_ELECTRON && !IS_LINUX) || IS_ANDROID_DIRECT
-  ? 5 * 60 * 1000 // 5 min
+  ? 5 * MINUTE
   : undefined;
 const PRERENDER_MAIN_DELAY = 1200;
 let mainKey = 0;
+
+const APP_STATE_RENDER_COUNT = Object.keys(AppState).length / 2;
 
 function App({
   appState,
@@ -77,10 +85,11 @@ function App({
   isBackupWalletModalOpen,
   isHardwareModalOpen,
   isQrScannerOpen,
+  isExploreOpen,
   areSettingsOpen,
-  isMediaViewerOpen,
+  theme,
+  accentColorIndex,
 }: StateProps) {
-  // return <Test />;
   const {
     closeBackupWalletModal,
     closeHardwareWalletModal,
@@ -91,16 +100,23 @@ function App({
   } = getActions();
 
   const { isPortrait } = useDeviceScreen();
-  const areSettingsInModal = !isPortrait || IS_ELECTRON || IS_DELEGATING_BOTTOM_SHEET || IS_DELEGATED_BOTTOM_SHEET;
+  const areSettingsInModal = !isPortrait;
 
   const [isInactive, markInactive] = useFlag(false);
   const [canPrerenderMain, prerenderMain] = useFlag();
 
   const renderingKey = isInactive
     ? AppState.Inactive
-    : ((areSettingsOpen && !areSettingsInModal)
-      ? AppState.Settings : appState
-    );
+    : areSettingsOpen && !areSettingsInModal
+      ? AppState.Settings
+      : isExploreOpen && isPortrait
+        ? AppState.Explore : appState;
+  const withBottomBar = isPortrait && APP_STATES_WITH_BOTTOM_BAR.has(renderingKey);
+  const transitionName = withBottomBar
+    ? 'semiFade'
+    : isPortrait
+      ? (IS_ANDROID ? 'slideFadeAndroid' : IS_IOS ? 'slideLayers' : 'slideFade')
+      : 'semiFade';
 
   useTimeout(
     prerenderMain,
@@ -108,6 +124,10 @@ function App({
   );
 
   useInterval(checkAppVersion, APP_UPDATE_INTERVAL);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('with-bottombar', withBottomBar);
+  }, [withBottomBar]);
 
   useEffect(() => {
     updateSizes();
@@ -137,6 +157,9 @@ function App({
     }
   }, [accountId]);
 
+  const appTheme = useAppTheme(theme);
+  useAccentColor('body', appTheme, accentColorIndex);
+
   // eslint-disable-next-line consistent-return
   function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
     switch (currentKey) {
@@ -164,6 +187,8 @@ function App({
           </Transition>
         );
       }
+      case AppState.Explore:
+        return <Explore isActive={isActive} />;
       case AppState.Settings:
         return <Settings />;
       case AppState.Ledger:
@@ -178,11 +203,14 @@ function App({
       {IS_ELECTRON && !IS_LINUX && <ElectronHeader withTitle />}
 
       <Transition
-        name={isPortrait ? (IS_ANDROID ? 'slideFadeAndroid' : IS_IOS ? 'slideLayers' : 'slideFade') : 'semiFade'}
+        name={transitionName}
         activeKey={renderingKey}
-        shouldCleanup={renderingKey !== AppState.Settings && !isMediaViewerOpen}
+        renderCount={APP_STATE_RENDER_COUNT}
+        shouldCleanup={!withBottomBar}
         className={styles.transitionContainer}
-        slideClassName={buildClassName(styles.appSlide, 'custom-scroll')}
+        slideClassName={
+          buildClassName(styles.appSlide, withBottomBar && styles.appSlide_fastTransition, 'custom-scroll')
+        }
       >
         {renderContent}
       </Transition>
@@ -195,6 +223,7 @@ function App({
           <Settings isInsideModal />
         </SettingsModal>
       )}
+      <AppLocked />
       <MediaViewer />
       {!isInactive && (
         <>
@@ -226,19 +255,24 @@ function App({
           {!IS_DELEGATED_BOTTOM_SHEET && <LoadingOverlay />}
         </>
       )}
+      {withBottomBar && <BottomBar />}
     </>
   );
 }
 
 export default memo(withGlobal((global): StateProps => {
+  const { activeContentTab } = selectCurrentAccountState(global) ?? {};
+
   return {
     appState: global.appState,
     accountId: global.currentAccountId,
     isBackupWalletModalOpen: global.isBackupWalletModalOpen,
     isHardwareModalOpen: global.isHardwareModalOpen,
+    isExploreOpen: !global.areSettingsOpen && activeContentTab === ContentTab.Explore,
     areSettingsOpen: global.areSettingsOpen,
-    isMediaViewerOpen: Boolean(global.mediaViewer.mediaId),
     isQrScannerOpen: global.isQrScannerOpen,
+    theme: global.settings.theme,
+    accentColorIndex: selectCurrentAccountSettings(global)?.accentColorIndex,
   };
 })(App));
 

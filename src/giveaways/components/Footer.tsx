@@ -5,14 +5,16 @@ import { prettifyAddress } from '../utils/tonConnect';
 
 import Button from '../../components/ui/Button';
 
+import pageStyles from './CommonPage.module.scss';
 import styles from './Footer.module.scss';
 
 interface OwnProps {
   onConnectClick?: (args?: any) => any;
   wallet?: Wallet;
+  isGiveawayFinished: boolean;
 }
 
-function Footer({ onConnectClick, wallet }: OwnProps) {
+function Footer({ onConnectClick, wallet, isGiveawayFinished }: OwnProps) {
   return (
     <div className={styles.footer}>
       {wallet
@@ -26,13 +28,15 @@ function Footer({ onConnectClick, wallet }: OwnProps) {
             </div>
           </div>
         )
-        : (
-          <Button
-            isSimple
-            className={styles.button}
-            onClick={onConnectClick!}
-          >Connect Wallet
-          </Button>
+        : !isGiveawayFinished && (
+          <div className={pageStyles.container}>
+            <Button
+              isSimple
+              className={styles.button}
+              onClick={onConnectClick!}
+            >Connect MyTonWallet
+            </Button>
+          </div>
         )}
     </div>
   );

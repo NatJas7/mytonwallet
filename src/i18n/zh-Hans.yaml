@@ -6,7 +6,8 @@ Import From %1$d Secret Words: 输入助记词
 More about MyTonWallet: 更多关于 MyTonWallet
 Creating Wallet...: 正在创建钱包...
 On the count of three...: 倒数三个数···
-Back Up: 备份
+$back_up_auth: 备份
+$back_up_security: 备份安全
 Passwords must be equal.: 密码必须相同。
 To protect your wallet as much as possible, use a password with: 为了尽可能的保障您钱包的安全，密码请遵循下列规则
 $auth_password_rule_8chars: 至少8位字符
@@ -32,14 +33,25 @@ $auth_import_mnemonic_description: |
 Let’s make sure your secrets words are recorded correctly.: 请确保您已经将助记词正确的记录至安全的地方，这将是您访问钱包的唯一凭证。
 $mnemonic_check_words_list: 请输入以下单词
 $mnemonic_check_error: 您输入的单词与列表中的单词不符，请再试一次。
-$mnemonic_list_description: |
-  按照**正确的顺序**写下这些单词，并将它们存放在一个**安全**的地方。
+$check_words_description: |
+  现在让我们检查一下
+  您是否正确写下了秘密词语。
+$mnemonic_list_description: 按**正确顺序**写下这些单词并存放在一个**安全的地方**。
+$private_key_description: 正确保存此私钥并存放在一个**安全的地方**。
 $mnemonic_warning: |
   **不要** 发送或向任何人展示，
   **不要** 在任何地方输入。
+View Secret Words: 查看密语
+View TON Private Key: 查看TON私钥
+Can be imported to non-multichain wallets for TON.: 可以导入到不支持多链的TON钱包。
+Can be imported to any multichain wallet supporting TON.: 可以导入到任何支持TON的多链钱包。
 Let's Check: 再确认一次。
 Let's Check!: 请再确认一次！
 Safety Rules: 安全守则
+$safety_rules_private_key_one: |
+  在下一个屏幕中，您将看到**TON 私钥**。请正确保存并存放在**安全的地方**。
+$safety_rules_private_key_two: 如果您忘记密码或无法访问此设备，它可以让您**打开钱包**。
+$safety_rules_private_key_three: 如果其他人看到此私钥，您的资金可能会**被盗**。**不要发送或显示给任何人**，包括开发者或技术支持。
 $safety_rules_one: |
   在下一个页面将会显示您的**助记词**！
   请以正确的顺序记下它们并且存放在**安全的地方**
@@ -149,8 +161,7 @@ NFT: NFT
 No NFTs yet: NFT 空空如也···
 $nft_explore_offer: |
   在市场中寻找心仪的 NFT 收藏。
-Open Getgems: 打开 Getgems
-Transaction is not completed: 交易未完成
+Open TON Diamonds: 打开 TON Diamonds
 Received: 已收到
 Sent: 已发送
 $transaction_from: 从 %address%
@@ -158,7 +169,8 @@ $transaction_to: 至 %address%
 Wallet is not backed up: 钱包未备份
 Testnet Version: 测试网版本
 Error reading clipboard: 读取剪切板时出现错误
-$fee_value: "手续费: %fee%"
+$fee_value: "手续费 %fee%"
+$fee_value_with_colon: "手续费: %fee%"
 Pay fee with %stars_symbol%: "使用 %stars_symbol% 支付"
 Loading...: 读取中...
 Recipient Address: 收款人地址
@@ -202,14 +214,15 @@ Appearance: 外观
 Light: 白天模式
 Dark: 黑夜模式
 System: 系统
-Stake TON: 质押 TON
+$stake_asset: 质押 %symbol%
 Earn from your tokens while holding them: 从您持有的代币身上赚一笔。
-$est_apy_val: 期望年回报率 %1$d%
 Why this is safe: 为什么这很安全
 Why is staking safe?: 为什么质押是安全的？
 $safe_staking_description1: TON 质押是**完全去中心化的**，由官方 TON Liquid Staking 智能合约运营。
 $safe_staking_description2: 作为其 **权益证明** 的一部分，您存入的 TON 将用于 TON 区块网络验证。
 $safe_staking_description3: 您可以在 **任何时候** 解除您 TON 的质押，它会在 **36小时** 内存入您的账户。
+$safe_staking_description_jetton1: 代币质押是 **完全去中心化的**，由 %jvault_link% 开发的 **开源** 智能合约操作，并已通过 **安全审计**。
+$safe_staking_description_jetton2: 您可以在 **任何时候** 提取您的质押，并会 **立即** 存入您的账户。
 $min_value: 最小 %1$s
 Est. balance in a year: 年平均预期回报
 Confirm Staking: 确认质押
@@ -222,7 +235,7 @@ Currently Staked: 当前质押
 Unstake: 解除质押
 Earning History: 质押奖励历史
 $total: "总计: %value%"
-Unstake TON: 解除 TON 质押
+$unstake_asset: "解除 %symbol% 质押"
 $unstake_information_with_time: |
   您当前的质押存款将在 %time% 后存入您的钱包
   质押奖励将会停止。
@@ -231,7 +244,8 @@ Confirm Unstaking: 确认解除质押
 Request for unstaking is sent!: 解除质押请求已发送!
 $unstaking_when_receive: 您将在 %time% 内收到解除质押的代币。
 $unstake_insufficient_balance: 您需要有 %balance% 在您的主账户中以进行解除质押的操作。
-at %apy_value%: 在%apy_value%
+at %annual_yield%: 在%annual_yield%
+Est. %annual_yield%: 预估 %annual_yield%
 Staked: 已质押
 Unstaked: 已解除质押
 The network fee has slightly changed, try sending again.: 网络费用已有细微变动，请尝试重新发送。
@@ -296,7 +310,6 @@ Select Ledger Wallets: 选择分类帐钱包
 Add: 添加
 Try Again: 再试一次
 Driver: 司机
-Connect your Ledger to PC: 连接您的 Ledger 到电脑
 Unlock it and open the TON App: 解锁并打开 TON 应用
 Maybe you need to check the password or change the driver.: 也许您需要检查密码或更改驱动程序。
 Confirm via Ledger: 通过账本确认
@@ -328,7 +341,7 @@ You sell: 您卖出
 You buy: 您购买
 Swap Details: 交换详情
 Blockchain Fee: 区块链费用
-Routing Fees: 路由费用
+Aggregator Fee: 聚合器费用
 Included: 包括
 Price Impact: 价格影响
 Minimum Received: 最低接收数量
@@ -337,7 +350,6 @@ $swap_from_to: 从 %from% 交换至 %to%
 The exchange rate is below market value!: 汇率低于市场价值 %value%！
 Invalid Pair: 无效交易对
 We do not recommend to perform an exchange, try to specify a lower amount.: 我们不建议进行交换，请尝试指定较小的金额。
-$swap_routing_fees_tooltip: 去中心化交易所和应用程序费用（~0.875%）已包含在您看到的价格中，不会额外收取。
 $swap_minimum_received_tooltip1: 这是您从此次交换中可能获得的最少新代币数量，考虑了目前市场条件、滑点容忍度和潜在价格影响。
 $swap_minimum_received_tooltip2: 这是预期的最低值，但如果在处理您的交换时条件发生很大变化，最终金额可能会较少。
 $swap_price_impact_tooltip1: 这显示了您的交易可能对代币价格造成的影响。
@@ -412,7 +424,7 @@ Please note that it may take up to a few hours for tokens to appear in your wall
 Minimum amount: 最低 %value%
 Maximum amount: 最高 %value%
 Display Tray Icon: 显示托盘图标
-Enable Auto-Updates: 启用自动更新
+Auto-Updates: 自动更新
 Biometric Authentication: 生物识别认证
 If you turn off biometric protection, you will need to create a password.: 如果您关闭生物识别保护，则需要创建密码。
 Enter your current password: 输入当前密码
@@ -422,6 +434,9 @@ Enabling biometric confirmation will reset the password.: 启用生物识别确�
 Biometric Registration: 生物识别注册
 Step 1 of 2. Registration: 第 1 步（共 2 步）：注册
 Step 2 of 2. Verification: 第 2 步（共 2 步）：验证
+Download Logs: 下载日志
+Copy Logs: 复制日志
+Logs were copied!: 日志已复制！
 Biometric setup failed.: 生物识别设置失败。
 Biometric confirmation failed.: 生物识别确认失败。
 Failed to disable biometrics.: 无法禁用生物识别。
@@ -442,8 +457,6 @@ Permission denied. Please grant camera permission to use the QR code scanner.: �
 Unsupported QR code format: 不支持的QR码格式
 An error on the server side. Please try again.: 服务器端的错误。请再试一次。
 Unrecognized QR Code: 无法识别的二维码
-$fee_value_almost_equal: 手续费 ≈ %fee%
-$fee_value_less: 手续费 < %fee%
 Address was saved!: 地址已保存！
 US Dollar: 美元
 Euro: 欧元
@@ -468,7 +481,6 @@ You can connect your biometric data for more convenience: 您可以连接您的�
 Connect Touch ID: 连接 Touch ID
 Connect Face ID: 连接 Face ID
 Not Now: 现在不要
-Biometric Authentification: 生物识别认证
 Touch ID: Touch ID
 Face ID: Face ID
 Turn Off Touch ID: 关闭 Touch ID
@@ -484,6 +496,7 @@ Incorrect code, please try again.: 不正确的代码，请重试。
 Correct: 正确
 Confirm Action: 确认操作
 Confirm Swap: 确认兑换
+Confirm Rewards Claim: 确认奖励提取
 "%amount% to %address%": "%amount% 至 %address%"
 "%amount_from% to %amount_to%": "%amount_from% 至 %amount_to%"
 Failed to enable biometrics.: 无法启用生物识别。
@@ -493,7 +506,7 @@ Are you sure you want to disable Face ID?: 您确定要禁用Face ID吗？
 Are you sure you want to disable Touch ID?: 您确定要禁用Touch ID吗？
 Are you sure you want to disable biometrics?: 您确定要禁用生物识别技术吗？
 Yes: 是的
-Declined. Please try to confirm transaction using biometrics again.: 拒绝了。 请尝试再次使用生物识别技术确认交易。
+Biometric confirmation failed: 生物识别确认失败
 No Activity: 无活动
 Add / Buy: 添加 / 购买
 Buy with Card: 用卡购买
@@ -503,7 +516,6 @@ Explore: 探索
 No partners yet: 还没有伴侣
 Clear: 清除
 Get TON: 获取TON
-Declined. Please try to confirm operation using biometrics again.: 拒绝了。 请再次尝试使用生物识别来确认操作。
 $unstake_up_to_information: 立即 – 高达 %value%
 $all_balance: "全部: %balance%"
 $unstaking_not_enough_balance: 您需要在主要余额中有 %value% 才能继续解押。
@@ -515,6 +527,7 @@ You have tokens on other versions of your wallet. You can import them from here.
 $wallet_switch_version_1: 您也可以%action%。
 $wallet_switch_version_2: 切换到另一个钱包版本
 or import from: 或从中导入
+Insufficient fee: 手续费不足
 $insufficient_fee: "手续费不足: %fee%"
 Required: 必需的
 Comment is too long.: 评论太长了。
@@ -527,7 +540,7 @@ No internet connection. Please check your connection and try again.: 没有网�
 To use this feature, first enable Face ID in your phone settings.: 要使用此功能，请首先在手机设置中启用面容 ID。
 To use this feature, first enable biometrics in your phone settings.: 要使用此功能，请首先在手机设置中启用生物识别功能。
 Open Settings: 打开设置
-You are about to transfer an important service token, which is needed to withdraw your deposit from staking.: 您即将转移一个重要的服务代币，这是从质押中提取押金所必需的。
+$service_token_transfer_warning: 您即将转移一个重要的服务代币，该代币是提款或完成服务操作所必需的。请确保这是您打算执行的操作。
 No Price: 无价格
 $ledger_not_supported_operation: 此操作不支持您当前版本的 Ledger TON 应用程序。请使用 Ledger Live 进行更新。
 $ledger_unsupported_ton_connect: TonConnect不受您的Ledger Ton应用程序的支持。请使用Ledger Live更新它。
@@ -542,7 +555,7 @@ $dapp_liquid_staking_vote_payload: 对提案 %votingAddress% 投票“%vote%”
 $dapp_single_nominator_change_validator_payload: 将 SingleNominator 质押合约验证者的地址更改为 %address%
 $dapp_single_nominator_withdraw_payload: 从 SingleNominator 质押合约中提取 %amount% TON
 $dapp_vesting_add_whitelist_payload: 将 %address% 添加到归属钱包白名单
-Search or enter address...: 搜索或输入地址...
+Search or enter address: 搜索或输入地址
 Connecting dapps is not yet supported by Ledger.: Ledger 尚不支持连接 dapp。
 Time synchronization issue. Please ensure your device's time settings are correct.: 时间同步问题。 请确保您设备的时间设置正确。
 Data was copied!: 数据被复制！
@@ -647,6 +660,7 @@ $hardware_blind_sign_not_enabled: |
   第三方服务正在请求访问您的钱包 — 这可能会导致资金损失。如果您不确定此服务的可靠性，请取消操作。
 
   要继续，请在 Ledger 的 TON 应用程序设置中启用“盲签名”选项。
+$hardware_blind_sign_not_enabled_internal: 要继续，请在 Ledger 的 TON 应用程序设置中启用“盲签名”选项。
 Switch to W5: 切换到 W5
 Not Scam: 不是骗局
 Untitled: 未命名
@@ -659,3 +673,54 @@ Enter Secret Words: 输入密语
 Turn this off so you can manually download updates and verify signatures.: 关闭此功能以便手动下载更新并验证签名。
 InvalidMnemonic: 您的助记词无效
 NFT Menu: NFT菜单
+Connection Type: 连接类型
+Ledger is not supported on this device: 此设备不支持 Ledger
+Connect your Ledger: 连接您的 Ledger
+$app_lock_description: 启用应用锁后，主页面的卡片上会出现锁图标。使用它锁定 MyTonWallet。
+App Lock: 应用锁
+Auto-Lock: 自动锁
+Disabled: 已禁用
+30 seconds: 30秒
+3 minutes: 3分钟
+10 minutes: 10分钟
+If away for 30 sec: 离开30秒
+If away for 3 min: 离开3分钟
+If away for 10 min: 离开10分钟
+Unlock: 解锁
+This address mimics another address that you previously interacted with.: 此地址模仿了您之前交互过的另一个地址。
+Biometric authentication failed: 生物识别认证失败
+Reset biometrics in security settings, or use a passcode.: 在安全设置中重置生物识别，或使用密码。
+Best Rate: 最佳汇率
+via %dex_name%: 通过 %dex_name%
+$swap_dex_chooser_rate_title: 在 **DeDust** 和 **STON.fi** 上分析的实际汇率，以便使用 **最佳汇率**。
+You will receive %amount% **more**.: 您将收到 %amount% **更多**。
+You will spend %amount% **less**.: 您将少花 %amount%。
+Best: 最佳
+Use Best Rate: 使用最佳汇率
+Switch to %dex_name%: 切换到 %dex_name%
+Built-in DEX Aggregator: 内置Dex聚合器
+Add tokens: 添加令牌
+No tokens yet: 尚无代币
+$no_tokens_description: 从其他钱包接收代币，或者在设置中启用首选代币进行监控。
+Exchange Rate: 汇率
+Install Card: 安装卡片
+Reset Card: 重置卡
+Apply Palette: 应用调色板
+Reset Palette: 重置调色板
+Notifications & Sounds: 通知和声音
+Push Notifications: 推送通知
+Select up to %count% wallets for notifications: 选择最多 %count% 个钱包接收通知
+$swap_aggregator_fee_tooltip: 内置的 **DEX 聚合器** 会在可用的 DEX 中找到 **最佳汇率**。服务费为 %percent%。
+Accumulated Rewards: 累积奖励
+$swap_reverse_prohibited: 无法为这对代币设置购买金额
+Blockchain Fee Details: 区块链费用详情
+Final Fee: 最终费用
+Excess: 多余款项
+$fee_details: 需要立即从您的钱包中扣除%full_fee%以支付费用。部分金额将在几分钟内以%excess_symbol%的形式返还给您作为多余款项。
+This is how the %chain_name% Blockchain works.: 这就是%chain_name%区块链的工作方式。
+Got It: 知道了
+Wallet: 钱包
+Connected: 已连接
+All Dapps: 所有去中心化应用
+Trending: 热门
+No Data: 无数据

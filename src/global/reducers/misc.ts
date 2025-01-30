@@ -1,12 +1,20 @@
 import type {
-  ApiChain, ApiMaybeBalanceBySlug, ApiSwapAsset, ApiTokenWithPrice,
+  ApiBalanceBySlug,
+  ApiChain,
+  ApiSwapAsset,
+  ApiTokenWithPrice,
 } from '../../api/types';
 import type { Account, AccountState, GlobalState } from '../types';
 
 import { POPULAR_WALLET_VERSIONS, TON_USDT_SLUG, TONCOIN } from '../../config';
 import isPartialDeepEqual from '../../util/isPartialDeepEqual';
+import { getChainBySlug } from '../../util/tokens';
 import {
-  selectAccount, selectAccountState, selectCurrentNetwork, selectNetworkAccounts,
+  selectAccount,
+  selectAccountSettings,
+  selectAccountState,
+  selectCurrentNetwork,
+  selectNetworkAccounts,
 } from '../selectors';
 
 export function updateAuth(global: GlobalState, authUpdate: Partial<GlobalState['auth']>) {
@@ -107,48 +115,42 @@ export function renameAccount(global: GlobalState, accountId: string, title: str
 export function updateBalances(
   global: GlobalState,
   accountId: string,
-  balancesToUpdate: ApiMaybeBalanceBySlug,
+  chain: ApiChain,
+  chainBalances: ApiBalanceBySlug,
 ): GlobalState {
-  if (Object.keys(balancesToUpdate).length === 0) {
-    return global;
-  }
+  const balances: ApiBalanceBySlug = { ...chainBalances };
+  const currentBalances = selectAccountState(global, accountId)?.balances?.bySlug ?? {};
+  const importedSlugs = selectAccountSettings(global, accountId)?.importedSlugs ?? [];
 
-  const { balances } = selectAccountState(global, accountId) || {};
-
-  const updatedBalancesBySlug = { ...(balances?.bySlug || {}) };
-
-  for (const [slug, balance] of Object.entries(balancesToUpdate)) {
-    if (balance === undefined) {
-      if (updatedBalancesBySlug[slug]) {
-        updatedBalancesBySlug[slug] = 0n;
-      }
-      continue;
+  for (const [slug, balance] of Object.entries(currentBalances)) {
+    if (getChainBySlug(slug) !== chain) {
+      balances[slug] = balance;
     }
-
-    updatedBalancesBySlug[slug] = balance;
   }
 
-  // Force balance value for USDT in Tonchain
-  if (!(TON_USDT_SLUG in updatedBalancesBySlug)) {
-    updatedBalancesBySlug[TON_USDT_SLUG] = 0n;
+  // Force balance value for USDT-TON and manual imported tokens
+  for (const slug of [...importedSlugs, TON_USDT_SLUG]) {
+    if (!(slug in balances)) {
+      balances[slug] = 0n;
+    }
   }
 
   return updateAccountState(global, accountId, {
     balances: {
-      ...balances,
-      bySlug: updatedBalancesBySlug,
+      bySlug: balances,
     },
   });
 }
 
-export function updateSendingLoading(global: GlobalState, isLoading: boolean): GlobalState {
-  return {
-    ...global,
-    currentTransfer: {
-      ...global.currentTransfer,
-      isLoading,
+export function changeBalance(global: GlobalState, accountId: string, slug: string, balance: bigint) {
+  return updateAccountState(global, accountId, {
+    balances: {
+      bySlug: {
+        ...selectAccountState(global, accountId)?.balances?.bySlug,
+        [slug]: balance,
+      },
     },
-  };
+  });
 }
 
 export function updateTokens(
@@ -248,8 +250,9 @@ export function updateSettings(global: GlobalState, settingsUpdate: Partial<Glob
   } as GlobalState;
 }
 
-export function updateCurrentAccountSettings(
+export function updateAccountSettings(
   global: GlobalState,
+  accountId: string,
   settingsUpdate: Partial<GlobalState['settings']['byAccountId']['*']>,
 ) {
   return {
@@ -258,13 +261,20 @@ export function updateCurrentAccountSettings(
       ...global.settings,
       byAccountId: {
         ...global.settings.byAccountId,
-        [global.currentAccountId!]: {
-          ...global.settings.byAccountId[global.currentAccountId!],
+        [accountId]: {
+          ...global.settings.byAccountId[accountId],
           ...settingsUpdate,
         },
       },
     },
   } as GlobalState;
+}
+
+export function updateCurrentAccountSettings(
+  global: GlobalState,
+  settingsUpdate: Partial<GlobalState['settings']['byAccountId']['*']>,
+) {
+  return updateAccountSettings(global, global.currentAccountId!, settingsUpdate);
 }
 
 export function updateBiometrics(global: GlobalState, biometricsUpdate: Partial<GlobalState['biometrics']>) {

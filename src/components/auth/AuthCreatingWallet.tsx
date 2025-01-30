@@ -1,6 +1,7 @@
 import React, { memo } from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
+import { SECOND } from '../../util/dateFormat';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useFlag from '../../hooks/useFlag';
@@ -17,7 +18,7 @@ interface OwnProps {
 }
 
 const START_DELAY = 700;
-const INTERVAL = 1000;
+const INTERVAL = SECOND;
 
 const AuthCreatingWallet = ({ isActive }: OwnProps) => {
   const lang = useLang();
@@ -44,11 +45,11 @@ const AuthCreatingWallet = ({ isActive }: OwnProps) => {
       />
       <div className={styles.title}>{lang('Creating Wallet...')}</div>
 
-      <div className={buildClassName(styles.counter)}>
+      <div className={styles.counter}>
         <p className={styles.counterTitle}>{lang('On the count of three...')}</p>
-        <b className={buildClassName(styles.counterDigit, oneClassNames)}>1</b>
-        <b className={buildClassName(styles.counterDigit, twoClassNames)}>2</b>
-        <b className={buildClassName(styles.counterDigit, threeClassNames)}>3</b>
+        <b className={buildClassName(styles.counterDigit, 'rounded-font', oneClassNames)}>1</b>
+        <b className={buildClassName(styles.counterDigit, 'rounded-font', twoClassNames)}>2</b>
+        <b className={buildClassName(styles.counterDigit, 'rounded-font', threeClassNames)}>3</b>
       </div>
     </div>
   );

@@ -1,15 +1,17 @@
+import { IS_DESKTOP, IS_MOBILE, platform } from "/common.js";
+
+
 const REPO = 'mytonwalletorg/mytonwallet';
 const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const LATEST_RELEASE_WEB_URL = `https://github.com/${REPO}/releases/latest`;
 const LATEST_RELEASE_DOWNLOAD_URL = `https://github.com/${REPO}/releases/download/v%VERSION%`;
 const WEB_APP_URL = '/';
 const MOBILE_URLS = {
-  ios: 'https://apps.apple.com/ru/app/mytonwallet-anyway-ton-wallet/id6464677844',
-  android: 'https://play.google.com/store/apps/details?id=org.mytonwallet.app',
+  ios: '/ios',
+  android: '/android-store',
   androidDirect: `${LATEST_RELEASE_DOWNLOAD_URL}/MyTonWallet.apk`,
 };
 
-let platform = getPlatform();
 const currentPage = location.href.includes('/android')
   ? 'android'
   : location.href.includes('/mac')
@@ -59,9 +61,6 @@ const packagesPromise = fetch(LATEST_RELEASE_API_URL)
     console.error('Error:', error);
   });
 
-const IS_DESKTOP = ['Windows', 'Linux', 'macOS'].includes(platform);
-const IS_MOBILE = !IS_DESKTOP;
-
 (function init() {
   if (currentPage === 'rate') {
     setupRateButtons();
@@ -95,34 +94,6 @@ const IS_MOBILE = !IS_DESKTOP;
 
 function $(id) {
   return document.getElementById(id);
-}
-
-function getPlatform() {
-  const {
-    userAgent,
-    platform,
-  } = window.navigator;
-
-  const iosPlatforms = ['iPhone', 'iPad', 'iPod'];
-  if (
-    iosPlatforms.indexOf(platform) !== -1
-    // For new IPads with M1 chip and IPadOS platform returns "MacIntel"
-    || (platform === 'MacIntel' && ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 2))
-  ) {
-    return 'iOS';
-  }
-
-  const macosPlatforms = ['Macintosh', 'MacIntel', 'MacPPC', 'Mac68K'];
-  if (macosPlatforms.indexOf(platform) !== -1) return 'macOS';
-
-  const windowsPlatforms = ['Win32', 'Win64', 'Windows', 'WinCE'];
-  if (windowsPlatforms.indexOf(platform) !== -1) return 'Windows';
-
-  if (/Android/.test(userAgent)) return 'Android';
-
-  if (/Linux/.test(platform)) return 'Linux';
-
-  return undefined;
 }
 
 function setupDownloadButton() {
@@ -234,4 +205,16 @@ function setupRateButtons() {
       btnEl.classList.remove('hidden');
     });
   }
+}
+
+const actions = {
+  redirectToStore,
+  downloadAndroidDirect,
+  redirectToFullList,
+  downloadDefault,
+  download,
+};
+
+for (const action of Object.keys(actions)) {
+  window[action] = actions[action];
 }

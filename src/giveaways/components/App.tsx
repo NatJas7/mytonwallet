@@ -3,8 +3,7 @@ import React, {
   memo, useCallback, useEffect, useLayoutEffect, useState,
 } from '../../lib/teact/teact';
 
-import type { JettonMetadata } from '../../api/chains/ton/types';
-import type { Giveaway, GiveawayWithTask } from '../utils/giveaway';
+import type { Giveaway, GiveawayWithTask, JettonMetadataInfo } from '../utils/giveaway';
 
 import buildClassName from '../../util/buildClassName';
 import { resolveRender } from '../../util/renderPromise';
@@ -23,7 +22,7 @@ import { useDeviceScreen } from '../../hooks/useDeviceScreen';
 import useEffectOnce from '../../hooks/useEffectOnce';
 import useInterval from '../../hooks/useInterval';
 
-import Loading from '../../components/ui/Loading';
+import Spinner from '../../components/ui/Spinner';
 import Transition from '../../components/ui/Transition';
 import CaptchaPage from '../pages/CaptchaPage';
 import CompleteTaskPage from '../pages/CompleteTaskPage';
@@ -35,8 +34,6 @@ import styles from './App.module.scss';
 interface OwnProps {
   mtwWalletInfo: WalletInfoRemote;
 }
-
-export type JettonMetadataInfo = JettonMetadata | { isTon: boolean };
 
 const FETCH_REPEAT_MS = 3000;
 
@@ -105,12 +102,13 @@ function App({ mtwWalletInfo }: OwnProps) {
         return <div>QueryParams has no giveawayId</div>;
 
       case PageKey.LoadingPageId:
-        return <div className={styles.loading}><Loading /></div>;
+        return <div className={styles.loading}><Spinner /></div>;
 
       case PageKey.ConnectPageId:
         return (
           <ConnectPage
             giveaway={giveaway!}
+            wallet={wallet}
             onConnectClick={handleConnectClick}
           />
         );
@@ -121,6 +119,7 @@ function App({ mtwWalletInfo }: OwnProps) {
             wallet={wallet!}
             setParticipantStatus={setParticipantStatus}
             setGiveaway={setGiveaway}
+            isGiveawayFinished={giveaway?.status === GiveawayStatus.Finished}
           />
         );
 
@@ -144,18 +143,18 @@ function App({ mtwWalletInfo }: OwnProps) {
         );
 
       default:
-        return <div className={styles.loading}><Loading /></div>;
+        return <div className={styles.loading}><Spinner /></div>;
     }
   }
 
   return (
     <div className={styles.app}>
       <Transition
-        name={isPortrait ? (IS_ANDROID ? 'slideFadeAndroid' : IS_IOS ? 'slideLayers' : 'slideFade') : 'semiFade'}
+        name={isPortrait ? (IS_ANDROID ? 'slideFadeAndroid' : IS_IOS ? 'slideLayers' : 'slideFade') : 'fade'}
         activeKey={renderKey}
         slideClassName={buildClassName(styles.appSlide, 'custom-scroll')}
       >
-        {renderPage()}
+        {renderPage}
       </Transition>
     </div>
   );

@@ -6,6 +6,8 @@ import type { GlobalState } from '../../global/types';
 
 import buildClassName from '../../util/buildClassName';
 import { getIsFaceIdAvailable, vibrateOnError } from '../../util/capacitor';
+import { disableSwipeToClose, enableSwipeToClose } from '../../util/modalSwipeManager';
+import { SWIPE_DISABLED_CLASS_NAME } from '../../util/swipeController';
 import { IS_DELEGATED_BOTTOM_SHEET } from '../../util/windowEnvironment';
 
 import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
@@ -22,6 +24,7 @@ interface OwnProps {
   type?: 'error' | 'success';
   value: string;
   length?: number;
+  resetStateDelayMs?: number;
   className?: string;
   isMinified?: boolean;
   onBiometricsClick?: NoneToVoidFunction;
@@ -42,11 +45,12 @@ function PinPad({
   title,
   type,
   value,
+  resetStateDelayMs = RESET_STATE_DELAY_MS,
   length = DEFAULT_PIN_LENGTH,
-  onBiometricsClick,
   isPinAccepted,
   className,
   isMinified,
+  onBiometricsClick,
   onChange,
   onClearError,
   onSubmit,
@@ -96,13 +100,23 @@ function PinPad({
         onChange('');
       }
       onClearError?.();
-    }, RESET_STATE_DELAY_MS);
+    }, resetStateDelayMs);
     void vibrateOnError();
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [length, onChange, onClearError, type, value.length]);
+  }, [length, onChange, onClearError, resetStateDelayMs, type, value.length]);
+
+  useEffect(() => {
+    if (!isActive) return undefined;
+
+    disableSwipeToClose();
+
+    return () => {
+      enableSwipeToClose();
+    };
+  }, [isActive]);
 
   const handleClick = useLastCallback((char: string) => {
     if (value.length === length || value.length === 0) {
@@ -155,7 +169,7 @@ function PinPad({
   }
 
   return (
-    <div className={buildClassName(styles.root, className)}>
+    <div className={buildClassName(styles.root, className, SWIPE_DISABLED_CLASS_NAME)}>
       <div className={titleClassName}>{title}</div>
       {renderDots()}
 
@@ -194,5 +208,10 @@ export default memo(withGlobal<OwnProps>(
     return {
       isPinAccepted,
     };
+  },
+  (global, _, stickToFirst) => {
+    const { isPinAccepted } = global;
+
+    return stickToFirst(isPinAccepted);
   },
 )(PinPad));

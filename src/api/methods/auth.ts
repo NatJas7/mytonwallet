@@ -24,7 +24,7 @@ import {
 import {
   decryptMnemonic, encryptMnemonic, generateBip39Mnemonic, validateBip39Mnemonic,
 } from '../common/mnemonic';
-import { apiDb } from '../db';
+import { nftRepository } from '../db';
 import { getEnvironment } from '../environment';
 import { handleServerError } from '../errors';
 import { storage } from '../storages';
@@ -152,7 +152,6 @@ export async function importLedgerWallet(network: ApiNetwork, walletInfo: Ledger
     deviceId,
     deviceName,
   });
-  void activateAccount(accountId);
 
   return { accountId, address, walletInfo };
 }
@@ -177,7 +176,7 @@ export async function resetAccounts() {
     storage.removeItem('accounts'),
     storage.removeItem('currentAccountId'),
     getEnvironment().isDappSupported && removeAllDapps(),
-    apiDb.nfts.clear(),
+    nftRepository.clear(),
   ]);
 }
 
@@ -185,7 +184,7 @@ export async function removeAccount(accountId: string, nextAccountId: string, ne
   await Promise.all([
     removeAccountValue(accountId, 'accounts'),
     getEnvironment().isDappSupported && removeAccountDapps(accountId),
-    apiDb.nfts.where({ accountId }).delete(),
+    nftRepository.deleteWhere({ accountId }),
   ]);
 
   deactivateCurrentAccount();

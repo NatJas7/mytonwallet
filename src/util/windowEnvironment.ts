@@ -36,6 +36,7 @@ export const IS_IOS = PLATFORM_ENV === 'iOS';
 export const IS_ANDROID = PLATFORM_ENV === 'Android';
 export const IS_SAFARI = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 export const IS_OPERA = navigator.userAgent.includes(' OPR/');
+export const IS_EDGE = navigator.userAgent.includes(' Edg/');
 export const IS_FIREFOX = navigator.userAgent.includes('Firefox/');
 export const IS_TOUCH_ENV = window.matchMedia('(pointer: coarse)').matches;
 export const IS_CHROME_EXTENSION = Boolean(window.chrome?.system);
@@ -44,7 +45,7 @@ export const IS_WEB = !IS_CAPACITOR && !IS_ELECTRON && !IS_EXTENSION;
 export const DEFAULT_LANG_CODE = 'en';
 export const USER_AGENT_LANG_CODE = getBrowserLanguage();
 export const DPR = window.devicePixelRatio || 1;
-export const IS_LEDGER_SUPPORTED = !(IS_IOS || (IS_ANDROID && IS_CAPACITOR) || IS_FIREFOX_EXTENSION);
+export const IS_LEDGER_SUPPORTED = IS_CAPACITOR || !(IS_IOS || IS_FIREFOX_EXTENSION);
 export const IS_LEDGER_EXTENSION_TAB = global.location.hash.startsWith('#detached');
 // Disable biometric auth on electron for now until this issue is fixed:
 // https://github.com/electron/electron/issues/24573
@@ -75,3 +76,4 @@ export function setScrollbarWidthProperty() {
 }
 
 export const REM = parseInt(getComputedStyle(document.documentElement).fontSize, 10);
+export const STICKY_CARD_INTERSECTION_THRESHOLD = -3.75 * REM;

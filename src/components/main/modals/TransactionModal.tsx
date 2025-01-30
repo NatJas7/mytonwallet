@@ -3,8 +3,14 @@ import React, {
 } from '../../../lib/teact/teact';
 import { getActions, getGlobal, withGlobal } from '../../../global';
 
-import type { ApiTokenWithPrice, ApiTransactionActivity } from '../../../api/types';
-import type { SavedAddress, StakingStatus, Theme } from '../../../global/types';
+import type {
+  ApiStakingCommonData,
+  ApiStakingState,
+  ApiTokenWithPrice,
+  ApiToncoinStakingState,
+  ApiTransactionActivity,
+} from '../../../api/types';
+import type { SavedAddress, Theme } from '../../../global/types';
 import { ActiveTab } from '../../../global/types';
 
 import {
@@ -16,14 +22,16 @@ import {
   TONCOIN,
 } from '../../../config';
 import { getIsTxIdLocal } from '../../../global/helpers';
-import { selectCurrentAccountStakingStatus, selectCurrentAccountState } from '../../../global/selectors';
+import { getStakingStateStatus } from '../../../global/helpers/staking';
+import { selectAccountStakingStates, selectCurrentAccountState } from '../../../global/selectors';
 import { bigintAbs } from '../../../util/bigint';
 import buildClassName from '../../../util/buildClassName';
 import { vibrateOnSuccess } from '../../../util/capacitor';
 import { formatFullDay, formatRelativeHumanDateTime, formatTime } from '../../../util/dateFormat';
 import { toDecimal } from '../../../util/decimals';
 import { handleOpenUrl } from '../../../util/openUrl';
-import resolveModalTransitionName from '../../../util/resolveModalTransitionName';
+import { getIsTransactionWithPoisoning } from '../../../util/poisoningHash';
+import resolveSlideTransitionName from '../../../util/resolveSlideTransitionName';
 import { getNativeToken, getTransactionHashFromTxId } from '../../../util/tokens';
 import { getExplorerName, getExplorerTransactionUrl } from '../../../util/url';
 import { callApi } from '../../../api';
@@ -59,14 +67,13 @@ type StateProps = {
   tokensBySlug?: Record<string, ApiTokenWithPrice>;
   savedAddresses?: SavedAddress[];
   isTestnet?: boolean;
-  startOfStakingCycle?: number;
-  endOfStakingCycle?: number;
-  isUnstakeRequested?: boolean;
+  stakingInfo?: ApiStakingCommonData;
+  stakingStates?: ApiStakingState[];
   isLongUnstakeRequested?: boolean;
-  stakingStatus?: StakingStatus;
   isMediaViewerOpen?: boolean;
   theme: Theme;
 };
+
 const enum SLIDES {
   initial,
   password,
@@ -77,17 +84,16 @@ function TransactionModal({
   tokensBySlug,
   savedAddresses,
   isTestnet,
-  startOfStakingCycle,
-  endOfStakingCycle,
-  isUnstakeRequested,
+  stakingInfo,
+  stakingStates,
   isLongUnstakeRequested,
-  stakingStatus,
   isMediaViewerOpen,
   theme,
 }: StateProps) {
   const {
     startTransfer,
     startStaking,
+    startUnstaking,
     closeActivityInfo,
     setIsPinAccepted,
     clearIsPinAccepted,
@@ -136,7 +142,8 @@ function TransactionModal({
     return address && chain && savedAddresses?.find((item) => item.address === address && item.chain === chain)?.name;
   }, [address, chain, savedAddresses]);
   const addressName = savedAddressName || transaction?.metadata?.name;
-  const isScam = Boolean(transaction?.metadata?.isScam);
+  const isTransactionWithPoisoning = isIncoming && getIsTransactionWithPoisoning(renderedTransaction!);
+  const isScam = isTransactionWithPoisoning || Boolean(transaction?.metadata?.isScam);
   const isModalOpen = Boolean(transaction) && !isMediaViewerOpen;
   const transactionHash = chain && id ? getTransactionHashFromTxId(chain, id) : undefined;
 
@@ -155,15 +162,25 @@ function TransactionModal({
 
   const [withUnstakeTimer, setWithUnstakeTimer] = useState(false);
 
+  const state = useMemo(() => {
+    return stakingStates?.find((staking): staking is ApiToncoinStakingState => {
+      return staking.tokenSlug === TONCOIN.slug && staking.balance > 0n;
+    });
+  }, [stakingStates]);
+
+  const stakingStatus = state && getStakingStateStatus(state);
+  const startOfStakingCycle = state?.type === 'nominators' ? state.start : stakingInfo?.round?.start;
+  const endOfStakingCycle = state?.type === 'nominators' ? state.end : stakingInfo?.round?.end;
+
   useEffect(() => {
     if (transaction?.type !== 'unstakeRequest' || !startOfStakingCycle) {
       return;
     }
 
-    const shouldDisplayTimer = Boolean(isUnstakeRequested || isLongUnstakeRequested)
+    const shouldDisplayTimer = Boolean(stakingStatus === 'unstakeRequested' || isLongUnstakeRequested)
       && transaction.timestamp >= startOfStakingCycle;
     setWithUnstakeTimer(shouldDisplayTimer);
-  }, [isUnstakeRequested, startOfStakingCycle, transaction, isLongUnstakeRequested]);
+  }, [stakingStatus, startOfStakingCycle, transaction, isLongUnstakeRequested]);
 
   const {
     shouldRender: shouldRenderUnstakeTimer,
@@ -234,7 +251,7 @@ function TransactionModal({
       setLandscapeActionsActiveTabIndex({ index: ActiveTab.Stake });
     }
 
-    startStaking({ isUnstaking: true });
+    startUnstaking();
   });
 
   const handlePasswordSubmit = useLastCallback(async (password: string) => {
@@ -315,6 +332,14 @@ function TransactionModal({
         >
           <i className={buildClassName(modalStyles.closeIcon, 'icon-close')} aria-hidden />
         </Button>
+      </div>
+    );
+  }
+
+  function renderTransactionWithPoisoningWarning() {
+    return (
+      <div className={styles.scamWarning}>
+        {lang('This address mimics another address that you previously interacted with.')}
       </div>
     );
   }
@@ -400,6 +425,8 @@ function TransactionModal({
             status={isUnstaking && !shouldRenderUnstakeTimer ? lang('Successfully') : undefined}
           />
         )}
+
+        {isTransactionWithPoisoning && renderTransactionWithPoisoningWarning()}
 
         {!isUnstaking && (
           <>
@@ -501,7 +528,7 @@ function TransactionModal({
       onCloseAnimationEnd={closePasswordSlide}
     >
       <Transition
-        name={resolveModalTransitionName()}
+        name={resolveSlideTransitionName()}
         className={buildClassName(modalStyles.transition, 'custom-scroll')}
         slideClassName={modalStyles.transitionSlide}
         activeKey={currentSlide}
@@ -515,29 +542,26 @@ function TransactionModal({
 
 export default memo(
   withGlobal((global): StateProps => {
+    const accountId = global.currentAccountId!;
     const accountState = selectCurrentAccountState(global);
 
     const txId = accountState?.currentActivityId;
     const activity = txId ? accountState?.activities?.byId[txId] : undefined;
-    const {
-      start: startOfStakingCycle,
-      end: endOfStakingCycle,
-    } = accountState?.staking || {};
     const savedAddresses = accountState?.savedAddresses;
-    const stakingStatus = selectCurrentAccountStakingStatus(global);
+
+    const stakingInfo = global.stakingInfo;
+    const stakingStates = selectAccountStakingStates(global, accountId);
 
     return {
       transaction: activity?.kind === 'transaction' ? activity : undefined,
       tokensBySlug: global.tokenInfo?.bySlug,
       savedAddresses,
       isTestnet: global.settings.isTestnet,
-      startOfStakingCycle,
-      endOfStakingCycle,
-      isUnstakeRequested: accountState?.staking?.isUnstakeRequested,
       isLongUnstakeRequested: accountState?.isLongUnstakeRequested,
-      stakingStatus,
       isMediaViewerOpen: Boolean(global.mediaViewer.mediaId),
       theme: global.settings.theme,
+      stakingInfo,
+      stakingStates,
     };
   })(TransactionModal),
 );

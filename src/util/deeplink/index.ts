@@ -157,15 +157,17 @@ async function processTonDeeplink(url: string) {
   }
 }
 
-export function parseTonDeeplink(value: string | unknown) {
+export function parseTonDeeplink(value?: string) {
   if (typeof value !== 'string' || !isTonDeeplink(value) || !value.includes('/transfer/')) {
     return undefined;
   }
 
   try {
-    const url = new URL(value);
+    // In some browsers URL module may handle non-standard protocols incorrectly
+    const adaptedDeeplink = value.replace(TON_PROTOCOL, 'https://');
+    const url = new URL(adaptedDeeplink);
 
-    const toAddress = url.pathname.replace(/.*\//, '');
+    const toAddress = url.pathname.replace(/\//g, '');
     const amount = getDeeplinkSearchParam(url, 'amount');
     const comment = getDeeplinkSearchParam(url, 'text');
     const binPayload = getDeeplinkSearchParam(url, 'bin');
@@ -217,6 +219,8 @@ async function processTonConnectDeeplink(url: string, isFromInAppBrowser = false
 }
 
 export function isSelfDeeplink(url: string) {
+  url = forceHttpsProtocol(url);
+
   return url.startsWith(SELF_PROTOCOL)
     || SELF_UNIVERSAL_URLS.some((u) => omitProtocol(url).startsWith(omitProtocol(u)));
 }
@@ -285,7 +289,7 @@ export function processSelfDeeplink(deeplink: string) {
         if (isTestnet) {
           actions.showError({ error: 'Buying with card is not supported in Testnet.' });
         } else {
-          actions.openOnRampWidgetModal();
+          actions.openOnRampWidgetModal({ chain: 'ton' });
         }
         break;
       }
@@ -300,10 +304,10 @@ export function processSelfDeeplink(deeplink: string) {
       }
 
       case DeeplinkCommand.Transfer: {
-        let tonDeeplink = deeplink;
+        let tonDeeplink = forceHttpsProtocol(deeplink);
         SELF_UNIVERSAL_URLS.forEach((prefix) => {
           if (tonDeeplink.startsWith(prefix)) {
-            tonDeeplink = tonDeeplink.replace(prefix, TON_PROTOCOL);
+            tonDeeplink = tonDeeplink.replace(`${prefix}/`, TON_PROTOCOL);
           }
         });
 
@@ -318,6 +322,10 @@ export function processSelfDeeplink(deeplink: string) {
 
 function omitProtocol(url: string) {
   return url.replace(/^https?:\/\//, '');
+}
+
+function forceHttpsProtocol(url: string) {
+  return url.replace(/^http:\/\//, 'https://');
 }
 
 function toNumberOrEmptyString(input?: string | null) {

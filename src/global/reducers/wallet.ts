@@ -1,42 +1,9 @@
-import type { ApiCheckTransactionDraftResult } from '../../api/chains/ton/types';
 import type { GlobalState } from '../types';
-import { TransferState } from '../types';
 
-import { omitUndefined, pick } from '../../util/iteratees';
 import { selectAccountState, selectCurrentAccountState } from '../selectors';
-import { updateAccountState, updateCurrentAccountState } from './misc';
-
-export function updateCurrentTransferByCheckResult(global: GlobalState, result: ApiCheckTransactionDraftResult) {
-  const partial = omitUndefined({
-    toAddressName: result.addressName,
-    ...pick(result, ['isScam', 'isMemoRequired', 'dieselAmount', 'dieselStatus']),
-  });
-
-  if (Object.keys(partial).length) {
-    global = updateCurrentTransfer(global, partial);
-  }
-
-  return global;
-}
-
-export function updateCurrentTransfer(global: GlobalState, update: Partial<GlobalState['currentTransfer']>) {
-  return {
-    ...global,
-    currentTransfer: {
-      ...global.currentTransfer,
-      ...update,
-    },
-  };
-}
-
-export function clearCurrentTransfer(global: GlobalState) {
-  return {
-    ...global,
-    currentTransfer: {
-      state: TransferState.None,
-    },
-  };
-}
+import { updateAccountState, updateCurrentAccountId, updateCurrentAccountState } from './misc';
+import { clearCurrentSwap } from './swap';
+import { clearCurrentTransfer } from './transfer';
 
 export function updateCurrentSignature(global: GlobalState, update: Partial<GlobalState['currentSignature']>) {
   return {
@@ -100,4 +67,11 @@ export function updateActivitiesIsLoadingByAccount(global: GlobalState, accountI
       isLoading,
     },
   });
+}
+
+export function switchAccountAndClearGlobal(global: GlobalState, accountId: string) {
+  let newGlobal = updateCurrentAccountId(global, accountId);
+  newGlobal = clearCurrentTransfer(newGlobal);
+
+  return clearCurrentSwap(newGlobal);
 }

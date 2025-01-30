@@ -2,7 +2,7 @@ import type { TeactNode } from '../../lib/teact/teact';
 import React, {
   memo, useEffect, useRef, useState,
 } from '../../lib/teact/teact';
-import { withGlobal } from '../../global';
+import { getActions, withGlobal } from '../../global';
 
 import type { AuthConfig } from '../../util/authApi/types';
 
@@ -12,23 +12,27 @@ import buildClassName from '../../util/buildClassName';
 import { getIsFaceIdAvailable, getIsTouchIdAvailable } from '../../util/capacitor';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { pause } from '../../util/schedulers';
-import { IS_DELEGATING_BOTTOM_SHEET } from '../../util/windowEnvironment';
+import { IS_ANDROID_APP, IS_DELEGATING_BOTTOM_SHEET } from '../../util/windowEnvironment';
 import { ANIMATED_STICKERS_PATHS } from './helpers/animatedAssets';
 
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
+import useFlag from '../../hooks/useFlag';
 import useFocusAfterAnimation from '../../hooks/useFocusAfterAnimation';
+import useHideBottomBar from '../../hooks/useHideBottomBar';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 
 import AnimatedIconWithPreview from './AnimatedIconWithPreview';
 import Button from './Button';
 import Input from './Input';
+import Modal from './Modal';
 import PinPad from './PinPad';
 
 import modalStyles from './Modal.module.scss';
 import styles from './PasswordForm.module.scss';
 
-type OperationType = 'transfer' | 'sending' | 'staking' | 'unstaking' | 'swap' | 'unfreeze' | 'passcode';
+type OperationType = 'transfer' | 'sending' | 'staking' | 'unstaking' | 'swap'
+| 'unfreeze' | 'passcode' | 'unlock' | 'claim';
 
 interface OwnProps {
   isActive: boolean;
@@ -40,10 +44,14 @@ interface OwnProps {
   placeholder?: string;
   error?: string;
   help?: string;
+  resetStateDelayMs?: number;
   containerClassName?: string;
   withCloseButton?: boolean;
   children?: TeactNode;
-  onCancel: NoneToVoidFunction;
+  noAnimatedIcon?: boolean;
+  inputWrapperClassName?: string;
+  forceBiometricsInMain?: boolean;
+  onCancel?: NoneToVoidFunction;
   onUpdate: NoneToVoidFunction;
   onSubmit: (password: string) => void;
 }
@@ -72,19 +80,27 @@ function PasswordForm({
   placeholder = 'Enter your password',
   error,
   help,
+  resetStateDelayMs,
   containerClassName,
   children,
   withCloseButton,
+  noAnimatedIcon,
+  inputWrapperClassName,
+  forceBiometricsInMain,
   onUpdate,
   onCancel,
   onSubmit,
 }: OwnProps & StateProps) {
+  const { openSettings } = getActions();
+
   const lang = useLang();
 
   // eslint-disable-next-line no-null/no-null
   const passwordRef = useRef<HTMLInputElement>(null);
   const [password, setPassword] = useState<string>('');
   const [localError, setLocalError] = useState<string>('');
+  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [isResetBiometricsWarningOpen, openResetBiometricsWarning, closeResetBiometricsWarning] = useFlag(false);
   const { isSmallHeight, isPortrait } = useDeviceScreen();
   const isSubmitDisabled = !password.length;
 
@@ -92,18 +108,22 @@ function PasswordForm({
     if (isActive) {
       setLocalError('');
       setPassword('');
+      setWrongAttempts(0);
     }
   }, [isActive]);
+
+  useHideBottomBar(Boolean(isActive));
 
   const handleBiometrics = useLastCallback(async () => {
     try {
       const biometricPassword = await authApi.getPassword(authConfig!);
       if (!biometricPassword) {
-        setLocalError(
-          operationType === 'transfer'
-            ? 'Declined. Please try to confirm transaction using biometrics again.'
-            : 'Declined. Please try to confirm operation using biometrics again.',
-        );
+        setWrongAttempts(wrongAttempts + 1);
+        setLocalError('Biometric confirmation failed');
+
+        if (IS_ANDROID_APP && wrongAttempts > 2) {
+          openResetBiometricsWarning();
+        }
       } else {
         onSubmit(biometricPassword);
       }
@@ -113,7 +133,7 @@ function PasswordForm({
   });
 
   useEffect(() => {
-    if (IS_DELEGATING_BOTTOM_SHEET || !isActive || !isBiometricAuthEnabled) {
+    if ((IS_DELEGATING_BOTTOM_SHEET && !forceBiometricsInMain) || !isActive || !isBiometricAuthEnabled) {
       return;
     }
 
@@ -121,13 +141,19 @@ function PasswordForm({
       await pause(APPEAR_ANIMATION_DURATION_MS);
       void handleBiometrics();
     })();
-  }, [handleBiometrics, isActive, isBiometricAuthEnabled]);
+  }, [forceBiometricsInMain, handleBiometrics, isActive, isBiometricAuthEnabled]);
 
   useFocusAfterAnimation(passwordRef, !isActive || isBiometricAuthEnabled);
 
   const handleClearError = useLastCallback(() => {
     setLocalError('');
     onUpdate();
+  });
+
+  const handleOpenSettings = useLastCallback(() => {
+    closeResetBiometricsWarning();
+    onCancel?.();
+    openSettings();
   });
 
   const handleInput = useLastCallback((value: string) => {
@@ -162,6 +188,10 @@ function PasswordForm({
         return 'Confirm Unstaking';
       case 'swap':
         return 'Confirm Swap';
+      case 'unlock':
+        return undefined;
+      case 'claim':
+        return 'Confirm Rewards Claim';
       default:
         return 'Confirm Action';
     }
@@ -194,7 +224,7 @@ function PasswordForm({
           </Button>
         )}
         <div className={styles.pinPadHeader}>
-          {isPortrait && (
+          {isPortrait && !noAnimatedIcon && (
             <AnimatedIconWithPreview
               play={isActive}
               tgsUrl={ANIMATED_STICKERS_PATHS.guard}
@@ -203,15 +233,16 @@ function PasswordForm({
               nonInteractive
             />
           )}
-          {!isSmallHeight && <div className={styles.title}>{lang(title)}</div>}
+          {!isSmallHeight && title && <div className={styles.title}>{lang(title)}</div>}
           {children}
         </div>
 
         <PinPad
           isActive={isActive}
-          title={lang(hasError ? (localError || error!) : (isSmallHeight ? title : actionName))}
+          title={lang(hasError ? (localError || error!) : (isSmallHeight && title ? title : actionName))}
           type={hasError ? 'error' : undefined}
           length={PIN_LENGTH}
+          resetStateDelayMs={resetStateDelayMs}
           value={password}
           onBiometricsClick={isNativeBiometricAuthEnabled ? handleBiometrics : undefined}
           onChange={setPassword}
@@ -246,6 +277,7 @@ function PasswordForm({
           type="password"
           isRequired
           id="first-password"
+          wrapperClassName={inputWrapperClassName}
           inputMode={isPasswordNumeric ? 'numeric' : undefined}
           error={error ? lang(error) : localError}
           placeholder={lang(placeholder)}
@@ -263,23 +295,31 @@ function PasswordForm({
     );
   }
 
+  const shouldRenderFullWidthButton = operationType === 'unlock';
+
   return (
     <div className={buildClassName(modalStyles.transitionContent, containerClassName)}>
-      <AnimatedIconWithPreview
-        tgsUrl={ANIMATED_STICKERS_PATHS.holdTon}
-        previewUrl={ANIMATED_STICKERS_PATHS.holdTonPreview}
-        play={isActive}
-        size={stickerSize}
-        nonInteractive
-        noLoop={false}
-        className={styles.sticker}
-      />
+      {!noAnimatedIcon && (
+        <AnimatedIconWithPreview
+          tgsUrl={ANIMATED_STICKERS_PATHS.holdTon}
+          previewUrl={ANIMATED_STICKERS_PATHS.holdTonPreview}
+          play={isActive}
+          size={stickerSize}
+          nonInteractive
+          noLoop={false}
+          className={styles.sticker}
+        />
+      )}
 
       {children}
 
       {isBiometricAuthEnabled ? renderBiometricPrompt() : renderPasswordForm()}
 
-      <div className={modalStyles.footerButtons}>
+      <div
+        className={
+          buildClassName(modalStyles.footerButtons, shouldRenderFullWidthButton && modalStyles.footerButtonFullWidth)
+        }
+      >
         {onCancel && (
           <Button
             onClick={isBiometricAuthEnabled && isLoading ? undefined : onCancel}
@@ -307,12 +347,29 @@ function PasswordForm({
             isLoading={isLoading}
             isDisabled={isSubmitDisabled}
             onClick={!isLoading ? handleSubmit : undefined}
-            className={modalStyles.buttonHalfWidth}
+            className={!shouldRenderFullWidthButton ? modalStyles.buttonHalfWidth : modalStyles.buttonFullWidth}
           >
             {submitLabel || lang('Send')}
           </Button>
         )}
       </div>
+      <Modal
+        isOpen={isResetBiometricsWarningOpen}
+        isCompact
+        title={lang('Biometric authentication failed')}
+        onClose={closeResetBiometricsWarning}
+      >
+        <p className={modalStyles.text}>
+          {lang('Reinstall biometrics in your device\'s system settings, or use a passcode.')}
+        </p>
+
+        <div className={modalStyles.buttons}>
+          <Button className={modalStyles.button} onClick={closeResetBiometricsWarning}>{lang('Close')}</Button>
+          <Button isPrimary className={modalStyles.button} onClick={handleOpenSettings}>
+            {lang('Settings')}
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

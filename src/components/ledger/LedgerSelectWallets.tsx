@@ -11,6 +11,7 @@ import { toDecimal } from '../../util/decimals';
 import { formatCurrency } from '../../util/formatNumber';
 import { shortenAddress } from '../../util/shortenAddress';
 
+import useHideBottomBar from '../../hooks/useHideBottomBar';
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
@@ -18,12 +19,15 @@ import useLastCallback from '../../hooks/useLastCallback';
 import Button from '../ui/Button';
 import ModalHeader from '../ui/ModalHeader';
 
+import settingsStyles from '../settings/Settings.module.scss';
 import styles from './LedgerModal.module.scss';
 
 type OwnProps = {
   isActive?: boolean;
+  isStatic?: boolean;
   hardwareWallets?: LedgerWalletInfo[];
   accounts?: Record<string, Account>;
+  onBackButtonClick?: NoneToVoidFunction;
   onCancel?: NoneToVoidFunction;
   onClose: NoneToVoidFunction;
 };
@@ -33,8 +37,10 @@ const ACCOUNT_BALANCE_DECIMALS = 3;
 
 function LedgerSelectWallets({
   isActive,
+  isStatic,
   hardwareWallets,
   accounts,
+  onBackButtonClick,
   onCancel,
   onClose,
 }: OwnProps) {
@@ -51,6 +57,8 @@ function LedgerSelectWallets({
     isActive,
     onBack: onCancel ?? onClose,
   });
+
+  useHideBottomBar(Boolean(isActive));
 
   const handleAccountToggle = useLastCallback((index: number) => {
     if (selectedAccountIndices.includes(index)) {
@@ -143,8 +151,25 @@ function LedgerSelectWallets({
 
   return (
     <>
-      <ModalHeader title={title} onClose={onClose} />
-      <div className={styles.container}>
+      {!isStatic ? (
+        <ModalHeader
+          title={title}
+          onBackButtonClick={onBackButtonClick}
+          onClose={!onBackButtonClick ? onClose : undefined}
+        />
+      ) : (
+        <div className={settingsStyles.header}>
+          <Button isSimple isText onClick={onClose} className={settingsStyles.headerBack}>
+            <i className={buildClassName(settingsStyles.iconChevron, 'icon-chevron-left')} aria-hidden />
+            <span>{lang('Back')}</span>
+          </Button>
+          <span className={settingsStyles.headerTitle}>{title}</span>
+        </div>
+      )}
+      <div className={buildClassName(
+        styles.container, isStatic && styles.containerStatic, isStatic && 'static-container',
+      )}
+      >
         {renderAccounts()}
         <div className={styles.actionBlock}>
           <Button

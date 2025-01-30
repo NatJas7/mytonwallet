@@ -5,7 +5,12 @@ import { ApiCommonError, ApiTransactionDraftError, ApiTransactionError } from '.
 import { AppState } from '../../types';
 
 import {
-  DEFAULT_SWAP_SECOND_TOKEN_SLUG, IS_CAPACITOR, IS_EXTENSION, TONCOIN,
+  DEFAULT_SWAP_FISRT_TOKEN_SLUG,
+  DEFAULT_SWAP_SECOND_TOKEN_SLUG,
+  DEFAULT_TRANSFER_TOKEN_SLUG,
+  IS_CAPACITOR,
+  IS_EXTENSION,
+  TONCOIN,
 } from '../../../config';
 import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { parseAccountId } from '../../../util/account';
@@ -39,6 +44,7 @@ import {
   selectNetworkAccounts,
   selectNetworkAccountsMemoized,
   selectNewestTxTimestamps,
+  selectSwapTokens,
 } from '../../selectors';
 
 const ANIMATION_DELAY_MS = 320;
@@ -108,6 +114,7 @@ addActionHandler('afterSignIn', (global, actions) => {
 
   setTimeout(() => {
     actions.resetAuth();
+
     processDeeplinkAfterSignIn();
   }, ANIMATION_DELAY_MS);
 });
@@ -154,15 +161,43 @@ addActionHandler('dismissDialog', (global) => {
 
 addActionHandler('selectToken', (global, actions, { slug } = {}) => {
   if (slug) {
-    if (slug === TONCOIN.slug) {
-      actions.setDefaultSwapParams({ tokenInSlug: DEFAULT_SWAP_SECOND_TOKEN_SLUG, tokenOutSlug: slug });
-    } else {
-      actions.setDefaultSwapParams({ tokenOutSlug: slug });
+    const isToncoin = slug === TONCOIN.slug;
+    const tokens = selectSwapTokens(global);
+
+    if (isToncoin || tokens?.some((token) => token.slug === slug)) {
+      if (isToncoin) {
+        actions.setDefaultSwapParams({ tokenInSlug: DEFAULT_SWAP_SECOND_TOKEN_SLUG, tokenOutSlug: slug });
+      } else {
+        actions.setDefaultSwapParams({ tokenOutSlug: slug });
+      }
+      actions.changeTransferToken({ tokenSlug: slug });
     }
-    actions.changeTransferToken({ tokenSlug: slug });
   } else {
-    actions.setDefaultSwapParams({ tokenInSlug: undefined, tokenOutSlug: undefined });
-    actions.changeTransferToken({ tokenSlug: TONCOIN.slug });
+    const currentActivityToken = global.byAccountId[global.currentAccountId!].currentTokenSlug;
+
+    const isDefaultFirstTokenOutSwap = global.currentSwap.tokenOutSlug === DEFAULT_SWAP_FISRT_TOKEN_SLUG
+    && global.currentSwap.tokenInSlug === DEFAULT_SWAP_SECOND_TOKEN_SLUG;
+
+    const shouldResetSwap = global.currentSwap.tokenOutSlug === currentActivityToken
+    && (
+      (
+        global.currentSwap.tokenInSlug === DEFAULT_SWAP_FISRT_TOKEN_SLUG
+        && global.currentSwap.tokenOutSlug !== DEFAULT_SWAP_SECOND_TOKEN_SLUG
+      )
+    || isDefaultFirstTokenOutSwap
+    );
+
+    if (shouldResetSwap) {
+      actions.setDefaultSwapParams({ tokenInSlug: undefined, tokenOutSlug: undefined, withResetAmount: true });
+    }
+
+    const shouldResetTransfer = (global.currentTransfer.tokenSlug === currentActivityToken
+    && global.currentTransfer.tokenSlug !== DEFAULT_TRANSFER_TOKEN_SLUG)
+    && !global.currentTransfer.nfts?.length;
+
+    if (shouldResetTransfer) {
+      actions.changeTransferToken({ tokenSlug: DEFAULT_TRANSFER_TOKEN_SLUG, withResetAmount: true });
+    }
   }
 
   return updateCurrentAccountState(global, { currentTokenSlug: slug });
@@ -339,12 +374,14 @@ addActionHandler('signOut', async (global, actions, payload) => {
   const { isFromAllAccounts } = payload || {};
 
   const network = selectCurrentNetwork(global);
-  const accountIds = Object.keys(selectNetworkAccounts(global)!);
+  const accounts = selectNetworkAccounts(global)!;
+  const accountIds = Object.keys(accounts);
 
   const otherNetwork = network === 'mainnet' ? 'testnet' : 'mainnet';
   const otherNetworkAccountIds = Object.keys(selectNetworkAccountsMemoized(otherNetwork, global.accounts?.byId)!);
 
   if (isFromAllAccounts || accountIds.length === 1) {
+    actions.deleteAllNotificationAccounts({ accountIds });
     if (otherNetworkAccountIds.length) {
       await callApi('removeNetworkAccounts', network);
 
@@ -403,6 +440,7 @@ addActionHandler('signOut', async (global, actions, payload) => {
     const nextNewestTxTimestamps = selectNewestTxTimestamps(global, nextAccountId);
 
     await callApi('removeAccount', prevAccountId, nextAccountId, nextNewestTxTimestamps);
+    actions.deleteNotificationAccount({ accountId: prevAccountId });
 
     global = getGlobal();
 

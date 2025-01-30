@@ -1,6 +1,4 @@
-@import '../../../styles/variables';
-
-@import '../../../styles/mixins/index';
+@import '../../../styles/mixins';
 
 .actionSheetDialog {
   width: 100%;
@@ -31,7 +29,7 @@
 
   margin: -1rem 0 0;
 
-  border-bottom: 0.75rem solid var(  --color-background-first-disabled);
+  border-bottom: 0.75rem solid var(--color-background-first-disabled);
   border-radius: 0;
 }
 
@@ -82,6 +80,12 @@
       background-color: var(--color-interactive-item-hover);
     }
   }
+
+  &.disabled {
+    pointer-events: none;
+
+    opacity: 0.4;
+  }
 }
 
 .actionIcon {
@@ -91,7 +95,7 @@
   height: 1.875rem;
 
   font-size: 1.875rem;
-  color: var(--color-blue);
+  color: var(--color-accent);
 }
 
 .iconChevronRight {

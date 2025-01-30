@@ -24,9 +24,13 @@ import styles from './Card.module.scss';
 interface StateProps {
   addressByChain?: Account['addressByChain'];
   isTestnet?: boolean;
+  isHardwareAccount?: boolean;
+  withTextGradient?: boolean;
 }
 
-function CardAddress({ addressByChain, isTestnet }: StateProps) {
+function CardAddress({
+  addressByChain, isTestnet, isHardwareAccount, withTextGradient,
+}: StateProps) {
   const { showNotification } = getActions();
 
   const lang = useLang();
@@ -119,7 +123,7 @@ function CardAddress({ addressByChain, isTestnet }: StateProps) {
       <div className={styles.addressContainer}>
         <button
           type="button"
-          className={styles.address}
+          className={buildClassName(styles.address, withTextGradient && 'gradientText')}
           onClick={() => openMenu()}
         >
           <span className={buildClassName(styles.itemName, 'itemName')}>
@@ -137,9 +141,10 @@ function CardAddress({ addressByChain, isTestnet }: StateProps) {
 
   return (
     <div className={styles.addressContainer}>
+      {isHardwareAccount && <i className={buildClassName(styles.icon, 'icon-ledger')} aria-hidden />}
       <button
         type="button"
-        className={styles.address}
+        className={buildClassName(styles.address, withTextGradient && 'gradientText')}
         aria-label={lang('Copy wallet address')}
         onClick={() => handleCopyAddress(addressByChain![chain])}
       >
@@ -161,10 +166,11 @@ function CardAddress({ addressByChain, isTestnet }: StateProps) {
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const { addressByChain } = selectAccount(global, global.currentAccountId!) || {};
+  const { addressByChain, isHardware } = selectAccount(global, global.currentAccountId!) || {};
 
   return {
     addressByChain,
     isTestnet: global.settings.isTestnet,
+    isHardwareAccount: isHardware,
   };
 })(CardAddress));

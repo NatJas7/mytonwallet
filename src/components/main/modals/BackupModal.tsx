@@ -9,7 +9,7 @@ import { selectCurrentAccountState } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
 import { vibrateOnError, vibrateOnSuccess } from '../../../util/capacitor';
 import isMnemonicPrivateKey from '../../../util/isMnemonicPrivateKey';
-import resolveModalTransitionName from '../../../util/resolveModalTransitionName';
+import resolveSlideTransitionName from '../../../util/resolveSlideTransitionName';
 import { callApi } from '../../../api';
 
 import useLang from '../../../hooks/useLang';
@@ -143,7 +143,7 @@ function BackupModal({
               isLoading={isLoading}
               error={error}
               withCloseButton={IS_CAPACITOR}
-              submitLabel={lang('Back Up')}
+              submitLabel={lang('$back_up_auth')}
               cancelLabel={lang('Cancel')}
               onSubmit={handlePasswordSubmit}
               onCancel={onClose}
@@ -194,7 +194,7 @@ function BackupModal({
       onCloseAnimationEnd={handleModalClose}
     >
       <Transition
-        name={resolveModalTransitionName()}
+        name={resolveSlideTransitionName()}
         className={buildClassName(modalStyles.transition, 'custom-scroll')}
         slideClassName={modalStyles.transitionSlide}
         activeKey={currentSlide}

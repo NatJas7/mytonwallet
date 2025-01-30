@@ -2,14 +2,14 @@ import type { TeactNode } from '../../../../lib/teact/teact';
 import React, { memo, useMemo, useState } from '../../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../../global';
 
-import type { ApiBaseCurrency } from '../../../../api/types';
+import type { ApiBaseCurrency, ApiStakingState } from '../../../../api/types';
 import type { PriceHistoryPeriods, TokenPeriod, UserToken } from '../../../../global/types';
 
 import { DEFAULT_PRICE_CURRENCY, HISTORY_PERIODS, TONCOIN } from '../../../../config';
-import { selectCurrentAccountState } from '../../../../global/selectors';
+import { selectAccountStakingStates, selectCurrentAccountState } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
 import { vibrate } from '../../../../util/capacitor';
-import { formatShortDay } from '../../../../util/dateFormat';
+import { formatShortDay, SECOND } from '../../../../util/dateFormat';
 import { toBig, toDecimal } from '../../../../util/decimals';
 import { formatCurrency, getShortCurrencySymbol } from '../../../../util/formatNumber';
 import { round } from '../../../../util/round';
@@ -28,7 +28,7 @@ import useTimeout from '../../../../hooks/useTimeout';
 
 import TokenPriceChart from '../../../common/TokenPriceChart';
 import Button from '../../../ui/Button';
-import Loading from '../../../ui/Loading';
+import Spinner from '../../../ui/Spinner';
 import Transition from '../../../ui/Transition';
 import ChartHistorySwitcher from './ChartHistorySwitcher';
 import CurrencySwitcher from './CurrencySwitcher';
@@ -41,23 +41,23 @@ interface OwnProps {
   token: UserToken;
   classNames: string;
   isUpdating?: boolean;
-  onApyClick?: NoneToVoidFunction;
+  onYieldClick: (stakingId?: string) => void;
   onClose: NoneToVoidFunction;
 }
 
 interface StateProps {
   period?: TokenPeriod;
-  apyValue: number;
   baseCurrency?: ApiBaseCurrency;
   historyPeriods?: PriceHistoryPeriods;
   tokenAddress?: string;
   isTestnet?: boolean;
+  stakingStates?: ApiStakingState[];
 }
 
 const OFFLINE_TIMEOUT = 120000; // 2 minutes
 
 const CHART_DIMENSIONS = { width: 300, height: 64 };
-const INTERVAL = 5 * 1000;
+const INTERVAL = 5 * SECOND;
 
 const DEFAULT_PERIOD = HISTORY_PERIODS[0];
 
@@ -66,13 +66,13 @@ function TokenCard({
   token,
   classNames,
   period = DEFAULT_PERIOD,
-  apyValue,
   isUpdating,
-  onApyClick,
+  onYieldClick,
   onClose,
   baseCurrency,
   historyPeriods,
   tokenAddress,
+  stakingStates,
 }: OwnProps & StateProps) {
   const { loadPriceHistory } = getActions();
   const lang = useLang();
@@ -98,6 +98,15 @@ function TokenCard({
   const {
     slug, symbol, amount, image, name, price: lastPrice, decimals,
   } = token;
+
+  const { annualYield, yieldType, id: stakingId } = useMemo(() => {
+    return stakingStates?.reduce((bestState, state) => {
+      if (state.tokenSlug === slug && (!bestState || state.balance > bestState.balance)) {
+        return state;
+      }
+      return bestState;
+    }, undefined as ApiStakingState | undefined);
+  }, [stakingStates, slug]) ?? {};
 
   const logoPath = slug === TONCOIN.slug
     ? tonUrl
@@ -180,34 +189,34 @@ function TokenCard({
           <i className="icon-chevron-left" aria-hidden />
         </Button>
         <img className={styles.tokenLogo} src={logoPath} alt={token.name} />
-        <div>
+        <div className={styles.tokenInfoHeader}>
           <b className={styles.tokenAmount}>{formatCurrency(toDecimal(amount, token.decimals), symbol)}</b>
-          <span className={styles.tokenName}>
-            {name}
-            {token.slug === TONCOIN.slug && (
-              <span className={styles.apy} onClick={onApyClick}>
-                APY {apyValue}%
+          {withChange && (
+            <div className={styles.tokenValue}>
+              <div className={styles.currencySwitcher} role="button" tabIndex={0} onClick={openCurrencyMenu}>
+                ≈&thinsp;{formatCurrency(value, currencySymbol, undefined, true)}
+                <i className={buildClassName('icon', 'icon-caret-down', styles.iconCaretSmall)} aria-hidden />
+              </div>
+              <CurrencySwitcher
+                isOpen={isCurrencyMenuOpen}
+                menuPositionHorizontal="right"
+                excludedCurrency={token.symbol}
+                onClose={closeCurrencyMenu}
+                onChange={handleCurrencyChange}
+              />
+            </div>
+          )}
+        </div>
+        <div className={styles.tokenInfoSubheader}>
+          <span className={styles.tokenTitle}>
+            <span className={styles.tokenName}>{name}</span>
+            {yieldType && (
+              <span className={styles.apy} onClick={() => onYieldClick(stakingId)}>
+                {yieldType} {annualYield}%
               </span>
             )}
           </span>
-        </div>
-      </div>
-
-      {withChange && (
-        <div className={styles.tokenPrice}>
-          <span className={styles.currencySwitcher} role="button" tabIndex={0} onClick={openCurrencyMenu}>
-            ≈&thinsp;{formatCurrency(value, currencySymbol, undefined, true)}
-            <i className={buildClassName('icon', 'icon-caret-down', styles.iconCaretSmall)} aria-hidden />
-          </span>
-          <CurrencySwitcher
-            isOpen={isCurrencyMenuOpen}
-            menuPositionHorizontal="right"
-            excludedCurrency={token.symbol}
-            onClose={closeCurrencyMenu}
-            onChange={handleCurrencyChange}
-          />
-
-          {Boolean(changeValue) && (
+          {withChange && Boolean(changeValue) && (
             <div className={styles.tokenChange}>
               {changePrefix}
               &thinsp;
@@ -215,12 +224,12 @@ function TokenCard({
             </div>
           )}
         </div>
-      )}
+      </div>
 
       <Transition activeKey={!history ? 0 : history.length ? HISTORY_PERIODS.indexOf(period) + 1 : -1} name="fade">
         {!history ? (
           <div className={buildClassName(styles.isLoading)}>
-            <Loading color="white" className={styles.center} />
+            <Spinner color="white" className={styles.center} />
           </div>
         ) : history?.length ? (
           <>
@@ -236,7 +245,7 @@ function TokenCard({
             />
 
             <div className={styles.tokenHistoryPrice}>
-              {formatCurrency(history![0][1], currencySymbol, undefined, true)}
+              {formatCurrency(history![0][1], currencySymbol, 2, true)}
               <div className={styles.tokenPriceDate}>{formatShortDay(lang.code!, historyStartDay!)}</div>
             </div>
           </>
@@ -271,16 +280,18 @@ function TokenCard({
 
 export default memo(
   withGlobal<OwnProps>((global, ownProps): StateProps => {
+    const slug = ownProps.token.slug;
     const accountState = selectCurrentAccountState(global);
-    const tokenAddress = global.tokenInfo.bySlug[ownProps.token.slug]?.tokenAddress;
+    const tokenAddress = global.tokenInfo.bySlug[slug]?.tokenAddress;
+    const stakingStates = selectAccountStakingStates(global, global.currentAccountId!);
 
     return {
       isTestnet: global.settings.isTestnet,
       period: accountState?.currentTokenPeriod,
-      apyValue: accountState?.staking?.apy || 0,
       baseCurrency: global.settings.baseCurrency,
       historyPeriods: global.tokenPriceHistory.bySlug[ownProps.token.slug],
       tokenAddress,
+      stakingStates,
     };
   })(TokenCard),
 );

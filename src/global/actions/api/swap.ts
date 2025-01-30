@@ -1,9 +1,12 @@
-import type { ApiSubmitTransferWithDieselResult } from '../../../api/chains/ton/types';
+import type { ApiCheckTransactionDraftResult, ApiSubmitTransferWithDieselResult } from '../../../api/chains/ton/types';
 import type { ApiSubmitTransferOptions, ApiSubmitTransferResult } from '../../../api/methods/types';
 import type {
   ApiChain,
+  ApiSwapActivity,
   ApiSwapBuildRequest,
   ApiSwapCexCreateTransactionRequest,
+  ApiSwapEstimateResponse,
+  ApiSwapEstimateVariant,
   ApiSwapHistoryItem,
   ApiSwapPairAsset,
 } from '../../../api/types';
@@ -15,7 +18,6 @@ import { ApiCommonError } from '../../../api/types';
 import {
   ActiveTab,
   SwapErrorType,
-  SwapFeeSource,
   SwapInputSource,
   SwapState,
   SwapType,
@@ -23,15 +25,14 @@ import {
 
 import {
   DEFAULT_FEE,
+  DEFAULT_SWAP_FISRT_TOKEN_SLUG,
   DEFAULT_SWAP_SECOND_TOKEN_SLUG,
   IS_CAPACITOR,
   TONCOIN,
-  TRX,
   TRX_SWAP_COUNT_FEE_ADDRESS,
 } from '../../../config';
 import { Big } from '../../../lib/big.js';
 import { vibrateOnError, vibrateOnSuccess } from '../../../util/capacitor';
-import { getChainConfig } from '../../../util/chain';
 import {
   fromDecimal, getIsPositiveDecimal, roundDecimal, toDecimal,
 } from '../../../util/decimals';
@@ -40,7 +41,7 @@ import { buildCollectionByKey, pick } from '../../../util/iteratees';
 import { callActionInMain, callActionInNative } from '../../../util/multitab';
 import { pause } from '../../../util/schedulers';
 import { buildSwapId } from '../../../util/swap/buildSwapId';
-import { getIsTonToken } from '../../../util/tokens';
+import { getIsTonToken, getNativeToken } from '../../../util/tokens';
 import { IS_DELEGATED_BOTTOM_SHEET, IS_DELEGATING_BOTTOM_SHEET } from '../../../util/windowEnvironment';
 import { callApi } from '../../../api';
 import { addActionHandler, getGlobal, setGlobal } from '../..';
@@ -56,6 +57,9 @@ import {
   selectAccount,
   selectAccountState,
   selectCurrentAccount,
+  selectCurrentAccountTokenBalance,
+  selectCurrentSwapTokenIn,
+  selectCurrentSwapTokenOut,
   selectCurrentToncoinBalance,
   selectIsMultichainAccount,
 } from '../../selectors';
@@ -78,21 +82,33 @@ const SERVER_ERRORS_MAP = {
   'Too small amount': SwapErrorType.TooSmallAmount,
 };
 
+const feeResetParams = {
+  networkFee: undefined,
+  realNetworkFee: undefined,
+  swapFee: undefined,
+  swapFeePercent: undefined,
+  ourFee: undefined,
+  ourFeePercent: undefined,
+  dieselStatus: undefined,
+  dieselFee: undefined,
+};
+
 function buildSwapBuildRequest(global: GlobalState): ApiSwapBuildRequest {
   const {
-    dexLabel,
+    currentDexLabel,
     amountIn,
     amountOut,
     amountOutMin,
-    tokenInSlug,
-    tokenOutSlug,
     slippage,
     networkFee,
     swapFee,
+    ourFee,
+    dieselFee,
+    realNetworkFee,
   } = global.currentSwap;
 
-  const tokenIn = global.swapTokenInfo!.bySlug[tokenInSlug!];
-  const tokenOut = global.swapTokenInfo!.bySlug[tokenOutSlug!];
+  const tokenIn = selectCurrentSwapTokenIn(global)!;
+  const tokenOut = selectCurrentSwapTokenOut(global)!;
   const from = resolveSwapAssetId(tokenIn);
   const to = resolveSwapAssetId(tokenOut);
   const fromAmount = amountIn!;
@@ -111,11 +127,57 @@ function buildSwapBuildRequest(global: GlobalState): ApiSwapBuildRequest {
     toMinAmount: amountOutMin!,
     slippage,
     fromAddress: account?.addressByChain[tokenIn.chain as ApiChain] || account?.addressByChain.ton!,
-    dexLabel: dexLabel!,
-    networkFee: networkFee!,
-    swapFee: swapFee!,
     shouldTryDiesel,
+    dexLabel: currentDexLabel!,
+    networkFee: realNetworkFee ?? networkFee!,
+    swapFee: swapFee!,
+    ourFee: ourFee!,
+    dieselFee,
   };
+}
+
+function buildSwapEstimates(estimate: ApiSwapEstimateResponse): ApiSwapEstimateVariant[] {
+  const bestEstimate: ApiSwapEstimateVariant = {
+    ...pick(estimate, [
+      'fromAmount',
+      'toAmount',
+      'toMinAmount',
+      'impact',
+      'dexLabel',
+      'networkFee',
+      'realNetworkFee',
+      'swapFee',
+      'swapFeePercent',
+      'ourFee',
+      'dieselFee',
+      'networkFee',
+    ]),
+  };
+
+  const result: ApiSwapEstimateVariant[] = [
+    bestEstimate,
+    ...(estimate.other ?? []),
+  ];
+
+  return result.sort((a, b) => a.dexLabel.localeCompare(b.dexLabel));
+}
+
+function processNativeMaxSwap(global: GlobalState) {
+  const tokenIn = selectCurrentSwapTokenIn(global)!;
+  let fromAmount = global.currentSwap.amountIn ?? '0';
+  let isFromAmountMax = false;
+
+  if (
+    global.currentSwap.amountIn
+    && global.currentSwap.swapType === SwapType.OnChain
+    && global.currentSwap.inputSource === SwapInputSource.In
+    && global.currentSwap.isMaxAmount
+  ) {
+    const tokenBalance = selectCurrentAccountTokenBalance(global, tokenIn.slug);
+    fromAmount = toDecimal(tokenBalance, tokenIn.decimals);
+    isFromAmountMax = true;
+  }
+  return { fromAmount, isFromAmountMax };
 }
 
 function getSupportedChains(global: GlobalState) {
@@ -176,19 +238,27 @@ addActionHandler('startSwap', async (global, actions, payload) => {
 
 addActionHandler('setDefaultSwapParams', (global, actions, payload) => {
   let { tokenInSlug: requiredTokenInSlug, tokenOutSlug: requiredTokenOutSlug } = payload ?? {};
+  const { withResetAmount } = payload ?? {};
 
-  requiredTokenInSlug = requiredTokenInSlug || TONCOIN.slug;
+  requiredTokenInSlug = requiredTokenInSlug || DEFAULT_SWAP_FISRT_TOKEN_SLUG;
   requiredTokenOutSlug = requiredTokenOutSlug || DEFAULT_SWAP_SECOND_TOKEN_SLUG;
+  if (
+    global.currentSwap.tokenInSlug === requiredTokenInSlug
+    && global.currentSwap.tokenOutSlug === requiredTokenOutSlug
+    && !withResetAmount
+  ) {
+    return;
+  }
 
   global = updateCurrentSwap(global, {
+    ...feeResetParams,
     tokenInSlug: requiredTokenInSlug,
     tokenOutSlug: requiredTokenOutSlug,
     priceImpact: 0,
-    transactionFee: '0',
-    swapFee: '0',
-    networkFee: 0,
     amountOutMin: '0',
     inputSource: SwapInputSource.In,
+    isDexLabelChanged: undefined,
+    ...(withResetAmount ? { amountIn: undefined, amountOut: undefined } : undefined),
   });
   setGlobal(global);
 });
@@ -201,17 +271,15 @@ addActionHandler('cancelSwap', (global, actions, { shouldReset } = {}) => {
 
     global = clearCurrentSwap(global);
     global = updateCurrentSwap(global, {
+      ...feeResetParams,
       tokenInSlug,
       tokenOutSlug,
       priceImpact: 0,
-      transactionFee: undefined,
-      swapFee: undefined,
-      networkFee: 0,
-      realNetworkFee: 0,
       amountIn: undefined,
       amountOutMin: undefined,
       amountOut: undefined,
       inputSource: SwapInputSource.In,
+      isDexLabelChanged: undefined,
       swapType,
       pairs,
     });
@@ -285,8 +353,9 @@ addActionHandler('submitSwap', async (global, actions, { password }) => {
     fromAmount: swapBuildRequest.fromAmount,
     to: swapBuildRequest.to,
     toAmount: swapBuildRequest.toAmount,
-    networkFee: global.currentSwap.networkFee!,
+    networkFee: global.currentSwap.realNetworkFee ?? global.currentSwap.networkFee!,
     swapFee: global.currentSwap.swapFee!,
+    ourFee: global.currentSwap.ourFee,
     txIds: [],
   };
 
@@ -462,6 +531,7 @@ addActionHandler('switchSwapTokens', (global) => {
       : SwapType.CrosschainFromWallet;
 
   global = updateCurrentSwap(global, {
+    isMaxAmount: false,
     amountIn: amountOut,
     amountOut: amountIn,
     tokenInSlug: tokenOutSlug,
@@ -497,6 +567,8 @@ addActionHandler('setSwapTokenIn', (global, actions, { tokenSlug: newTokenInSlug
     tokenOutSlug: newTokenOutSlug,
     isEstimating: isFilled,
     shouldEstimate: true,
+    isMaxAmount: false,
+    isDexLabelChanged: undefined,
   });
   setGlobal(global);
 });
@@ -524,6 +596,7 @@ addActionHandler('setSwapTokenOut', (global, actions, { tokenSlug: newTokenOutSl
     tokenInSlug: newTokenInSlug,
     isEstimating: isFilled,
     shouldEstimate: true,
+    isDexLabelChanged: undefined,
   });
   setGlobal(global);
 });
@@ -536,6 +609,14 @@ addActionHandler('setSwapAmountIn', (global, actions, { amount }) => {
     inputSource: SwapInputSource.In,
     isEstimating,
     shouldEstimate: true,
+    isDexLabelChanged: undefined,
+  });
+  setGlobal(global);
+});
+
+addActionHandler('setSwapIsMaxAmount', (global, actions, { isMaxAmount }) => {
+  global = updateCurrentSwap(global, {
+    isMaxAmount,
   });
   setGlobal(global);
 });
@@ -548,6 +629,7 @@ addActionHandler('setSwapAmountOut', (global, actions, { amount }) => {
     inputSource: SwapInputSource.Out,
     isEstimating,
     shouldEstimate: true,
+    isDexLabelChanged: undefined,
   });
   setGlobal(global);
 });
@@ -561,340 +643,336 @@ addActionHandler('setSlippage', (global, actions, { slippage }) => {
   setGlobal(global);
 });
 
-addActionHandler('estimateSwap', async (global, actions, { shouldBlock, isEnoughToncoin }) => {
+addActionHandler('estimateSwap', async (global, actions, payload) => {
   if (isEstimateSwapBeingExecuted) return;
 
-  isEstimateSwapBeingExecuted = true;
-  const resetParams = {
-    amountOutMin: '0',
-    transactionFee: '0',
-    swapFee: '0',
-    networkFee: 0,
-    realNetworkFee: 0,
-    priceImpact: 0,
-    errorType: undefined,
-    isEstimating: false,
-  };
+  try {
+    isEstimateSwapBeingExecuted = true;
 
-  global = updateCurrentSwap(global, {
-    shouldEstimate: false,
-  });
+    const { shouldBlock, toncoinBalance, isEnoughToncoin } = payload;
 
-  // Check for empty string
-  if ((global.currentSwap.amountIn === undefined && global.currentSwap.inputSource === SwapInputSource.In)
+    const resetParams = {
+      ...feeResetParams,
+      amountOutMin: '0',
+      priceImpact: 0,
+      errorType: undefined,
+      shouldEstimate: false,
+      isEstimating: false,
+    };
+
+    // Check for empty string
+    if ((global.currentSwap.amountIn === undefined && global.currentSwap.inputSource === SwapInputSource.In)
       || (global.currentSwap.amountOut === undefined && global.currentSwap.inputSource === SwapInputSource.Out)) {
+      global = updateCurrentSwap(global, {
+        amountIn: undefined,
+        amountOut: undefined,
+        ...resetParams,
+      });
+      setGlobal(global);
+      return;
+    }
+
+    const pairsBySlug = global.currentSwap.pairs?.bySlug ?? {};
+    const canSwap = global.currentSwap.tokenOutSlug! in pairsBySlug;
+
+    // Check for invalid pair
+    if (!canSwap) {
+      const amount = global.currentSwap.inputSource === SwapInputSource.In
+        ? { amountOut: undefined }
+        : { amountIn: undefined };
+
+      global = updateCurrentSwap(global, {
+        ...amount,
+        ...resetParams,
+        errorType: SwapErrorType.InvalidPair,
+      });
+      setGlobal(global);
+      return;
+    }
+
     global = updateCurrentSwap(global, {
-      amountIn: undefined,
-      amountOut: undefined,
-      ...resetParams,
+      shouldEstimate: false,
+      isEstimating: shouldBlock,
     });
     setGlobal(global);
-    isEstimateSwapBeingExecuted = false;
-    return;
-  }
 
-  const pairsBySlug = global.currentSwap.pairs?.bySlug ?? {};
-  const canSwap = global.currentSwap.tokenOutSlug! in pairsBySlug;
+    const tokenIn = global.swapTokenInfo!.bySlug[global.currentSwap.tokenInSlug!];
+    const tokenOut = global.swapTokenInfo!.bySlug[global.currentSwap.tokenOutSlug!];
 
-  // Check for invalid pair
-  if (!canSwap) {
-    const amount = global.currentSwap.inputSource === SwapInputSource.In
-      ? { amountOut: undefined }
-      : { amountIn: undefined };
+    const from = tokenIn.slug === TONCOIN.slug ? tokenIn.symbol : tokenIn.tokenAddress!;
+    const to = tokenOut.slug === TONCOIN.slug ? tokenOut.symbol : tokenOut.tokenAddress!;
+    const { fromAmount, isFromAmountMax } = processNativeMaxSwap(global);
+    const toAmount = global.currentSwap.amountOut ?? '0';
+    const fromAddress = selectCurrentAccount(global)!.addressByChain.ton;
 
-    global = updateCurrentSwap(global, {
-      ...amount,
-      ...resetParams,
-      errorType: SwapErrorType.InvalidPair,
+    const estimateAmount = global.currentSwap.inputSource === SwapInputSource.In ? { fromAmount } : { toAmount };
+
+    const shouldTryDiesel = isEnoughToncoin === false;
+
+    const estimate = await callApi('swapEstimate', global.currentAccountId!, {
+      ...estimateAmount,
+      from,
+      to,
+      slippage: global.currentSwap.slippage,
+      fromAddress,
+      shouldTryDiesel,
+      isFromAmountMax,
+      toncoinBalance: toDecimal(toncoinBalance ?? 0n, TONCOIN.decimals),
     });
-    setGlobal(global);
-    isEstimateSwapBeingExecuted = false;
-    return;
-  }
 
-  global = updateCurrentSwap(global, {
-    isEstimating: shouldBlock,
-  });
-  setGlobal(global);
+    global = getGlobal();
 
-  const tokenIn = global.swapTokenInfo!.bySlug[global.currentSwap.tokenInSlug!];
-  const tokenOut = global.swapTokenInfo!.bySlug[global.currentSwap.tokenOutSlug!];
+    if (!estimate || 'error' in estimate) {
+      const errorType = estimate?.error && estimate?.error in SERVER_ERRORS_MAP
+        ? SERVER_ERRORS_MAP[estimate.error as keyof typeof SERVER_ERRORS_MAP]
+        : SwapErrorType.UnexpectedError;
 
-  const from = tokenIn.slug === TONCOIN.slug ? tokenIn.symbol : tokenIn.tokenAddress!;
-  const to = tokenOut.slug === TONCOIN.slug ? tokenOut.symbol : tokenOut.tokenAddress!;
-  const fromAmount = global.currentSwap.amountIn ?? '0';
-  const toAmount = global.currentSwap.amountOut ?? '0';
-  const fromAddress = selectCurrentAccount(global)!.addressByChain.ton;
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+        errorType,
+      });
+      setGlobal(global);
+      return;
+    }
 
-  const estimateAmount = global.currentSwap.inputSource === SwapInputSource.In ? { fromAmount } : { toAmount };
+    // Check for outdated response
+    if (
+      !isFromAmountMax
+      && (
+        (
+          global.currentSwap.inputSource === SwapInputSource.In
+          && global.currentSwap.amountIn !== estimate.fromAmount
+        ) || (
+          global.currentSwap.inputSource === SwapInputSource.Out
+          && global.currentSwap.amountOut !== estimate.toAmount
+        )
+      )) {
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+      });
+      setGlobal(global);
+      return;
+    }
 
-  const shouldTryDiesel = isEnoughToncoin === false;
+    const errorType = estimate.toAmount === '0' && shouldTryDiesel
+      ? SwapErrorType.NotEnoughForFee
+      : undefined;
 
-  const estimate = await callApi('swapEstimate', {
-    ...estimateAmount,
-    from,
-    to,
-    slippage: global.currentSwap.slippage,
-    fromAddress,
-    shouldTryDiesel,
-  });
-
-  isEstimateSwapBeingExecuted = false;
-  global = getGlobal();
-
-  if (!estimate || 'error' in estimate) {
-    const errorType = estimate?.error && estimate?.error in SERVER_ERRORS_MAP
-      ? SERVER_ERRORS_MAP[estimate.error as keyof typeof SERVER_ERRORS_MAP]
-      : SwapErrorType.UnexpectedError;
+    const estimates = buildSwapEstimates(estimate);
+    const currentDexLabel = global.currentSwap.currentDexLabel && global.currentSwap.isDexLabelChanged
+    && estimates.some(({ dexLabel }) => dexLabel === global.currentSwap.currentDexLabel)
+      ? global.currentSwap.currentDexLabel
+      : estimate.dexLabel;
+    const currentEstimate = estimates.find(({ dexLabel }) => dexLabel === currentDexLabel)!;
 
     global = updateCurrentSwap(global, {
-      ...resetParams,
+      ...(
+        global.currentSwap.inputSource === SwapInputSource.In
+          ? {
+            amountOut: currentEstimate.toAmount,
+            ...(
+              isFromAmountMax
+                ? { amountIn: currentEstimate.fromAmount }
+                : undefined
+            ),
+          } : { amountIn: currentEstimate.fromAmount }
+      ),
+      bestRateDexLabel: estimate.dexLabel,
+      amountOutMin: currentEstimate.toMinAmount,
+      priceImpact: currentEstimate.impact,
+      isEstimating: false,
       errorType,
+      dieselStatus: estimate.dieselStatus,
+      estimates,
+      currentDexLabel,
+      // Fees
+      networkFee: currentEstimate.networkFee,
+      realNetworkFee: currentEstimate.realNetworkFee,
+      swapFee: currentEstimate.swapFee,
+      swapFeePercent: currentEstimate.swapFeePercent,
+      ourFee: currentEstimate.ourFee,
+      ourFeePercent: estimate.ourFeePercent,
+      dieselFee: currentEstimate.dieselFee,
     });
     setGlobal(global);
-    return;
+  } finally {
+    isEstimateSwapBeingExecuted = false;
   }
-
-  // Check for outdated response
-  if (
-    (global.currentSwap.inputSource === SwapInputSource.In
-        && global.currentSwap.amountIn !== estimate.fromAmount)
-    || (global.currentSwap.inputSource === SwapInputSource.Out
-        && global.currentSwap.amountOut !== estimate.toAmount)
-  ) {
-    global = updateCurrentSwap(global, {
-      ...resetParams,
-    });
-    setGlobal(global);
-    return;
-  }
-
-  const errorType = estimate.toAmount === '0' && shouldTryDiesel
-    ? SwapErrorType.NotEnoughForFee
-    : undefined;
-
-  // `networkFee` here does not directly include transfer fee
-  const maxTransferFee = Number(toDecimal(getChainConfig('ton').gas.maxTransfer));
-  const networkFee = estimate.networkFee + maxTransferFee;
-
-  global = updateCurrentSwap(global, {
-    ...(
-      global.currentSwap.inputSource === SwapInputSource.In
-        ? { amountOut: estimate.toAmount }
-        : { amountIn: estimate.fromAmount }
-    ),
-    amountOutMin: estimate.toMinAmount,
-    swapFee: estimate.swapFee,
-    priceImpact: estimate.impact,
-    dexLabel: estimate.dexLabel,
-    feeSource: SwapFeeSource.In,
-    isEstimating: false,
-    errorType,
-    dieselStatus: estimate.dieselStatus,
-    networkFee,
-    realNetworkFee: estimate.realNetworkFee,
-  });
-  setGlobal(global);
 });
 
 addActionHandler('estimateSwapCex', async (global, actions, { shouldBlock }) => {
   if (isEstimateCexSwapBeingExecuted) return;
 
-  isEstimateCexSwapBeingExecuted = true;
-  const amount = global.currentSwap.inputSource === SwapInputSource.In
-    ? { amountOut: undefined }
-    : { amountIn: undefined };
+  try {
+    isEstimateCexSwapBeingExecuted = true;
 
-  const resetParams = {
-    ...amount,
-    amountOutMin: '0',
-    transactionFee: '0',
-    swapFee: '0',
-    networkFee: 0,
-    realNetworkFee: 0,
-    priceImpact: 0,
-    errorType: undefined,
-    isEstimating: false,
-  };
+    const amount = global.currentSwap.inputSource === SwapInputSource.In
+      ? { amountOut: undefined }
+      : { amountIn: undefined };
 
-  const resetSwapFeeParams = {
-    shouldEstimate: false,
-    transactionFee: '0',
-    swapFee: '0',
-    networkFee: 0,
-    priceImpact: 0,
-  };
+    const resetParams = {
+      ...feeResetParams,
+      ...amount,
+      amountOutMin: '0',
+      priceImpact: 0,
+      errorType: undefined,
+      shouldEstimate: false,
+      isEstimating: false,
+    };
 
-  // Check for empty string
-  const { amountIn, amountOut, inputSource } = global.currentSwap;
-  if (((amountIn === undefined || amountIn === '0') && inputSource === SwapInputSource.In)
-      || ((amountOut === undefined || amountOut === '0') && global.currentSwap.inputSource === SwapInputSource.Out)) {
-    global = updateCurrentSwap(global, {
-      amountIn: undefined,
-      amountOut: undefined,
-      ...resetSwapFeeParams,
-      ...resetParams,
-    });
-    setGlobal(global);
-    isEstimateCexSwapBeingExecuted = false;
-    return;
-  }
+    // Check for empty string
+    const { amountIn, amountOut, inputSource } = global.currentSwap;
+    if (((amountIn === undefined || amountIn === '0') && inputSource === SwapInputSource.In)
+      || ((amountOut === undefined || amountOut === '0') && inputSource === SwapInputSource.Out)) {
+      global = updateCurrentSwap(global, {
+        amountIn: undefined,
+        amountOut: undefined,
+        ...resetParams,
+      });
+      setGlobal(global);
+      return;
+    }
 
-  const pairsBySlug = global.currentSwap.pairs?.bySlug ?? {};
-  const canSwap = global.currentSwap.tokenOutSlug! in pairsBySlug;
+    const pairsBySlug = global.currentSwap.pairs?.bySlug ?? {};
+    const canSwap = global.currentSwap.tokenOutSlug! in pairsBySlug;
 
-  // Check for invalid pair
-  if (!canSwap) {
-    global = updateCurrentSwap(global, {
-      ...resetParams,
-      ...resetSwapFeeParams,
-      errorType: SwapErrorType.InvalidPair,
-    });
-    setGlobal(global);
-    return;
-  }
-
-  global = updateCurrentSwap(global, {
-    isEstimating: shouldBlock,
-  });
-  setGlobal(global);
-
-  const tokenIn = global.swapTokenInfo!.bySlug[global.currentSwap.tokenInSlug!];
-  const tokenOut = global.swapTokenInfo!.bySlug[global.currentSwap.tokenOutSlug!];
-
-  const from = resolveSwapAssetId(tokenIn);
-  const to = resolveSwapAssetId(tokenOut);
-  const fromAmount = global.currentSwap.amountIn ?? '0';
-
-  const estimate = await callApi('swapCexEstimate', {
-    fromAmount,
-    from,
-    to,
-  });
-
-  global = getGlobal();
-  isEstimateCexSwapBeingExecuted = false;
-
-  if (!estimate || 'errors' in estimate) {
-    global = updateCurrentSwap(global, {
-      ...resetParams,
-      ...resetSwapFeeParams,
-      errorType: window.navigator.onLine ? SwapErrorType.InvalidPair : SwapErrorType.UnexpectedError,
-    });
-    setGlobal(global);
-    return;
-  }
-
-  if ('errors' in estimate) {
-    global = updateCurrentSwap(global, {
-      ...resetParams,
-      ...resetSwapFeeParams,
-      errorType: SwapErrorType.UnexpectedError,
-    });
-    setGlobal(global);
-    return;
-  }
-
-  if ('error' in estimate) {
-    const { error } = estimate as { error: string };
-    if (error.includes('requests limit')) return;
-
-    if (error.includes('Invalid amount')) {
-      const [, mode, matchedAmount] = error.match(/(Maximum|Minimal) amount is ([\d.]+) .*/) || [];
-      if (mode && matchedAmount) {
-        const isLessThanMin = mode === 'Minimal';
-        global = updateCurrentSwap(global, {
-          ...resetParams,
-          ...resetSwapFeeParams,
-          limits: isLessThanMin ? { fromMin: matchedAmount } : { fromMax: matchedAmount },
-          errorType: isLessThanMin ? SwapErrorType.ChangellyMinSwap : SwapErrorType.ChangellyMaxSwap,
-        });
-        setGlobal(global);
-        return;
-      }
+    // Check for invalid pair
+    if (!canSwap) {
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+        errorType: SwapErrorType.InvalidPair,
+      });
+      setGlobal(global);
+      return;
     }
 
     global = updateCurrentSwap(global, {
-      ...resetParams,
-      ...resetSwapFeeParams,
-      errorType: SwapErrorType.UnexpectedError,
+      shouldEstimate: false,
+      isEstimating: shouldBlock,
     });
     setGlobal(global);
-    return;
-  }
 
-  const isLessThanMin = Big(fromAmount).lt(estimate.fromMin);
-  const isBiggerThanMax = Big(fromAmount).gt(estimate.fromMax);
+    const tokenIn = global.swapTokenInfo!.bySlug[global.currentSwap.tokenInSlug!];
+    const tokenOut = global.swapTokenInfo!.bySlug[global.currentSwap.tokenOutSlug!];
 
-  if (isLessThanMin || isBiggerThanMax) {
+    const from = resolveSwapAssetId(tokenIn);
+    const to = resolveSwapAssetId(tokenOut);
+    const fromAmount = global.currentSwap.amountIn ?? '0';
+
+    const estimate = await callApi('swapCexEstimate', {
+      fromAmount,
+      from,
+      to,
+    });
+
+    global = getGlobal();
+
+    if (!estimate || 'errors' in estimate) {
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+        errorType: window.navigator.onLine ? SwapErrorType.InvalidPair : SwapErrorType.UnexpectedError,
+      });
+      setGlobal(global);
+      return;
+    }
+
+    if ('errors' in estimate) {
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+        errorType: SwapErrorType.UnexpectedError,
+      });
+      setGlobal(global);
+      return;
+    }
+
+    if ('error' in estimate) {
+      const { error } = estimate as { error: string };
+      if (error.includes('requests limit')) return;
+
+      if (error.includes('Invalid amount')) {
+        const [, mode, matchedAmount] = error.match(/(Maximum|Minimal) amount is ([\d.]+) .*/) || [];
+        if (mode && matchedAmount) {
+          const isLessThanMin = mode === 'Minimal';
+          global = updateCurrentSwap(global, {
+            ...resetParams,
+            limits: isLessThanMin ? { fromMin: matchedAmount } : { fromMax: matchedAmount },
+            errorType: isLessThanMin ? SwapErrorType.ChangellyMinSwap : SwapErrorType.ChangellyMaxSwap,
+          });
+          setGlobal(global);
+          return;
+        }
+      }
+
+      global = updateCurrentSwap(global, {
+        ...resetParams,
+        errorType: SwapErrorType.UnexpectedError,
+      });
+      setGlobal(global);
+      return;
+    }
+
+    // Check for outdated response
+    if (
+      (global.currentSwap.inputSource === SwapInputSource.In
+        && global.currentSwap.amountIn !== estimate.fromAmount)
+      || (global.currentSwap.inputSource === SwapInputSource.Out
+        && global.currentSwap.amountOut !== estimate.toAmount)
+    ) {
+      global = updateCurrentSwap(global, resetParams);
+      setGlobal(global);
+      return;
+    }
+
+    const account = global.accounts?.byId[global.currentAccountId!];
+    let networkFee: string | undefined;
+    let realNetworkFee: string | undefined;
+
+    if (
+      global.currentSwap.swapType === SwapType.CrosschainFromWallet
+      && (tokenIn.chain === 'ton' || tokenIn.chain === 'tron')
+    ) {
+      const toAddress = {
+        ton: account?.addressByChain.ton!,
+        tron: TRX_SWAP_COUNT_FEE_ADDRESS,
+      }[tokenIn.chain];
+
+      const txDraft = await callApi('checkTransactionDraft', tokenIn.chain, {
+        accountId: global.currentAccountId!,
+        toAddress,
+        tokenAddress: tokenIn.tokenAddress,
+      });
+      if (txDraft) {
+        ({ networkFee, realNetworkFee } = convertTransferFeesToSwapFees(txDraft, tokenIn.chain));
+      }
+    }
+
+    global = getGlobal();
+
     global = updateCurrentSwap(global, {
       ...resetParams,
-      ...resetSwapFeeParams,
+      amountOut: estimate.toAmount === '0' ? undefined : estimate.toAmount,
       limits: {
         fromMin: estimate.fromMin,
         fromMax: estimate.fromMax,
       },
-      errorType: isLessThanMin ? SwapErrorType.ChangellyMinSwap : SwapErrorType.ChangellyMaxSwap,
+      swapFee: estimate.swapFee,
+      networkFee,
+      realNetworkFee,
+      ourFee: '0',
+      ourFeePercent: 0,
+      dieselStatus: 'not-available',
+      amountOutMin: estimate.toAmount,
+      isEstimating: false,
+      errorType: Big(fromAmount).lt(estimate.fromMin)
+        ? SwapErrorType.ChangellyMinSwap
+        : Big(fromAmount).gt(estimate.fromMax)
+          ? SwapErrorType.ChangellyMaxSwap
+          : undefined,
     });
     setGlobal(global);
-    return;
+  } finally {
+    isEstimateCexSwapBeingExecuted = false;
   }
-
-  // Check for outdated response
-  if (
-    (global.currentSwap.inputSource === SwapInputSource.In
-          && global.currentSwap.amountIn !== estimate.fromAmount)
-      || (global.currentSwap.inputSource === SwapInputSource.Out
-          && global.currentSwap.amountOut !== estimate.toAmount)
-  ) {
-    global = updateCurrentSwap(global, {
-      ...resetParams,
-      ...resetSwapFeeParams,
-    });
-    setGlobal(global);
-    return;
-  }
-
-  let networkFee = 0;
-  const account = global.accounts?.byId[global.currentAccountId!];
-
-  if (global.currentSwap.swapType === SwapType.CrosschainFromWallet) {
-    if (tokenIn.chain === 'ton') {
-      const txDraft = await callApi('checkTransactionDraft', 'ton', {
-        accountId: global.currentAccountId!,
-        toAddress: account?.addressByChain.ton!,
-        tokenAddress: tokenIn.tokenAddress,
-        amount: fromDecimal(global.currentSwap.amountIn ?? 0, tokenIn.decimals),
-      });
-      networkFee = Number(toDecimal(txDraft?.fee ?? 0n, TONCOIN.decimals));
-    } else if (tokenIn.chain === 'tron') {
-      const txDraft = await callApi('checkTransactionDraft', 'tron', {
-        accountId: global.currentAccountId!,
-        toAddress: TRX_SWAP_COUNT_FEE_ADDRESS,
-        tokenAddress: tokenIn.tokenAddress,
-        amount: fromDecimal(global.currentSwap.amountIn ?? 0, tokenIn.decimals),
-      });
-      networkFee = Number(toDecimal(txDraft?.fee ?? 0n, TRX.decimals));
-    }
-  }
-
-  global = getGlobal();
-
-  global = updateCurrentSwap(global, {
-    ...resetSwapFeeParams,
-    amountOut: estimate.toAmount === '0' ? undefined : estimate.toAmount,
-    limits: {
-      fromMin: estimate.fromMin,
-      fromMax: estimate.fromMax,
-    },
-    swapFee: estimate.swapFee,
-    networkFee,
-    realNetworkFee: networkFee,
-    amountOutMin: estimate.toAmount,
-    isEstimating: false,
-    errorType: undefined,
-  });
-  setGlobal(global);
 });
 
 addActionHandler('setSwapScreen', (global, actions, { state }) => {
@@ -1001,19 +1079,38 @@ addActionHandler('updatePendingSwaps', async (global) => {
     .map(({ id }) => id);
   if (!ids.length) return;
 
-  const swaps = await callApi('fetchSwaps', accountId, ids);
-  if (!swaps?.length) return;
+  const result = await callApi('fetchSwaps', accountId, ids);
+  if (!result?.swaps.length) return;
+
+  const { swaps, nonExistentIds } = result;
 
   global = getGlobal();
   if (global.currentAccountId !== accountId) return;
 
   ({ activities } = selectAccountState(global, accountId) ?? {});
 
+  for (const swap of result.swaps) {
+    if (swap.isCanceled) {
+      swap.shouldHide = true;
+    }
+  }
+
+  const nonExistentSwaps: Record<string, ApiSwapActivity> = {};
+
+  for (const id of nonExistentIds) {
+    nonExistentSwaps[id] = {
+      ...activities!.byId[id] as ApiSwapActivity,
+      status: 'expired',
+      shouldHide: true,
+    };
+  }
+
   global = updateAccountState(global, accountId, {
     activities: {
       ...activities,
       byId: {
-        ...activities?.byId,
+        ...activities!.byId,
+        ...nonExistentSwaps,
         ...buildCollectionByKey(swaps, 'id'),
       },
     },
@@ -1021,3 +1118,43 @@ addActionHandler('updatePendingSwaps', async (global) => {
 
   setGlobal(global);
 });
+
+addActionHandler('setSwapDex', (global, actions, { dexLabel }) => {
+  const { estimates } = global.currentSwap;
+  const newEstimate = (estimates || []).find((estimate) => estimate.dexLabel === dexLabel);
+  if (!newEstimate) return;
+
+  global = updateCurrentSwap(global, {
+    amountIn: newEstimate.fromAmount,
+    amountOut: newEstimate.toAmount,
+    amountOutMin: newEstimate.toMinAmount,
+    networkFee: newEstimate.networkFee,
+    realNetworkFee: newEstimate.realNetworkFee,
+    swapFee: newEstimate.swapFee,
+    swapFeePercent: newEstimate.swapFeePercent,
+    ourFee: newEstimate.ourFee,
+    dieselFee: newEstimate.dieselFee,
+    priceImpact: newEstimate.impact,
+    currentDexLabel: dexLabel,
+    isDexLabelChanged: true,
+  });
+  setGlobal(global);
+});
+
+function convertTransferFeesToSwapFees(
+  txDraft: Pick<ApiCheckTransactionDraftResult, 'fee' | 'realFee'>,
+  chain: ApiChain,
+) {
+  const nativeToken = getNativeToken(chain);
+  let networkFee: string | undefined;
+  let realNetworkFee: string | undefined;
+
+  if (txDraft?.fee !== undefined) {
+    networkFee = toDecimal(txDraft.fee, nativeToken.decimals);
+  }
+  if (txDraft?.realFee !== undefined) {
+    realNetworkFee = toDecimal(txDraft.realFee, nativeToken.decimals);
+  }
+
+  return { networkFee, realNetworkFee };
+}

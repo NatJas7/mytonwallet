@@ -17,7 +17,12 @@ import styles from './AnimatedIconWithPreview.module.scss';
 
 type OwnProps =
   Partial<AnimatedIconProps>
-  & { previewUrl?: string; thumbDataUri?: string; noPreviewTransition?: boolean };
+  & {
+    iconPreviewClass?: string;
+    previewUrl?: string;
+    thumbDataUri?: string;
+    noPreviewTransition?: boolean;
+  };
 
 interface StateProps {
   noAnimation?: boolean;
@@ -28,11 +33,20 @@ const DEFAULT_SIZE = 150;
 
 function AnimatedIconWithPreview(props: OwnProps & StateProps) {
   const {
-    size = DEFAULT_SIZE, previewUrl, thumbDataUri, className, noAnimation, ...otherProps
+    size = DEFAULT_SIZE,
+    previewUrl,
+    iconPreviewClass,
+    thumbDataUri,
+    className,
+    noAnimation,
+    noPreviewTransition,
+    ...otherProps
   } = props;
 
-  const [isPreviewLoaded, markPreviewLoaded] = useFlag(Boolean(thumbDataUri) || loadedPreviewUrls.has(previewUrl));
-  const transitionClassNames = useMediaTransition(isPreviewLoaded);
+  const [isPreviewLoaded, markPreviewLoaded] = useFlag(
+    Boolean(iconPreviewClass) || Boolean(thumbDataUri) || loadedPreviewUrls.has(previewUrl),
+  );
+  const transitionClassNames = useMediaTransition(isPreviewLoaded && !noPreviewTransition);
   const [isAnimationReady, markAnimationReady, markAnimationNotReady] = useFlag(false);
 
   useEffect(() => {
@@ -48,8 +62,11 @@ function AnimatedIconWithPreview(props: OwnProps & StateProps) {
 
   return (
     <div
-      className={buildClassName(className, styles.root, transitionClassNames)}
-      style={buildStyle(size !== undefined && `width: ${size}px; height: ${size}px;`)}
+      className={buildClassName(className, styles.root, !noPreviewTransition && transitionClassNames)}
+      style={buildStyle(
+        size !== undefined && !otherProps.shouldStretch && `width: ${size}px; height: ${size}px;`,
+      )}
+      data-preview-url={previewUrl}
     >
       {thumbDataUri && !previewUrl && !isAnimationReady && (
         // eslint-disable-next-line jsx-a11y/alt-text
@@ -62,6 +79,9 @@ function AnimatedIconWithPreview(props: OwnProps & StateProps) {
           className={styles.preview}
           onLoad={handlePreviewLoad}
         />
+      )}
+      {iconPreviewClass && !isAnimationReady && (
+        <i className={buildClassName(styles.preview, iconPreviewClass)} aria-hidden />
       )}
       {/* eslint-disable-next-line react/jsx-props-no-spreading */}
       {!noAnimation && <AnimatedIcon size={size} {...otherProps} onLoad={markAnimationReady} noTransition />}

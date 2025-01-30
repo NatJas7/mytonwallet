@@ -1,5 +1,7 @@
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
 
+import type { ApiChain } from '../../../api/types';
+import type { LedgerTransport } from '../../../util/ledger/types';
 import type { GlobalState } from '../../types';
 import {
   AppState, AuthState, HardwareConnectState, SettingsState, SwapState, TransferState,
@@ -10,26 +12,38 @@ import {
   APP_VERSION,
   BETA_URL,
   BOT_USERNAME,
+  CHAIN_CONFIG,
   DEBUG,
   IS_CAPACITOR,
   IS_EXTENSION,
   IS_PRODUCTION,
   PRODUCTION_URL,
+  TONCOIN,
 } from '../../../config';
+import {
+  ACCENT_BNW_INDEX,
+  ACCENT_GOLD_INDEX,
+  ACCENT_RADIOACTIVE_INDEX,
+  ACCENT_SILVER_INDEX,
+  extractAccentColorIndex,
+} from '../../../util/accentColor';
 import { vibrateOnSuccess } from '../../../util/capacitor';
 import { isTonDeeplink, parseTonDeeplink, processDeeplink } from '../../../util/deeplink';
+import { getCachedImageUrl } from '../../../util/getCachedImageUrl';
 import getIsAppUpdateNeeded from '../../../util/getIsAppUpdateNeeded';
 import { isValidAddressOrDomain } from '../../../util/isValidAddressOrDomain';
 import { omitUndefined, pick } from '../../../util/iteratees';
 import { getTranslation } from '../../../util/langProvider';
 import { onLedgerTabClose, openLedgerTab } from '../../../util/ledger/tab';
-import { callActionInMain } from '../../../util/multitab';
+import { callActionInMain, callActionInNative } from '../../../util/multitab';
 import { openUrl } from '../../../util/openUrl';
+import { preloadImage } from '../../../util/preloadImage';
 import { pause } from '../../../util/schedulers';
 import {
   IS_ANDROID_APP,
   IS_BIOMETRIC_AUTH_SUPPORTED,
   IS_DELEGATED_BOTTOM_SHEET,
+  IS_DELEGATING_BOTTOM_SHEET,
 } from '../../../util/windowEnvironment';
 import { callApi } from '../../../api';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
@@ -52,8 +66,15 @@ import {
   selectCurrentAccount,
   selectCurrentAccountSettings,
   selectCurrentAccountState,
+  selectCurrentAccountTokens,
   selectFirstNonHardwareAccount,
+  selectIsMultichainAccount,
 } from '../../selectors';
+import { switchAccount } from '../api/auth';
+
+import { reportAppLockActivityEvent } from '../../../components/AppLocked';
+import { getCardNftImageUrl } from '../../../components/main/sections/Card/helpers/getCardNftImageUrl';
+import { closeModal } from '../../../components/ui/Modal';
 
 const OPEN_LEDGER_TAB_DELAY = 500;
 const APP_VERSION_URL = IS_ANDROID_APP ? `${IS_PRODUCTION ? PRODUCTION_URL : BETA_URL}/version.txt` : 'version.txt';
@@ -65,6 +86,28 @@ addActionHandler('showActivityInfo', (global, actions, { id }) => {
   }
 
   return updateCurrentAccountState(global, { currentActivityId: id });
+});
+
+addActionHandler('showAnyAccountTx', async (global, actions, { txId, accountId, network }) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('showAnyAccountTx', { txId, accountId, network });
+    return;
+  }
+
+  await switchAccount(global, accountId, network);
+
+  actions.showActivityInfo({ id: txId });
+});
+
+addActionHandler('showAnyAccountTokenActivity', async (global, actions, { slug, accountId, network }) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('showAnyAccountTokenActivity', { slug, accountId, network });
+    return;
+  }
+
+  await switchAccount(global, accountId, network);
+
+  actions.showTokenActivity({ slug });
 });
 
 addActionHandler('closeActivityInfo', (global, actions, { id }) => {
@@ -162,9 +205,10 @@ addActionHandler('addAccount2', (global, actions, { method, password }) => {
     ? isMnemonicImport
       ? AuthState.importWallet
       : undefined
-    : (IS_CAPACITOR
-      ? AuthState.createPin
-      : (IS_BIOMETRIC_AUTH_SUPPORTED ? AuthState.createBiometrics : AuthState.createPassword)
+    : (
+      IS_CAPACITOR
+        ? AuthState.createPin
+        : (IS_BIOMETRIC_AUTH_SUPPORTED ? AuthState.createBiometrics : AuthState.createPassword)
     );
 
   if (isMnemonicImport || !firstNonHardwareAccount) {
@@ -185,7 +229,10 @@ addActionHandler('addAccount2', (global, actions, { method, password }) => {
 
 addActionHandler('renameAccount', (global, actions, { accountId, title }) => {
   global = { ...global, shouldForceAccountEdit: false };
-  return renameAccount(global, accountId, title);
+
+  setGlobal(renameAccount(global, accountId, title));
+
+  actions.renameNotificationAccount({ accountId });
 });
 
 addActionHandler('clearAccountError', (global) => {
@@ -208,26 +255,6 @@ addActionHandler('closeAddAccountModal', (global) => {
   }
 
   return { ...global, isAddAccountModalOpen: undefined };
-});
-
-addActionHandler('setTheme', (global, actions, { theme }) => {
-  return {
-    ...global,
-    settings: {
-      ...global.settings,
-      theme,
-    },
-  };
-});
-
-addActionHandler('setAnimationLevel', (global, actions, { level }) => {
-  return {
-    ...global,
-    settings: {
-      ...global.settings,
-      animationLevel: level,
-    },
-  };
 });
 
 addActionHandler('changeNetwork', (global, actions, { network }) => {
@@ -281,62 +308,100 @@ addActionHandler('closeBackupWalletModal', (global) => {
   return { ...global, isBackupWalletModalOpen: undefined };
 });
 
-addActionHandler('initializeHardwareWalletConnection', async (global, actions) => {
-  const startConnection = () => {
+addActionHandler('initializeHardwareWalletModal', async (global, actions) => {
+  const ledgerApi = await import('../../../util/ledger');
+  const { isBluetoothAvailable, isUsbAvailable } = await ledgerApi.detectAvailableTransports();
+  const availableTransports: LedgerTransport[] = [];
+  if (isUsbAvailable) {
+    availableTransports.push('usb');
+  }
+  if (isBluetoothAvailable) {
+    availableTransports.push('bluetooth');
+  }
+
+  if (availableTransports.length === 0) {
+    actions.showNotification({
+      message: 'Ledger is not supported on this device.',
+    });
+  } else if (availableTransports.length === 1) {
+    actions.initializeHardwareWalletConnection({ transport: availableTransports[0] });
+  } else {
+    global = updateHardware(getGlobal(), {
+      availableTransports,
+    });
+    setGlobal(global);
+  }
+});
+
+addActionHandler('initializeHardwareWalletConnection', async (global, actions, params) => {
+  if (IS_DELEGATING_BOTTOM_SHEET && params.shouldDelegateToNative) {
+    callActionInNative('initializeHardwareWalletConnection', { transport: params.transport });
+    return;
+  }
+
+  const setHardwareStateToConnecting = () => {
+    global = getGlobal();
     global = updateHardware(getGlobal(), {
       hardwareState: HardwareConnectState.Connecting,
     });
     setGlobal(global);
-
-    actions.connectHardwareWallet();
   };
 
+  setHardwareStateToConnecting();
   const ledgerApi = await import('../../../util/ledger');
 
-  if (await ledgerApi.connectLedger()) {
-    startConnection();
+  if (await ledgerApi.connectLedger(params.transport)) {
+    actions.connectHardwareWallet({ transport: params.transport });
     return;
   }
 
-  if (IS_EXTENSION) {
-    global = updateHardware(getGlobal(), {
-      hardwareState: HardwareConnectState.WaitingForBrowser,
+  if (!IS_EXTENSION) {
+    global = getGlobal();
+    global = updateHardware(global, {
+      isLedgerConnected: false,
+      hardwareState: HardwareConnectState.Failed,
     });
     setGlobal(global);
-
-    await pause(OPEN_LEDGER_TAB_DELAY);
-    const id = await openLedgerTab();
-    const popup = await chrome.windows.getCurrent();
-
-    onLedgerTabClose(id, async () => {
-      await chrome.windows.update(popup.id!, { focused: true });
-
-      if (!await ledgerApi.connectLedger()) {
-        actions.closeHardwareWalletModal();
-        return;
-      }
-
-      startConnection();
-    });
-  }
-});
-
-addActionHandler('openHardwareWalletModal', async (global) => {
-  const ledgerApi = await import('../../../util/ledger');
-  let newHardwareState;
-
-  const isConnected = await ledgerApi.connectLedger();
-
-  if (!isConnected && IS_EXTENSION) {
-    newHardwareState = HardwareConnectState.WaitingForBrowser;
-  } else {
-    newHardwareState = HardwareConnectState.Connect;
+    return;
   }
 
   global = updateHardware(getGlobal(), {
-    hardwareState: newHardwareState,
+    hardwareState: HardwareConnectState.WaitingForBrowser,
   });
+  setGlobal(global);
+
+  await pause(OPEN_LEDGER_TAB_DELAY);
+  const id = await openLedgerTab();
+  const popup = await chrome.windows.getCurrent();
+
+  onLedgerTabClose(id, async () => {
+    await chrome.windows.update(popup.id!, { focused: true });
+
+    if (!await ledgerApi.connectLedger(params.transport)) {
+      actions.closeHardwareWalletModal();
+      return;
+    }
+
+    setHardwareStateToConnecting();
+    actions.connectHardwareWallet({ transport: params.transport });
+  });
+});
+
+addActionHandler('openHardwareWalletModal', async (global) => {
+  const hardwareState = await connectLedgerAndGetHardwareState();
+
+  global = updateHardware(getGlobal(), { hardwareState });
+
   setGlobal({ ...global, isHardwareModalOpen: true });
+});
+
+addActionHandler('openSettingsHardwareWallet', async (global) => {
+  const hardwareState = await connectLedgerAndGetHardwareState();
+
+  global = updateHardware(getGlobal(), { hardwareState });
+  global = updateSettings(global, { state: SettingsState.LedgerConnectHardware });
+
+  setGlobal(global);
 });
 
 addActionHandler('closeHardwareWalletModal', (global) => {
@@ -390,18 +455,11 @@ addActionHandler('closeSecurityWarning', (global) => {
 });
 
 addActionHandler('toggleTokensWithNoCost', (global, actions, { isEnabled }) => {
-  global = updateSettings(global, { areTokensWithNoCostHidden: isEnabled });
-
-  const accountSettings = selectCurrentAccountSettings(global) ?? {};
-  global = updateCurrentAccountSettings(global, { ...accountSettings, exceptionSlugs: [] });
-
-  return global;
+  return updateSettings(global, { areTokensWithNoCostHidden: isEnabled });
 });
 
 addActionHandler('toggleSortByValue', (global, actions, { isEnabled }) => {
-  return updateSettings(global, {
-    isSortByValueEnabled: isEnabled,
-  });
+  return updateSettings(global, { isSortByValueEnabled: isEnabled });
 });
 
 addActionHandler('updateOrderedSlugs', (global, actions, { orderedSlugs }) => {
@@ -412,21 +470,24 @@ addActionHandler('updateOrderedSlugs', (global, actions, { orderedSlugs }) => {
   });
 });
 
-addActionHandler('toggleExceptionToken', (global, actions, { slug }) => {
+addActionHandler('toggleTokenVisibility', (global, actions, { slug, shouldShow }) => {
   const accountSettings = selectCurrentAccountSettings(global) ?? {};
-  const { exceptionSlugs = [] } = accountSettings;
-  const exceptionSlugsCopy = exceptionSlugs.slice();
-  const slugIndexInAvailable = exceptionSlugsCopy.indexOf(slug);
+  const { alwaysShownSlugs = [], alwaysHiddenSlugs = [] } = accountSettings;
+  const alwaysShownSlugsSet = new Set(alwaysShownSlugs);
+  const alwaysHiddenSlugsSet = new Set(alwaysHiddenSlugs);
 
-  if (slugIndexInAvailable !== -1) {
-    exceptionSlugsCopy.splice(slugIndexInAvailable, 1);
+  if (shouldShow) {
+    alwaysHiddenSlugsSet.delete(slug);
+    alwaysShownSlugsSet.add(slug);
   } else {
-    exceptionSlugsCopy.push(slug);
+    alwaysShownSlugsSet.delete(slug);
+    alwaysHiddenSlugsSet.add(slug);
   }
 
   return updateCurrentAccountSettings(global, {
     ...accountSettings,
-    exceptionSlugs: exceptionSlugsCopy,
+    alwaysHiddenSlugs: Array.from(alwaysHiddenSlugsSet),
+    alwaysShownSlugs: Array.from(alwaysShownSlugsSet),
   });
 });
 
@@ -435,8 +496,10 @@ addActionHandler('deleteToken', (global, actions, { slug }) => {
   return updateCurrentAccountSettings(global, {
     ...accountSettings,
     orderedSlugs: accountSettings.orderedSlugs?.filter((s) => s !== slug),
-    exceptionSlugs: accountSettings.exceptionSlugs?.filter((s) => s !== slug),
+    alwaysHiddenSlugs: accountSettings.alwaysHiddenSlugs?.filter((s) => s !== slug),
+    alwaysShownSlugs: accountSettings.alwaysShownSlugs?.filter((s) => s !== slug),
     deletedSlugs: [...accountSettings.deletedSlugs ?? [], slug],
+    importedSlugs: accountSettings.importedSlugs?.filter((s) => s !== slug),
   });
 });
 
@@ -508,7 +571,6 @@ addActionHandler('requestOpenQrScanner', async (global, actions) => {
 addActionHandler('closeQrScanner', (global) => {
   if (IS_DELEGATED_BOTTOM_SHEET) {
     callActionInMain('closeQrScanner');
-    return undefined;
   }
 
   return {
@@ -525,11 +587,23 @@ addActionHandler('handleQrCode', (global, actions, { data }) => {
   }
 
   const { currentTransfer, currentSwap } = global.currentQrScan || {};
+  const isMultichain = selectIsMultichainAccount(global, global.currentAccountId!);
 
   if (currentTransfer) {
-    if (isValidAddressOrDomain(data, 'ton')) {
+    const chainFromAddress = getChainFromAddress(data, isMultichain);
+
+    if (chainFromAddress) {
+      const { tokenSlug } = currentTransfer;
+
+      const token = selectCurrentAccountTokens(global)?.find(({ slug }) => slug === tokenSlug);
+
+      const newTokenSlug = (!token || token.chain !== chainFromAddress)
+        ? CHAIN_CONFIG[chainFromAddress].nativeToken.slug
+        : tokenSlug;
+
       return updateCurrentTransfer(global, {
         ...currentTransfer,
+        tokenSlug: newTokenSlug,
         toAddress: data,
       });
     }
@@ -540,6 +614,8 @@ addActionHandler('handleQrCode', (global, actions, { data }) => {
         ...currentTransfer,
         // For NFT transfer we only extract address from a ton:// link
         ...(currentTransfer.nfts?.length ? pick(linkParams, ['toAddress']) : omitUndefined(linkParams)),
+        // Only Toncoin can be processed with deeplink right now
+        tokenSlug: TONCOIN.slug,
       });
     }
   }
@@ -578,17 +654,17 @@ addActionHandler('clearIsPinAccepted', (global) => {
   return clearIsPinAccepted(global);
 });
 
-addActionHandler('openOnRampWidgetModal', (global) => {
+addActionHandler('openOnRampWidgetModal', (global, actions, { chain }) => {
   if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('openOnRampWidgetModal');
+    callActionInMain('openOnRampWidgetModal', { chain });
     return;
   }
 
-  setGlobal({ ...global, isOnRampWidgetModalOpen: true });
+  setGlobal({ ...global, chainForOnRampWidgetModal: chain });
 });
 
 addActionHandler('closeOnRampWidgetModal', (global) => {
-  setGlobal({ ...global, isOnRampWidgetModalOpen: undefined });
+  setGlobal({ ...global, chainForOnRampWidgetModal: undefined });
 });
 
 addActionHandler('openMediaViewer', (global, actions, {
@@ -617,6 +693,11 @@ addActionHandler('closeMediaViewer', (global) => {
 });
 
 addActionHandler('openReceiveModal', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('openReceiveModal');
+    return;
+  }
+
   setGlobal({ ...global, isReceiveModalOpen: true });
 });
 
@@ -668,3 +749,106 @@ addActionHandler('authorizeDiesel', (global) => {
   setGlobal(updateCurrentAccountState(global, { isDieselAuthorizationStarted: true }));
   openUrl(`https://t.me/${BOT_USERNAME}?start=auth-${address}`, true);
 });
+
+addActionHandler('submitAppLockActivityEvent', () => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('submitAppLockActivityEvent');
+    return;
+  }
+  reportAppLockActivityEvent();
+});
+
+addActionHandler('setCardBackgroundNft', (global, actions, { nft }) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('setCardBackgroundNft', { nft });
+    return;
+  }
+
+  global = updateCurrentAccountSettings(global, { cardBackgroundNft: nft });
+  setGlobal(global);
+});
+
+addActionHandler('clearCardBackgroundNft', (global) => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('clearCardBackgroundNft');
+    return;
+  }
+
+  global = updateCurrentAccountSettings(global, { cardBackgroundNft: undefined });
+  setGlobal(global);
+});
+
+addActionHandler('installAccentColorFromNft', async (global, actions, { nft }) => {
+  const { mtwCardType, mtwCardBorderShineType } = nft.metadata!;
+
+  let accentColorIndex: number | undefined;
+  if (mtwCardBorderShineType === 'radioactive') {
+    accentColorIndex = ACCENT_RADIOACTIVE_INDEX;
+  } else if (mtwCardType === 'silver') {
+    accentColorIndex = ACCENT_SILVER_INDEX;
+  } else if (mtwCardType === 'gold') {
+    accentColorIndex = ACCENT_GOLD_INDEX;
+  } else if (mtwCardType === 'platinum' || mtwCardType === 'black') {
+    accentColorIndex = ACCENT_BNW_INDEX;
+  } else {
+    const src = getCardNftImageUrl(nft);
+    if (!src) return;
+
+    const cachedBlobUrl = await getCachedImageUrl(src);
+    const img = await preloadImage(cachedBlobUrl);
+    accentColorIndex = extractAccentColorIndex(img);
+    URL.revokeObjectURL(cachedBlobUrl);
+
+    if (!accentColorIndex) return;
+  }
+
+  global = getGlobal();
+  global = updateCurrentAccountSettings(global, {
+    accentColorNft: nft,
+    accentColorIndex,
+  });
+  setGlobal(global);
+});
+
+addActionHandler('clearAccentColorFromNft', (global) => {
+  return updateCurrentAccountSettings(global, {
+    accentColorNft: undefined,
+    accentColorIndex: undefined,
+  });
+});
+
+addActionHandler('closeAnyModal', () => {
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('closeAnyModal');
+    return;
+  }
+
+  closeModal();
+});
+
+addActionHandler('closeAllOverlays', (global, actions) => {
+  actions.closeAnyModal();
+  actions.closeMediaViewer();
+});
+
+async function connectLedgerAndGetHardwareState() {
+  const ledgerApi = await import('../../../util/ledger');
+  let newHardwareState;
+
+  // If not running in the Capacitor environment, try to instantly connect to the Ledger
+  const isConnected = !IS_CAPACITOR ? await ledgerApi.connectLedger() : false;
+
+  if (!isConnected && IS_EXTENSION) {
+    newHardwareState = HardwareConnectState.WaitingForBrowser;
+  } else {
+    newHardwareState = HardwareConnectState.Connect;
+  }
+
+  return newHardwareState;
+}
+
+function getChainFromAddress(address: string, isMultichainAccount: boolean): ApiChain | undefined {
+  if (isMultichainAccount && isValidAddressOrDomain(address, 'tron')) return 'tron';
+
+  return isValidAddressOrDomain(address, 'ton') ? 'ton' : undefined;
+}

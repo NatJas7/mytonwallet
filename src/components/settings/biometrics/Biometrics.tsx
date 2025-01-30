@@ -10,9 +10,13 @@ import BiometricsTurnOn from './TurnOn';
 interface StateProps {
   state: BiometricsState;
   error?: string;
+  isLoading?: boolean;
+  isInsideModal?: boolean;
 }
 
-function Biometrics({ state, error }: StateProps) {
+function Biometrics({
+  state, error, isLoading, isInsideModal,
+}: StateProps) {
   const { closeBiometricSettings } = getActions();
 
   const isTurnOnBiometricsOpened = state === BiometricsState.TurnOnPasswordConfirmation
@@ -28,12 +32,16 @@ function Biometrics({ state, error }: StateProps) {
     <>
       <BiometricsTurnOn
         isOpen={isTurnOnBiometricsOpened}
+        isLoading={isLoading}
+        isInsideModal={isInsideModal}
         state={state}
         error={error}
         onClose={closeBiometricSettings}
       />
       <BiometricsTurnOff
         isOpen={isTurnOffBiometricsOpened}
+        isLoading={isLoading}
+        isInsideModal={isInsideModal}
         state={state}
         error={error}
         onClose={closeBiometricSettings}
@@ -49,5 +57,6 @@ export default memo(withGlobal((global) => {
   return {
     state,
     error,
+    isLoading: global.auth.isLoading,
   };
 })(Biometrics));

@@ -8,7 +8,9 @@ import { pause, waitFor } from '../../../util/schedulers';
 import { IS_DELEGATED_BOTTOM_SHEET } from '../../../util/windowEnvironment';
 import { callApi } from '../../../api';
 import {
-  ApiHardwareBlindSigningNotEnabled, ApiUnsupportedVersionError, ApiUserRejectsError,
+  ApiHardwareBlindSigningNotEnabled,
+  ApiUnsupportedVersionError,
+  ApiUserRejectsError,
 } from '../../../api/errors';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
@@ -77,9 +79,7 @@ addActionHandler('submitDappConnectRequestConfirm', async (global, actions, { pa
 addActionHandler(
   'submitDappConnectRequestConfirmHardware',
   async (global, actions, { accountId: connectAccountId }) => {
-    const {
-      promiseId, proof,
-    } = global.dappConnectRequest!;
+    const { proof } = global.dappConnectRequest!;
 
     global = getGlobal();
     global = updateDappConnectRequest(global, {
@@ -92,26 +92,34 @@ addActionHandler(
 
     try {
       const signature = await ledgerApi.signLedgerProof(connectAccountId!, proof!);
-      actions.switchAccount({ accountId: connectAccountId });
-      await callApi('confirmDappRequestConnect', promiseId!, {
-        accountId: connectAccountId,
-        signature,
-      });
+      if (IS_DELEGATED_BOTTOM_SHEET) {
+        callActionInMain('submitDappConnectHardware', { accountId: connectAccountId, signature });
+
+        return;
+      }
+
+      actions.submitDappConnectHardware({ accountId: connectAccountId, signature });
     } catch (err) {
       setGlobal(updateDappConnectRequest(getGlobal(), {
         error: 'Canceled by the user',
       }));
-      return;
     }
-
-    global = getGlobal();
-    global = clearDappConnectRequest(global);
-    setGlobal(global);
-
-    await pause(GET_DAPPS_PAUSE);
-    actions.getDapps();
   },
 );
+
+addActionHandler('submitDappConnectHardware', async (global, actions, { accountId, signature }) => {
+  const { promiseId } = global.dappConnectRequest!;
+
+  actions.switchAccount({ accountId });
+  await callApi('confirmDappRequestConnect', promiseId!, { accountId, signature });
+
+  global = getGlobal();
+  global = clearDappConnectRequest(global);
+  setGlobal(global);
+
+  await pause(GET_DAPPS_PAUSE);
+  actions.getDapps();
+});
 
 addActionHandler('cancelDappConnectRequestConfirm', (global) => {
   const { promiseId } = global.dappConnectRequest || {};
@@ -227,7 +235,14 @@ addActionHandler('submitDappTransferHardware', async (global, actions) => {
       isTonConnect: true,
       vestingAddress,
     });
-    void callApi('confirmDappRequest', promiseId, signedMessages);
+
+    if (IS_DELEGATED_BOTTOM_SHEET) {
+      callActionInMain('submitDappTransferHardware2', { signedMessages });
+
+      return;
+    }
+
+    actions.submitDappTransferHardware2({ signedMessages });
   } catch (err) {
     if (err instanceof ApiHardwareBlindSigningNotEnabled) {
       setGlobal(updateCurrentDappTransfer(getGlobal(), {
@@ -249,7 +264,21 @@ addActionHandler('submitDappTransferHardware', async (global, actions) => {
     } else {
       void callApi('cancelDappRequest', promiseId, 'Unknown error.');
     }
+
+    global = getGlobal();
+    global = clearCurrentDappTransfer(global);
+    setGlobal(global);
   }
+});
+
+addActionHandler('submitDappTransferHardware2', (global, actions, { signedMessages }) => {
+  const { promiseId } = global.currentDappTransfer;
+
+  if (!promiseId) {
+    return;
+  }
+
+  void callApi('confirmDappRequest', promiseId, signedMessages);
 
   global = getGlobal();
   global = clearCurrentDappTransfer(global);
@@ -383,7 +412,7 @@ addActionHandler('apiUpdateDappLoading', async (global, actions, { connectionTyp
     if (!(await waitFor(() => {
       global = getGlobal();
       return (connectionType === 'connect' && !!global.dappConnectRequest)
-      || (connectionType === 'sendTransaction' && global.currentDappTransfer.state !== TransferState.None);
+        || (connectionType === 'sendTransaction' && global.currentDappTransfer.state !== TransferState.None);
     }, 300, 5))) {
       return;
     }
@@ -431,16 +460,13 @@ addActionHandler('apiUpdateDappCloseLoading', async (global) => {
   setGlobal(global);
 });
 
-addActionHandler('loadExploreSites', async (global) => {
-  const sites = await callApi('loadExploreSites');
+addActionHandler('loadExploreSites', async (global, _, { isLandscape }) => {
+  const exploreData = await callApi('loadExploreSites', { isLandscape });
   global = getGlobal();
-  if (areDeepEqual(sites, global.exploreSites)) {
+  if (areDeepEqual(exploreData, global.exploreData)) {
     return;
   }
 
-  global = {
-    ...global,
-    exploreSites: sites,
-  };
+  global = { ...global, exploreData };
   setGlobal(global);
 });

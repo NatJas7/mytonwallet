@@ -4,6 +4,7 @@ import type { GlobalState } from '../../types';
 
 import { setLanguage } from '../../../util/langProvider';
 import switchTheme from '../../../util/switchTheme';
+import { addActionHandler } from '../..';
 
 let prevGlobal: GlobalState | undefined;
 
@@ -17,7 +18,7 @@ addCallback((global: GlobalState) => {
   const { settings } = global;
 
   if (settings.theme !== prevSettings.theme) {
-    switchTheme(settings.theme, true);
+    switchTheme(settings.theme);
   }
 
   if (settings.langCode !== prevSettings.langCode) {
@@ -25,4 +26,23 @@ addCallback((global: GlobalState) => {
   }
 
   prevGlobal = global;
+});
+
+addActionHandler('setAppLockValue', (global, actions, { value, isEnabled }) => {
+  return {
+    ...global,
+    settings: {
+      ...global.settings,
+      autolockValue: value,
+      isAppLockEnabled: isEnabled,
+    },
+  };
+});
+
+addActionHandler('setIsManualLockActive', (global, actions, { isActive, shouldHideBiometrics }) => {
+  return {
+    ...global,
+    isManualLockActive: isActive,
+    appLockHideBiometrics: shouldHideBiometrics,
+  };
 });

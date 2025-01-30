@@ -1,5 +1,5 @@
 import type {
-  ApiDapp, ApiDappsState, ApiNetwork, ApiSite, OnApiUpdate,
+  ApiDapp, ApiDappsState, ApiNetwork, ApiSite, ApiSiteCategory, OnApiUpdate,
 } from '../types';
 
 import { parseAccountId } from '../../util/account';
@@ -114,7 +114,7 @@ export async function updateDapp(accountId: string, origin: string, update: Part
 }
 
 export async function getDapp(accountId: string, origin: string): Promise<ApiDapp | undefined> {
-  return (await getAccountValue(accountId, 'dapps'))[origin];
+  return (await getAccountValue(accountId, 'dapps'))?.[origin];
 }
 
 export async function addDapp(accountId: string, dapp: ApiDapp) {
@@ -226,6 +226,8 @@ export function setSseLastEventId(lastEventId: string) {
   return storage.setItem('sseLastEventId', lastEventId);
 }
 
-export function loadExploreSites(): Promise<ApiSite[]> {
-  return callBackendGet('/dapp/catalog');
+export function loadExploreSites(
+  { isLandscape }: { isLandscape: boolean },
+): Promise<{ categories: ApiSiteCategory[]; sites: ApiSite[] }> {
+  return callBackendGet('/v2/dapp/catalog', { isLandscape });
 }

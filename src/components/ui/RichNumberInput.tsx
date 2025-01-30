@@ -1,14 +1,14 @@
 import type { TeactNode } from '../../lib/teact/teact';
-import React, {
-  memo, useLayoutEffect, useRef, useState,
-} from '../../lib/teact/teact';
+import React, { memo, useLayoutEffect, useRef } from '../../lib/teact/teact';
 
-import { FRACTION_DIGITS, TONCOIN, WHOLE_PART_DELIMITER } from '../../config';
-import { forceMeasure, requestMutation } from '../../lib/fasterdom/fasterdom';
+import { FRACTION_DIGITS, WHOLE_PART_DELIMITER } from '../../config';
+import { requestMutation } from '../../lib/fasterdom/fasterdom';
+import { getNumberParts, getNumberRegex } from '../../global/helpers/number';
 import buildClassName from '../../util/buildClassName';
 import { saveCaretPosition } from '../../util/saveCaretPosition';
 
 import useFlag from '../../hooks/useFlag';
+import useFontScale from '../../hooks/useFontScale';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 
@@ -31,14 +31,15 @@ type OwnProps = {
   onBlur?: NoneToVoidFunction;
   onFocus?: NoneToVoidFunction;
   onPressEnter?: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  /** Expected to fire when regardless of the `disabled` prop value */
+  onInputClick?: NoneToVoidFunction;
   decimals?: number;
   disabled?: boolean;
   isStatic?: boolean;
+  size?: 'large' | 'normal';
 };
 
 const MIN_LENGTH_FOR_SHRINK = 5;
-const MIN_SIZE_SCALE = 0.25; // 12px
-const measureEl = document.createElement('div');
 
 function RichNumberInput({
   id,
@@ -57,50 +58,17 @@ function RichNumberInput({
   onBlur,
   onFocus,
   onPressEnter,
+  onInputClick,
   decimals = FRACTION_DIGITS,
   disabled = false,
   isStatic = false,
+  size = 'large',
 }: OwnProps) {
   // eslint-disable-next-line no-null/no-null
   const inputRef = useRef<HTMLInputElement | null>(null);
   const lang = useLang();
   const [hasFocus, markHasFocus, unmarkHasFocus] = useFlag(false);
-  const [isContentEditable, setContentEditable] = useState(!disabled);
-  const isFontShrinkedRef = useRef(false);
-
-  const updateFontScale = useLastCallback((content: string) => {
-    const input = inputRef.current!;
-
-    forceMeasure(() => {
-      const { clientWidth: width } = input;
-      measureEl.className = buildClassName(input.className, 'measure-hidden');
-      measureEl.style.width = `${width}px`;
-      measureEl.innerHTML = content;
-      document.body.appendChild(measureEl);
-      let delta = 1;
-
-      while (delta > MIN_SIZE_SCALE) {
-        measureEl.style.setProperty('--base-font-size', delta.toString());
-        if (measureEl.scrollWidth <= width) {
-          break;
-        }
-        delta -= 0.05;
-      }
-
-      isFontShrinkedRef.current = delta < 1;
-      document.body.removeChild(measureEl);
-      measureEl.className = '';
-      input.style.setProperty('--base-font-size', delta.toString());
-    });
-  });
-
-  const handleLoadingHtml = useLastCallback((input: HTMLInputElement, parts?: RegExpMatchArray) => {
-    const newHtml = parts ? buildContentHtml({ values: parts, suffix, decimals }) : '';
-    input.innerHTML = newHtml;
-    setContentEditable(false);
-
-    return newHtml;
-  });
+  const { updateFontScale, isFontChangedRef } = useFontScale(inputRef);
 
   const handleNumberHtml = useLastCallback((input: HTMLInputElement, parts?: RegExpMatchArray) => {
     const newHtml = parts ? buildContentHtml({ values: parts, suffix, decimals }) : '';
@@ -109,7 +77,6 @@ function RichNumberInput({
       : undefined;
 
     input.innerHTML = newHtml;
-    setContentEditable(!disabled);
     restoreCaretPosition?.();
 
     return newHtml;
@@ -117,36 +84,32 @@ function RichNumberInput({
 
   const updateHtml = useLastCallback((parts?: RegExpMatchArray) => {
     const input = inputRef.current!;
-    const content = isLoading ? handleLoadingHtml(input, parts) : handleNumberHtml(input, parts);
+    const content = handleNumberHtml(input, parts);
     const textContent = parts?.[0] || '';
 
-    if (textContent.length > MIN_LENGTH_FOR_SHRINK || isFontShrinkedRef.current) {
+    if (textContent.length > MIN_LENGTH_FOR_SHRINK || isFontChangedRef.current) {
       updateFontScale(content);
     }
-    if (content.length) {
-      input.classList.remove(styles.isEmpty);
-    } else {
-      input.classList.add(styles.isEmpty);
-    }
+    input.classList.toggle(styles.isEmpty, !content.length);
   });
 
   useLayoutEffect(() => {
     if (value === undefined) {
       updateHtml();
     } else {
-      updateHtml(getParts(value));
+      updateHtml(getNumberParts(value));
     }
   }, [updateHtml, value]);
 
   function handleChange(e: React.FormEvent<HTMLDivElement>) {
     const inputValue = e.currentTarget.innerText.trim();
     const newValue = clearValue(inputValue, decimals);
-    const parts = getParts(newValue, decimals);
+    const parts = getNumberParts(newValue, decimals);
     const isEmpty = inputValue === '';
 
     requestMutation(() => {
       if (!parts && !isEmpty && value) {
-        updateHtml(getParts(value, decimals));
+        updateHtml(getNumberParts(value, decimals));
       } else {
         updateHtml(parts);
       }
@@ -187,9 +150,12 @@ function RichNumberInput({
   const inputFullClass = buildClassName(
     styles.input,
     styles.input_rich,
+    size === 'large' && styles.input_large,
     !value && styles.isEmpty,
     valueClassName,
+    disabled && styles.disabled,
     isLoading && styles.isLoading,
+    'rounded-font',
   );
   const labelTextClassName = buildClassName(
     styles.label,
@@ -217,7 +183,7 @@ function RichNumberInput({
         {/* eslint-disable-next-line jsx-a11y/control-has-associated-label */}
         <div
           ref={inputRef}
-          contentEditable={isContentEditable}
+          contentEditable={!disabled && !isLoading}
           id={id}
           role="textbox"
           aria-required
@@ -230,6 +196,7 @@ function RichNumberInput({
           onChange={handleChange}
           onFocus={handleFocus}
           onBlur={handleBlur}
+          onClick={onInputClick}
         />
         {children}
       </div>
@@ -238,21 +205,11 @@ function RichNumberInput({
   );
 }
 
-function getParts(value: string, decimals: number = TONCOIN.decimals) {
-  const regex = getInputRegex(decimals);
-  return value.match(regex) || undefined;
-}
-
-export function getInputRegex(decimals: number) {
-  if (!decimals) return /^(\d+)$/;
-  return new RegExp(`^(\\d+)([.,])?(\\d{1,${decimals}})?`);
-}
-
 function clearValue(value: string, decimals: number) {
   return value
     .replace(',', '.') // Replace comma to point
     .replace(/[^\d.]/, '') // Remove incorrect symbols
-    .match(getInputRegex(decimals))?.[0] // Trim extra decimal places
+    .match(getNumberRegex(decimals))?.[0] // Trim extra decimal places
     .replace(/^0+(?=([1-9]|0\.))/, '') // Trim extra zeros at beginning
     .replace(/^0+$/, '0') // Trim extra zeros (if only zeros are entered)
     ?? '';

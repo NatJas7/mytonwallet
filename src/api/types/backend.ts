@@ -1,5 +1,8 @@
 import type { DieselStatus } from '../../global/types';
+import type { ApiTonWalletVersion } from '../chains/ton/types';
 import type { ApiLoyaltyType } from './misc';
+
+export type ApiSwapDexLabel = 'dedust' | 'ston';
 
 export type ApiSwapEstimateRequest = {
   from: string;
@@ -9,23 +12,63 @@ export type ApiSwapEstimateRequest = {
   toAmount?: string;
   fromAddress: string;
   shouldTryDiesel?: boolean;
+  swapVersion?: 1 | 2;
+  toncoinBalance?: string;
+  walletVersion?: ApiTonWalletVersion;
+  isFromAmountMax?: boolean;
+};
+
+export type ApiSwapEstimateVariant = {
+  fromAmount: string;
+  toAmount: string;
+  toMinAmount: string;
+  impact: number;
+  dexLabel: ApiSwapDexLabel;
+  // Fees
+  networkFee: string;
+  realNetworkFee: string;
+  swapFee: string;
+  swapFeePercent: number;
+  ourFee: string;
+  dieselFee?: string;
 };
 
 export type ApiSwapEstimateResponse = ApiSwapEstimateRequest & {
   toAmount: string;
   fromAmount: string;
   toMinAmount: string;
-  networkFee: number;
-  realNetworkFee: number;
+  impact: number;
+  dexLabel: ApiSwapDexLabel;
+  dieselStatus: DieselStatus;
+  other?: ApiSwapEstimateVariant[];
+  // Fees
+  networkFee: string;
+  realNetworkFee: string;
   swapFee: string;
   swapFeePercent: number;
-  impact: number;
-  dexLabel: string;
-  dieselStatus: DieselStatus;
+  ourFee: string;
+  ourFeePercent: number;
+  dieselFee?: string;
 };
 
-export type ApiSwapBuildRequest
-  = Omit<ApiSwapEstimateResponse, 'impact' | 'swapFeePercent' | 'realNetworkFee' | 'dieselStatus'>;
+export type ApiSwapBuildRequest = Pick<ApiSwapEstimateResponse,
+'from'
+| 'to'
+| 'fromAddress'
+| 'dexLabel'
+| 'fromAmount'
+| 'toAmount'
+| 'toMinAmount'
+| 'slippage'
+| 'shouldTryDiesel'
+| 'swapVersion'
+| 'networkFee'
+| 'swapFee'
+| 'ourFee'
+| 'dieselFee'
+> & {
+  walletVersion?: ApiTonWalletVersion;
+};
 
 export type ApiSwapTransfer = {
   toAddress: string;
@@ -73,10 +116,12 @@ export type ApiSwapHistoryItem = {
   fromAmount: string;
   to: string;
   toAmount: string;
-  networkFee: number;
+  networkFee: string;
   swapFee: string;
+  ourFee?: string;
   status: 'pending' | 'completed' | 'failed' | 'expired';
   txIds: string[];
+  isCanceled?: boolean;
   cex?: {
     payinAddress: string;
     payoutAddress: string;
@@ -115,7 +160,7 @@ export type ApiSwapCexCreateTransactionRequest = {
   toAddress: string; // TON or other crypto address
   payoutExtraId?: string;
   swapFee: string; // from estimate request
-  networkFee?: number; // only for sent TON
+  networkFee?: string; // only for sent TON
 };
 
 export type ApiSwapCexCreateTransactionResponse = {
@@ -124,6 +169,16 @@ export type ApiSwapCexCreateTransactionResponse = {
 };
 
 // Staking
+export type ApiStakingJettonPool = {
+  pool: string;
+  token: string;
+  periods: {
+    period: number;
+    unstakeCommission: number;
+    token: string;
+  }[];
+};
+
 export type ApiStakingCommonData = {
   liquid: {
     currentRate: number;
@@ -145,7 +200,7 @@ export type ApiStakingCommonData = {
     end: number;
     unlock: number;
   };
-  bigInt: bigint;
+  jettonPools: ApiStakingJettonPool[];
 };
 
 export type ApiSite = {
@@ -156,6 +211,17 @@ export type ApiSite = {
   description: string;
   canBeRestricted: boolean;
   isExternal: boolean;
+  isFeatured?: boolean;
+  categoryId?: number;
+
+  extendedIcon?: string;
+  badgeText?: string;
+  withBorder?: boolean;
+};
+
+export type ApiSiteCategory = {
+  id: number;
+  name: string;
 };
 
 // Prices

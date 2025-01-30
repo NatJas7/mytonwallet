@@ -13,6 +13,7 @@ export {
   getNftUpdates,
   checkNftTransferDraft,
   submitNftTransfers,
+  checkNftOwnership,
 } from './nfts';
 export { oneCellFromBoc } from './util/tonCore';
 export {
@@ -21,7 +22,6 @@ export {
   fetchAccountTransactionSlice,
   fetchTokenTransactionSlice,
   submitTransfer,
-  waitPendingTransfer,
   checkMultiTransactionDraft,
   submitMultiTransfer,
   getAllTransactionSlice,
@@ -54,11 +54,11 @@ export {
 export {
   checkStakeDraft,
   checkUnstakeDraft,
+  submitStakingClaim,
   submitStake,
   submitUnstake,
-  getStakingState,
+  getStakingStates,
   getBackendStakingState,
-  onStakingChangeExpected,
 } from './staking';
 export {
   packPayloadToBoc,
@@ -67,7 +67,6 @@ export {
 export {
   getAccountTokenBalances,
   getTokenBalances,
-  getAddressTokenBalances,
   fetchToken,
   insertMintlessPayload,
 } from './tokens';
