@@ -9,21 +9,27 @@ import SwiftUI
 import WalletCore
 import WalletContext
 
-public func makeTappableAddressMenu(accountContext: AccountContext, displayName: String?, chain: String, address: String) -> () -> MenuConfig {
+func makeTappableAddressMenu(accountContext: AccountContext, addressModel: AddressViewModel) -> () -> MenuConfig {
+    let chain = ApiChain(rawValue: addressModel.chain)
+    
     return {
         var menuItems: [MenuItem] = [
             .customView(id: "0-view-account", view: {
-                AnyView(ViewAccountMenuItem(accountContext: accountContext, displayName: displayName, chain: chain, address: address))
-            }, height: 60, width: 250),
-            .wideSeparator(),
-            .button(id: "0-copy", title: lang("Copy Address"), trailingIcon: .air("SendCopy")) {
+                    AnyView(ViewAccountMenuItem(addressModel: addressModel))
+                }, height: 60, width: 250),
+            .wideSeparator()
+        ]
+        
+        if let address = addressModel.addressToCopy {
+            menuItems += .button(id: "0-copy", title: lang("Copy Address"), trailingIcon: .air("SendCopy")) {
                 UIPasteboard.general.string = address
                 AppActions.showToast(animationName: "Copy", message: lang("Address was copied!"))
                 Haptics.play(.lightTap)
-            },
-        ]
-        if let chain = ApiChain(rawValue: chain) {
-            if let saved = accountContext.savedAddresses.get(chain: chain, address: address) {
+            }
+        }
+        
+        if let chain, let saveKey = addressModel.effectiveSaveKey {
+            if let saved = accountContext.savedAddresses.get(chain: chain, address: saveKey) {
                 menuItems += .button(id: "0-unsave", title: lang("Remove from Saved"), trailingIcon: .system("star.slash")) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         withAnimation {
@@ -34,32 +40,34 @@ public func makeTappableAddressMenu(accountContext: AccountContext, displayName:
             } else {
                 menuItems += .button(id: "0-save", title: lang("Save Address"), trailingIcon: .system("star")) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        AppActions.showSaveAddressDialog(accountContext: accountContext, chain: chain, address: address)
+                        AppActions.showSaveAddressDialog(accountContext: accountContext, chain: chain, address: saveKey)
                     }
                 }
             }
         }
-
-        menuItems += .button(id: "0-open-explorer", title: lang("Open in Explorer"), trailingIcon: .air("SendGlobe")) {
-            if let chain = ApiChain(rawValue: chain) {
+                
+        if let chain, let address = addressModel.addressToCopy {
+            menuItems += .button(id: "0-open-explorer", title: lang("Open in Explorer"), trailingIcon: .air("SendGlobe")) {
                 let url = ExplorerHelper.addressUrl(chain: chain, address: address)
                 AppActions.openInBrowser(url)
             }
         }
+
         return MenuConfig(menuItems: menuItems)
     }
 }
 
-
-struct ViewAccountMenuItem: View {
-    var accountContext: AccountContext
-    var displayName: String?
-    var chain: String
-    var address: String
+private struct ViewAccountMenuItem: View {
+    var addressModel: AddressViewModel
 
     @Environment(MenuContext.self) var menuContext
 
     public var body: some View {
+        let address = addressModel.address ?? "?"
+        let name = addressModel.name
+        let chain = addressModel.chain
+        let account = MAccount(id: "", title: name, type: .view, byChain: [chain: AccountChain(address: address)], isTemporary: true)
+        
         SelectableMenuItem(id: "0-view-account", action: {
             topViewController()?.dismiss(animated: true) {
                 AppActions.showTemporaryViewAccount(addressOrDomainByChain: [chain : address])
@@ -69,7 +77,7 @@ struct ViewAccountMenuItem: View {
                 AccountIcon(account: account)
                 
                 VStack(alignment: .leading) {
-                    if let name, name.count < 20 {
+                    if let name {
                         Text(name)
                             .font(.system(size: 17))
                             .lineLimit(1)
@@ -89,16 +97,5 @@ struct ViewAccountMenuItem: View {
             }
             .padding(.horizontal, 4)
         }
-        
-        var name: String? {
-            if let chain = ApiChain(rawValue: chain), let name = accountContext.getLocalName(chain: chain, address: address) {
-                return name
-            }
-            return displayName
-        }
-    }
-    
-    var account: MAccount {
-        MAccount(id: "", title: displayName, type: .view, byChain: [chain: AccountChain(address: address)], isTemporary: true)
     }
 }

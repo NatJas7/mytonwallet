@@ -2,7 +2,7 @@ import React, { memo } from '../../lib/teact/teact';
 
 import { IS_EXPLORER } from '../../config';
 import buildClassName from '../../util/buildClassName';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
+import getDeterministicRandom from '../../util/getDeterministicRandom';
 
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
 
@@ -44,7 +44,7 @@ const NAVIGATION_LINKS_COUNT = 4;
 const BOTTOM_BAR_BUTTONS_COUNT = 3;
 
 function sizeVar(min: number, max: number, seed: string) {
-  return `--size: ${getPseudoRandomNumber(min, max, seed)}`;
+  return `--size: ${getDeterministicRandom(min, max, seed)}`;
 }
 
 function renderHeader() {

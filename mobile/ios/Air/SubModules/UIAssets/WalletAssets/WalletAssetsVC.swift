@@ -70,6 +70,7 @@ private let log = Log("Home-WalletAssets")
     private var snapshot: UIView?
     
     public func interactivelySwitchAccountTo(accountId: String) {
+        stopReordering(isCanceled: true)
         changeAccountTask?.cancel()
         changeAccountTask = Task {
             self.snapshot?.removeFromSuperview()
@@ -288,7 +289,7 @@ private let log = Log("Home-WalletAssets")
         tabsViewModel.startOrdering()
     }
     
-    /// Called from parent (`HomeVC`)
+    /// Called from parent (`HomeVC`), also called as a reaction on account switching
     public func stopReordering(isCanceled: Bool) {
         tabsViewModel.stopReordering(isCanceled: isCanceled, restoreTabsOnCancel: true)
     }

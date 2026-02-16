@@ -59,6 +59,32 @@ public final class SendModel: Sendable {
     var nftSendMode: NftSendMode?
     let stateInit: String?
     
+    @PerceptionIgnored
+    var addressViewModel: AddressViewModel {
+        let apiName = draftData.transactionDraft?.addressName
+        let chain = nfts?.first != nil ? ApiChain.ton.rawValue : token.chain
+        
+        // A temporary solution to detect how would (if any) the address be saved
+        var saveKey: String?
+        switch addressInput.source {
+        case .savedAccount(_, let saveKey1):
+            saveKey = saveKey1
+        case .myAccount:
+            break
+        case .constant:
+            if let apiName, let chain = ApiChain(rawValue: chain), chain.isValidDomain(apiName) {
+                saveKey = apiName // name returned by API is a domain 🤷
+            }
+        }
+        
+        return AddressViewModel(
+            chain: chain,
+            apiAddress: draftData.transactionDraft?.resolvedAddress,
+            apiName: apiName,
+            saveKey: saveKey
+        )
+    }
+    
     // MARK: - Wallet state
     
     var accountBalance: TokenAmount? {

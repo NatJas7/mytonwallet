@@ -103,10 +103,7 @@ function LandscapeActions({
   const addBuyButtonName = IS_CORE_WALLET
     ? lang('Receive')
     : (!isSwapDisabled || isOnRampAllowed
-      ? (lang.code === 'en'
-        ? (<span className={styles.name}>{lang('Add')}<span className={styles.divider}>/</span>{lang('Buy')}</span>)
-        : lang('Add / Buy')
-      )
+      ? lang('Fund')
       : lang('Add')
     );
   const sendButtonName = IS_CORE_WALLET || isOffRampDisabled || lang.code !== 'en'

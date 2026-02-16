@@ -25,8 +25,7 @@ struct SendingHeaderView: View {
                     nft: nft,
                     isOutgoing: true,
                     text: text,
-                    addressName: model.draftData.transactionDraft?.addressName,
-                    addressOrDomain: model.addressOrDomain
+                    addressViewModel: model.addressViewModel
                 )
             } else {
                 TransactionOverviewView(
@@ -34,8 +33,7 @@ struct SendingHeaderView: View {
                     token: model.token,
                     isOutgoing: true,
                     text: text,
-                    addressName: model.draftData.transactionDraft?.addressName,
-                    addressOrDomain: model.addressOrDomain
+                    addressViewModel: model.addressViewModel
                 )
             }
         }

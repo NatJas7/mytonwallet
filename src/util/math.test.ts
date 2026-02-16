@@ -1,4 +1,4 @@
-import { clamp, getPseudoRandom, isBetween, lerp, round, roundToNearestEven } from './math';
+import { clamp, isBetween, lerp, round, roundToNearestEven } from './math';
 
 describe('clamp', () => {
   test('returns value when within range', () => {
@@ -183,73 +183,5 @@ describe('roundToNearestEven', () => {
     expect(roundToNearestEven(5.5)).toBe(6);
     expect(roundToNearestEven(6.5)).toBe(6);
     expect(roundToNearestEven(7.5)).toBe(8);
-  });
-});
-
-describe('getPseudoRandom', () => {
-  test('returns value within range', () => {
-    for (let i = 0; i < 20; i++) {
-      const result = getPseudoRandom(0, 10, i);
-      expect(result).toBeGreaterThanOrEqual(0);
-      expect(result).toBeLessThanOrEqual(10);
-    }
-  });
-
-  test('returns same value for same index (deterministic)', () => {
-    expect(getPseudoRandom(0, 100, 5)).toBe(getPseudoRandom(0, 100, 5));
-    expect(getPseudoRandom(10, 50, 42)).toBe(getPseudoRandom(10, 50, 42));
-  });
-
-  test('returns different values for different indices', () => {
-    const value1 = getPseudoRandom(0, 100, 1);
-    const value2 = getPseudoRandom(0, 100, 2);
-    const value3 = getPseudoRandom(0, 100, 3);
-
-    const uniqueValues = new Set([value1, value2, value3]);
-    expect(uniqueValues.size).toBeGreaterThan(1);
-  });
-
-  test('handles single value range', () => {
-    expect(getPseudoRandom(5, 5, 0)).toBe(5);
-    expect(getPseudoRandom(5, 5, 10)).toBe(5);
-  });
-
-  test('handles negative ranges', () => {
-    for (let i = 0; i < 20; i++) {
-      const result = getPseudoRandom(-10, -5, i);
-      expect(result).toBeGreaterThanOrEqual(-10);
-      expect(result).toBeLessThanOrEqual(-5);
-    }
-  });
-
-  test('handles large ranges', () => {
-    for (let i = 0; i < 100; i++) {
-      const result = getPseudoRandom(0, 10000, i);
-      expect(result).toBeGreaterThanOrEqual(0);
-      expect(result).toBeLessThanOrEqual(10000);
-    }
-  });
-
-  test('handles zero index', () => {
-    const result = getPseudoRandom(0, 100, 0);
-    expect(result).toBeGreaterThanOrEqual(0);
-    expect(result).toBeLessThanOrEqual(100);
-  });
-
-  test('produces reasonable distribution', () => {
-    const results: number[] = [];
-    for (let i = 0; i < 1000; i++) {
-      results.push(getPseudoRandom(0, 9, i));
-    }
-
-    // Check that we get variety of values (not all the same)
-    const uniqueValues = new Set(results);
-    expect(uniqueValues.size).toBeGreaterThan(5); // Should have at least half of possible values
-
-    // Check that values are distributed across the range
-    const min = Math.min(...results);
-    const max = Math.max(...results);
-    expect(min).toBe(0);
-    expect(max).toBe(9);
   });
 });

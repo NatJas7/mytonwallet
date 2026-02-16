@@ -32,67 +32,15 @@ fileprivate struct ToSection: View {
     var body: some View {
         WithPerceptionTracking {
             InsetSection {
-                AddressCellView(model: model)
+                InsetCell {
+                    TappableAddressFull(accountContext: model.$account, model: model.addressViewModel, compactAddressWithName: false)
+                }
             } header: {
                 Text(lang("Recipient Address"))
             } footer: {}
         }
     }
 }
-
-
-fileprivate struct AddressCellView: View {
-    
-    let model: SendModel
-    
-    @State private var menuContext = MenuContext()
-    
-    var body: some View {
-        WithPerceptionTracking {
-            InsetCell {
-                let more: Text = Text(
-                    Image(systemName: "chevron.down")
-                )
-                    .font(.system(size: 14))
-                    .foregroundColor(Color(WTheme.secondaryLabel))
-                
-                Group {
-                    if let resolvedAddress = model.resolvedAddress, resolvedAddress != model.addressOrDomain {
-                        let addr = Text(model.addressOrDomain).foregroundColor(Color(WTheme.primaryLabel))
-                        let resolvedAddress = Text(
-                            formatAddressAttributed(
-                                resolvedAddress,
-                                startEnd: false,
-                                primaryColor: WTheme.secondaryLabel
-                            )
-                        )
-                        
-                        Text("\(addr)\u{A0}·\u{A0}\(resolvedAddress) \(more)") // non-breaking spaces
-                        
-                    } else {
-                        let addr = Text(
-                            formatAddressAttributed(
-                                model.addressOrDomain,
-                                startEnd: false
-                            )
-                        )
-                        
-                        Text("\(addr) \(more)")
-                    }
-                }
-                .multilineTextAlignment(.leading)
-                .font16h22()
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .contentShape(.rect)
-            .menuSource(menuContext: menuContext)
-            .task {
-                menuContext.makeConfig = makeTappableAddressMenu(accountContext: model.$account, displayName: nil, chain: model.token.chain, address: model.addressOrDomain)
-            }
-        }
-    }
-}
-
 
 fileprivate struct AmountSection: View {
     

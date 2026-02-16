@@ -17,7 +17,7 @@ import { swapReplaceActivities } from '../common/swap';
 
 export type ActivitySliceResult = {
   activities: ApiActivity[];
-  shouldFetchMore: boolean;
+  hasMore: boolean;
 };
 
 export async function fetchPastActivities(
@@ -27,13 +27,13 @@ export async function fetchPastActivities(
   toTimestamp?: number,
 ): Promise<ActivitySliceResult | undefined> {
   try {
-    const { activities: rawActivities, shouldFetchMore } = tokenSlug
+    const { activities: rawActivities, hasMore } = tokenSlug
       ? await fetchTokenActivitySlice(accountId, limit, tokenSlug, toTimestamp)
       : await fetchAllActivitySlice(accountId, limit, toTimestamp);
 
     const activities = await swapReplaceActivities(accountId, rawActivities, tokenSlug);
 
-    return { activities, shouldFetchMore };
+    return { activities, hasMore };
   } catch (err) {
     logDebugError('fetchPastActivities', tokenSlug, err);
     return undefined;
@@ -65,9 +65,9 @@ async function fetchAllActivitySlice(
 
   const activities = mergeSortedActivitiesToMaxTime(...results.map((r) => r.activities));
   // If any chain indicates there might be more, we should fetch more
-  const shouldFetchMore = results.some((r) => r.shouldFetchMore);
+  const hasMore = results.some((r) => r.hasMore);
 
-  return { activities, shouldFetchMore };
+  return { activities, hasMore };
 }
 
 export function decryptComment(accountId: string, activity: ApiTransactionActivity, password?: string) {
@@ -125,13 +125,13 @@ async function fetchAndCheckActivitySlice(
   if (options.limit && activities.length === options.limit) {
     return {
       activities: trimLastIncompleteTrace(activities),
-      shouldFetchMore: true,
+      hasMore: true,
     };
   }
 
   return {
     activities,
-    shouldFetchMore: false,
+    hasMore: false,
   };
 }
 

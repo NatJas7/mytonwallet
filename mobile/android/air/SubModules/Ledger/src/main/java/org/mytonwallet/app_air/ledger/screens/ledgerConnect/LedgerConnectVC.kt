@@ -347,7 +347,7 @@ class LedgerConnectVC(
 
         title = when (mode) {
             is Mode.AddAccount -> {
-                LocaleController.getString("Add Account")
+                LocaleController.getString("Add Wallet")
             }
 
             is Mode.ConnectToSubmitTransfer -> {

@@ -206,7 +206,7 @@ public final class EarnVM: WalletCoreData.EventsObserver {
                 if newTransactions.count > 0 {
                     lastUnstakeActivityItem = (newTransactions.last!.id, newTransactions.last!.timestamp)
                 }
-                if !result.shouldFetchMore {
+                if !result.hasMore {
                     isLoadedAllUnstakeActivityItems = true
                 }
                 await merger(newTransactions: newTransactions)
@@ -250,7 +250,7 @@ public final class EarnVM: WalletCoreData.EventsObserver {
                 if newTransactions.count > 0 {
                     lastActivityItem = (newTransactions.last!.id, newTransactions.last!.timestamp)
                 }
-                if !result.shouldFetchMore {
+                if !result.hasMore {
                     isLoadedAllActivityItems = true
                 }
                 await merger(newTransactions: newTransactions)

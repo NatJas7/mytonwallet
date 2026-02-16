@@ -6,30 +6,29 @@ import { updateAuth, updateSettings } from '../../reducers';
 import { selectNetworkAccounts } from '../../selectors';
 
 addActionHandler('openAccountSelector', (global) => {
+  global = updateAuth(global, {
+    forceAddingTonOnlyAccount: undefined,
+    initialAddAccountState: undefined,
+    shouldHideAddAccountBackButton: undefined,
+  });
+
   if (IS_DELEGATED_BOTTOM_SHEET) {
     callActionInMain('openAccountSelector');
     return global;
   }
-
-  global = updateAuth(global, {
-    forceAddingTonOnlyAccount: undefined,
-    initialAddAccountState: undefined,
-    shouldHideAddAccountBackButton: undefined,
-  });
-
   return { ...global, isAccountSelectorOpen: true };
 });
 
 addActionHandler('closeAccountSelector', (global) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('closeAccountSelector');
-  }
-
   global = updateAuth(global, {
     forceAddingTonOnlyAccount: undefined,
     initialAddAccountState: undefined,
     shouldHideAddAccountBackButton: undefined,
   });
+
+  if (IS_DELEGATED_BOTTOM_SHEET) {
+    callActionInMain('closeAccountSelector');
+  }
 
   return { ...global, isAccountSelectorOpen: undefined };
 });

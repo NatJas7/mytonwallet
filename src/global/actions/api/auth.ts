@@ -100,6 +100,7 @@ export async function switchAccount(global: GlobalState, accountId: string, newN
   global = getGlobal();
   updatePoisoningCacheFromGlobalState(global);
 
+  actions.closeSettings();
   if (newNetwork) {
     actions.changeNetwork({ network: newNetwork });
   }

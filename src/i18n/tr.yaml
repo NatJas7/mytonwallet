@@ -491,7 +491,7 @@ Are you sure you want to disable biometrics?: Biyometrik korumayı devre dışı
 "Yes": Evet
 Biometric confirmation failed: Biyometrik doğrulama başarısız oldu
 No Activity: Etkinlik yok
-Add / Buy: Yükleme
+Fund: Yükleme
 Buy with Card: Kart ile Satın Al
 Buy with Crypto: Kripto ile Satın Al
 Cannot load widget: Widget yüklenemiyor
@@ -979,7 +979,6 @@ All: Tümü
 $view_accounts: Görüntüle
 Add your first one to begin.: Başlamak için ilk cüzdanınızı ekleyin.
 You don’t have any wallets yet: Henüz hiç cüzdanınız yok
-Add New Wallet: Yeni Cüzdan Ekle
 Add Ledger Wallet: Ledger Cüzdanı Ekle
 Add View Wallet: Görüntüleme Cüzdanı Ekle
 No Ledger wallets yet: Henüz Ledger cüzdanı yok
@@ -1046,3 +1045,4 @@ Pin: Sabitle
 Unpin: Sabitlemeyi Kaldır
 My Assets: Varlıklarım
 Owner: Sahip
+Show All Wallets: Tüm cüzdanları göster

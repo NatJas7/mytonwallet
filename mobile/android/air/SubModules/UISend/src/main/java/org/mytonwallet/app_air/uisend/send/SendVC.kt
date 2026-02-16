@@ -10,6 +10,7 @@ import android.text.Spanned
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.View.generateViewId
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
@@ -22,8 +23,8 @@ import androidx.appcompat.widget.AppCompatEditText
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.Guideline
 import androidx.core.content.ContextCompat
+import androidx.core.text.buildSpannedString
 import androidx.core.view.isGone
-import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.ViewModelProvider
@@ -43,6 +44,8 @@ import org.mytonwallet.app_air.uicomponents.extensions.animatorSet
 import org.mytonwallet.app_air.uicomponents.extensions.collectFlow
 import org.mytonwallet.app_air.uicomponents.extensions.disableInteraction
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import org.mytonwallet.app_air.uicomponents.extensions.disableInteraction
+import org.mytonwallet.app_air.uicomponents.extensions.setReadOnly
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
 import org.mytonwallet.app_air.uicomponents.extensions.setReadOnly
 import org.mytonwallet.app_air.uicomponents.helpers.DieselAuthorizationHelpers
@@ -64,6 +67,7 @@ import org.mytonwallet.app_air.uicomponents.widgets.setRoundedOutline
 import org.mytonwallet.app_air.uicomponents.widgets.showKeyboard
 import org.mytonwallet.app_air.uicomponents.widgets.updateLayoutParamsIfExists
 import org.mytonwallet.app_air.uisend.send.helpers.ScamDetectionHelpers
+import org.mytonwallet.app_air.walletbasecontext.R
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.theme.ViewConstants
 import org.mytonwallet.app_air.walletbasecontext.theme.WColor
@@ -82,6 +86,7 @@ import org.mytonwallet.app_air.walletcore.WalletCore
 import org.mytonwallet.app_air.walletcore.WalletEvent
 import org.mytonwallet.app_air.walletcore.helpers.ActivityHelpers
 import org.mytonwallet.app_air.walletcore.models.MBlockchain
+import org.mytonwallet.app_air.walletcore.models.MSavedAddress
 import org.mytonwallet.app_air.walletcore.moshi.MApiTransaction
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import org.mytonwallet.app_air.walletcore.stores.ConfigStore
@@ -189,10 +194,29 @@ class SendVC(
             onTextEntered = { keyword ->
                 hideSuggestions()
                 focusAmount()
+                val addressInfo = viewModel.addressInfoFlow.value
+                if (addressInfo?.input == keyword) {
+                    updateAddressOverlay(addressInfo, keyword)
+                } else {
+                    viewModel.onDestinationEntered(keyword)
+                }
                 suggestionsBoxView.search(keyword, true)
             }).apply {
             id = generateViewId()
             showCloseOnTextEditing = true
+            pasteInterceptor = { pastedText ->
+                val address = pastedText.trim()
+                if (!MBlockchain.isValidAddressOnAnyChain(address)) {
+                    false
+                } else {
+                    hideSuggestions()
+                    focusAmount()
+                    viewModel.onInputDestination(address)
+                    switchTokenBasedOnChain(address)
+                    viewModel.onDestinationEntered(address)
+                    true
+                }
+            }
             focusCallback = { hasFocus ->
                 if (hasFocus) {
                     showSuggestions()
@@ -221,12 +245,14 @@ class SendVC(
                         addressInputView.setAccount(account)
                         hideSuggestions()
                         focusAmount()
+                        viewModel.onDestinationEntered(addressInputView.getKeyword())
                     }
 
                     savedAddress != null -> {
                         addressInputView.setAddress(savedAddress)
                         hideSuggestions()
                         focusAmount()
+                        viewModel.onDestinationEntered(addressInputView.getKeyword())
                     }
                 }
             }
@@ -488,6 +514,10 @@ class SendVC(
             val address = s?.toString() ?: ""
             viewModel.onInputDestination(address)
             switchTokenBasedOnChain(address)
+            if (address.isBlank()) {
+                viewModel.onDestinationEntered("")
+                updateContinueButtonType(false)
+            }
         }
 
         override fun afterTextChanged(s: Editable?) {}
@@ -617,7 +647,7 @@ class SendVC(
         if (!suggestionsBoxView.isEnabled) {
             return
         }
-        if (primaryContent.isVisible && suggestionsBoxView.isInvisible) {
+        if (primaryContent.isVisible && !suggestionsBoxView.isVisible) {
             return
         }
         navigationBar?.fadeOutActions()
@@ -758,6 +788,7 @@ class SendVC(
             addressInputView.addTextChangedListener(onInputDestinationTextWatcher)
             addressInputView.doAfterQrCodeScanned { address ->
                 switchTokenBasedOnChain(address)
+                viewModel.onDestinationEntered(address)
             }
 
             commentInputView.addTextChangedListener(onInputCommentTextWatcher)
@@ -822,6 +853,21 @@ class SendVC(
             suggestionsBoxView.isEnabled = it.uiAddressSearch.enabled
         }
 
+        collectFlow(viewModel.addressInfoFlow) { info ->
+            val destination = viewModel.inputStateFlow.value.destination.trim()
+            if (destination.isEmpty()) {
+                return@collectFlow
+            }
+
+            if (info?.input == destination) {
+                updateAddressOverlay(info, destination)
+            }
+        }
+
+        collectFlow(viewModel.memoRequiredFlow) {
+            updateCommentHint(it)
+        }
+
         collectFlow(viewModel.uiEventFlow) { event ->
             when (event) {
                 is SendViewModel.UiEvent.ShowAlert -> {
@@ -839,12 +885,33 @@ class SendVC(
 
     private fun buildSegmentedItems(): List<WClearSegmentedControl.Item> {
         val items = mutableListOf(
-            WClearSegmentedControl.Item(LocaleController.getString("Send"), null, null)
+            WClearSegmentedControl.Item(
+                LocaleController.getString("Send"),
+                null,
+                if (autoConfirm) null else {
+                    anchorView -> presentOffRampSendMenu(anchorView)
+                }
+            )
         )
         if (shouldShowSellTab) {
             items.add(WClearSegmentedControl.Item(LocaleController.getString("Sell"), null, null))
         }
         return items
+    }
+
+    private fun presentOffRampSendMenu(anchorView: View) {
+        WMenuPopup.present(
+            anchorView,
+            listOf(
+                WMenuPopup.Item(
+                    R.drawable.ic_header_popup_menu_multisend_outline,
+                    LocaleController.getString("Multisend"),
+                ) {
+                    MultisendLauncher.launch(this)
+                }
+            ),
+            positioning = WMenuPopup.Positioning.BELOW
+        )
     }
 
     private fun openSellWithCard() {
@@ -870,11 +937,12 @@ class SendVC(
     private fun openConfirmIfPossible() {
         viewModel.getConfirmationPageConfig()?.let { config ->
             val vc = SendConfirmVC(
-                context = context,
-                config = config,
-                transferOptions = viewModel.getTransferOptions(config, ""),
-                slug = viewModel.getTokenSlug(),
-                name = addressInputView.autocompleteResult?.name
+                context,
+                config,
+                viewModel.getTransferOptions(config, ""),
+                viewModel.getTokenSlug(),
+                name = addressInputView.autocompleteResult?.name,
+                isScam = viewModel.addressInfoFlow.value?.isScam ?: false
             )
             val isHardware = AccountStore.activeAccount?.isHardware == true
             vc.setNextTask { passcode ->
@@ -935,34 +1003,87 @@ class SendVC(
 
     private fun updateCommentTitleLabel() {
         title2.apply {
-            if (AccountStore.activeAccount?.supportsCommentEncryption == false) {
-                configure(
-                    title = LocaleController.getString("Comment or Memo"),
-                    titleColor = WColor.Tint,
-                    topRounding = HeaderCell.TopRounding.FIRST_ITEM
-                )
-                return@apply
+            val supportsEncryption = AccountStore.activeAccount?.supportsCommentEncryption != false
+            val titleLabel = buildCommentTitleLabel(supportsEncryption)
+            configure(
+                title = titleLabel,
+                titleColor = WColor.Tint,
+                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+            )
+        }
+    }
+
+    private fun buildCommentTitleLabel(supportsEncryption: Boolean): CharSequence {
+        val base = LocaleController.getString(
+            if (supportsEncryption && viewModel.getShouldEncrypt()) {
+                "Encrypted Message"
+            } else {
+                "Comment or Memo"
             }
-            val txt =
-                LocaleController.getString(if (viewModel.getShouldEncrypt()) "Encrypted Message" else "Comment or Memo") + " "
-            val ss = SpannableStringBuilder(txt)
+        )
+        val ss = SpannableStringBuilder(
+            buildSpannedString {
+                append(base)
+                if (supportsEncryption) {
+                    append(" ")
+                }
+            }
+        )
+        if (supportsEncryption) {
             ContextCompat.getDrawable(
                 context,
                 org.mytonwallet.app_air.icons.R.drawable.ic_arrow_bottom_8
             )?.let { drawable ->
                 drawable.mutate()
                 drawable.setTint(WColor.Tint.color)
-                val width = 8.dp
-                val height = 4.dp
-                drawable.setBounds(0, 0, width, height)
+                drawable.setBounds(0, 0, 8.dp, 4.dp)
                 val imageSpan = VerticalImageSpan(drawable)
                 ss.append(" ", imageSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            configure(
-                title = ss,
-                titleColor = WColor.Tint,
-                topRounding = HeaderCell.TopRounding.FIRST_ITEM
+        }
+        return ss
+    }
+
+    private fun updateCommentHint(isMemoRequired: Boolean) {
+        commentInputView.hint =
+            LocaleController.getString(if (isMemoRequired) "Required" else "Add a message, if needed")
+    }
+
+    private fun updateAddressOverlay(info: SendViewModel.AddressInfo, destination: String) {
+        val resolved = info.resolvedAddress
+        val name = info.addressName
+        val isScam = info.isScam == true
+        updateContinueButtonType(isScam)
+        if (isScam) {
+            val address = resolved ?: destination
+            return addressInputView.setScamAddress(
+                MSavedAddress(
+                    address = address,
+                    name = address,
+                    chain = info.chain.name,
+                ),
             )
+        }
+        if (!resolved.isNullOrEmpty() && !name.isNullOrEmpty()) {
+            return addressInputView.setAddress(
+                MSavedAddress(
+                    address = resolved,
+                    name = name,
+                    chain = info.chain.name,
+                ),
+            )
+        }
+
+        if (addressInputView.getKeyword() != destination) {
+            addressInputView.setText(destination)
+        }
+    }
+
+    private fun updateContinueButtonType(isScam: Boolean) {
+        continueButton.type = if (isScam) {
+            WButton.Type.DESTRUCTIVE
+        } else {
+            WButton.Type.PRIMARY
         }
     }
 
@@ -971,6 +1092,7 @@ class SendVC(
             it.address?.let { address ->
                 viewModel.onInputDestination(address)
                 addressInputView.setText(address)
+                viewModel.onDestinationEntered(address)
             }
             it.amount?.let { amountBigDecimalString ->
                 val token = TokenStore.getToken(initialTokenSlug ?: TONCOIN_SLUG)

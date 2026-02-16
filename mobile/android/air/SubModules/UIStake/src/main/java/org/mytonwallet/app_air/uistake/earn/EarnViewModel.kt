@@ -300,9 +300,10 @@ class EarnViewModel(val tokenSlug: String) : ViewModel(), WalletCore.EventObserv
         ) { result, err ->
             if (activeAccountId != AccountStore.activeAccountId) return@call
             val transactions = result?.activities
+            val isHistoryEndReached = result?.hasMore == false
             if (!transactions.isNullOrEmpty()) {
                 if (!isCheckingLatestChanges) {
-                    hasLoadedAllUnstakedActivityItems = transactions.isEmpty()
+                    hasLoadedAllUnstakedActivityItems = isHistoryEndReached
                     lastUnstakedActivityTimestamp = transactions.last().timestamp
                 }
                 viewModelScope.launch {
@@ -318,8 +319,8 @@ class EarnViewModel(val tokenSlug: String) : ViewModel(), WalletCore.EventObserv
                 }, 2000)
                 isLoadingUnstakedActivityItems = false
             } else {
-                hasLoadedAllUnstakedActivityItems = true
-                if (historyItems.isNullOrEmpty()) {
+                hasLoadedAllUnstakedActivityItems = isHistoryEndReached
+                if (hasLoadedAllUnstakedActivityItems && historyItems.isNullOrEmpty()) {
                     showNoItemView()
                 }
                 isLoadingUnstakedActivityItems = false
@@ -367,9 +368,10 @@ class EarnViewModel(val tokenSlug: String) : ViewModel(), WalletCore.EventObserv
             )
         ) { result, err ->
             val transactions = result?.activities
+            val isHistoryEndReached = result?.hasMore == false
             if (!transactions.isNullOrEmpty()) {
                 if (!isCheckingLatestChanges) {
-                    hasLoadedAllStakedActivityItems = transactions.isEmpty()
+                    hasLoadedAllStakedActivityItems = isHistoryEndReached
                     lastStakedActivityTimestamp = transactions.last().timestamp
                 }
                 viewModelScope.launch {
@@ -382,8 +384,8 @@ class EarnViewModel(val tokenSlug: String) : ViewModel(), WalletCore.EventObserv
                 }, 2000)
                 isLoadingStakedActivityItems = false
             } else {
-                hasLoadedAllStakedActivityItems = true
-                if (historyItems.isNullOrEmpty()) {
+                hasLoadedAllStakedActivityItems = isHistoryEndReached
+                if (hasLoadedAllStakedActivityItems && historyItems.isNullOrEmpty()) {
                     showNoItemView()
                 }
                 isLoadingStakedActivityItems = false

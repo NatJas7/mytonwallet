@@ -15,7 +15,6 @@ import android.widget.Toast
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.constraintlayout.widget.ConstraintLayout.LayoutParams.MATCH_CONSTRAINT
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.core.text.buildSpannedString
 import androidx.core.text.inSpans
 import androidx.core.view.isGone
@@ -1029,13 +1028,7 @@ class WalletCardView(
                     }
                 }
             }.toMutableList()
-        val shareText = account?.byChain?.entries?.joinToString(
-            prefix = "https://my.tt/view/?",
-            separator = "&"
-        ) { (chain, chainAccount) ->
-            "$chain=${chainAccount.address}"
-        }
-        shareText?.let { shareText ->
+        account?.shareLink?.let { shareLink ->
             items.lastOrNull()?.also { it.hasSeparator = true }
             items.add(
                 WMenuPopup.Item(
@@ -1053,7 +1046,7 @@ class WalletCardView(
                 ) {
                     ShareHelpers.shareText(
                         context,
-                        shareText,
+                        shareLink,
                         LocaleController.getString("Share Wallet Link")
                     )
                 }

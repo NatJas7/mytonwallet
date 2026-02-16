@@ -108,7 +108,7 @@ function useTokenContextMenu(ref: ElementRef<HTMLButtonElement>, options: {
         value: 'claimRewards',
       } satisfies DropdownItem<MenuHandler>]
       : [!isServiceToken && {
-        name: 'Add / Buy',
+        name: 'Fund',
         fontIcon: 'menu-plus',
         value: 'add',
       } satisfies DropdownItem<MenuHandler>, {

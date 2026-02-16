@@ -177,11 +177,11 @@ public actor _ActivityStore: WalletCoreData.EventsObserver {
         var toTimestamp = selectLastMainTxTimestamp(accountId: accountId)
         var fetchedActivities: [ApiActivity] = []
         
-        var shouldFetchMore = true
-        while shouldFetchMore {
+        var hasMore = true
+        while hasMore {
             let result = try await Api.fetchPastActivities(accountId: accountId, limit: limit, tokenSlug: nil, toTimestamp: toTimestamp)
             let activities = result.activities
-            let apiShouldFetchMore = result.shouldFetchMore
+            let apiHasMore = result.hasMore
             if activities.isEmpty {
                 updateActivitiesIsHistoryEndReached(accountId: accountId, slug: nil, isReached: true)
                 break
@@ -197,8 +197,8 @@ public actor _ActivityStore: WalletCoreData.EventsObserver {
                 return !poisoningCache.isTransactionWithPoisoning(transaction: transaction)
             }
             fetchedActivities.append(contentsOf: activities)
-            shouldFetchMore = apiShouldFetchMore
-                || (
+            hasMore = apiHasMore
+                && (
                     filteredResult.count < limit
                     && fetchedActivities.count < limit
                 )
@@ -251,11 +251,11 @@ public actor _ActivityStore: WalletCoreData.EventsObserver {
             .last(where: { getIsIdSuitableForFetchingTimestamp(activity: byId[$0]) })
             .flatMap { id in byId[id]?.timestamp }
         
-        var shouldFetchMore = true
-        while shouldFetchMore {
+        var hasMore = true
+        while hasMore {
             let result = try await Api.fetchPastActivities(accountId: accountId, limit: limit, tokenSlug: token.slug, toTimestamp: toTimestamp)
             let activities = result.activities
-            let apiShouldFetchMore = result.shouldFetchMore
+            let apiHasMore = result.hasMore
             if activities.isEmpty {
                 updateActivitiesIsHistoryEndReached(accountId: accountId, slug: token.slug, isReached: true)
                 break
@@ -271,8 +271,8 @@ public actor _ActivityStore: WalletCoreData.EventsObserver {
                 return !poisoningCache.isTransactionWithPoisoning(transaction: transaction)
             }
             fetchedActivities.append(contentsOf: activities)
-            shouldFetchMore = apiShouldFetchMore
-                || (
+            hasMore = apiHasMore
+                && (
                     filteredResult.count < limit
                     && fetchedActivities.count < limit
                 )

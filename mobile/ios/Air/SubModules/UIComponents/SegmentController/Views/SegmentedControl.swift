@@ -64,7 +64,7 @@ struct _SegmentedControlContent: View {
 }
 
 
-struct SegmentedControlSelectionView: View {
+private struct SegmentedControlSelectionView: View {
     
     let model: SegmentedControlModel
     

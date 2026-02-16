@@ -114,19 +114,18 @@ public class AccountContext {
         domainsStore.for(accountId: accountId)
     }
     public func getLocalName(chain: ApiChain, address: String) -> String? {
-        let saved = savedAddresses.get(chain: chain, address: address)
-        if let saved {
-            return saved.name
-        }
+        getMyAccountName(chain: chain, address: address) ?? getSavedAddressName(chain: chain, saveKey: address)
+    }
+    public func getMyAccountName(chain: ApiChain, address: String) -> String? {
         let matchingAccount = accountStore.orderedAccounts.first { account in
             if let info = account.byChain[chain.rawValue], info.address == address || info.domain == address {
                 return true
             }
             return false
         }
-        if let matchingAccount {
-            return matchingAccount.displayName
-        }
-        return nil
+        return matchingAccount?.displayName
+    }
+    public func getSavedAddressName(chain: ApiChain, saveKey: String) -> String? {
+        savedAddresses.get(chain: chain, address: saveKey)?.name
     }
 }

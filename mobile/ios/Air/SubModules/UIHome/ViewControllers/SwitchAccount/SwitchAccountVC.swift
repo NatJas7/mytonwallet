@@ -222,7 +222,7 @@ public class SwitchAccountVC: WViewController {
             cell.configurationUpdateHandler = { cell, state in
                 cell.contentConfiguration = UIHostingConfiguration {
                     ActionRowView(
-                        title: lang("Add Account"),
+                        title: lang("Add Wallet"),
                         icon: Image.airBundle("AddAccountIcon")
                     )
                 }

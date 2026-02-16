@@ -37,6 +37,7 @@ jest.mock('../capacitor', () => ({
 
 jest.mock('../openUrl', () => ({
   openUrl: jest.fn(),
+  isSubproject: jest.fn().mockReturnValue(false),
 }));
 
 jest.mock('../renderPromise', () => ({

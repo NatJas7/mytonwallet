@@ -176,7 +176,7 @@ class SettingsVM {
             SettingsItem(
                 identifier = SettingsItem.Identifier.ADD_ACCOUNT,
                 icon = R.drawable.ic_add,
-                title = LocaleController.getString("Add Account"),
+                title = LocaleController.getString("Add Wallet"),
                 hasTintColor = true
             )
         )

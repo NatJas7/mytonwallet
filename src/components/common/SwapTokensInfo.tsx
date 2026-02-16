@@ -1,11 +1,10 @@
-import React, { memo, useMemo } from '../../lib/teact/teact';
+import React, { memo } from '../../lib/teact/teact';
 
 import type { ApiSwapAsset } from '../../api/types';
 import type { UserSwapToken } from '../../global/types';
 
 import buildClassName from '../../util/buildClassName';
 import { formatCurrencyExtended } from '../../util/formatNumber';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
 import getChainNetworkName from '../../util/swap/getChainNetworkName';
 import getSwapRate from '../../util/swap/getSwapRate';
 
@@ -27,9 +26,6 @@ interface OwnProps {
 function SwapTokensInfo({
   isSensitiveDataHidden, tokenIn, amountIn, tokenOut, amountOut, isError = false, onTokenClick,
 }: OwnProps) {
-  const amountInCols = useMemo(() => getPseudoRandomNumber(5, 13, amountIn ?? ''), [amountIn]);
-  const amountOutCols = useMemo(() => getPseudoRandomNumber(5, 13, amountOut ?? ''), [amountOut]);
-
   function handleTokenClick(token?: UserSwapToken | ApiSwapAsset) {
     if (onTokenClick && token?.slug) {
       onTokenClick(token.slug);
@@ -37,7 +33,7 @@ function SwapTokensInfo({
   }
 
   function renderTokenInfo(
-    amountCols: number,
+    seed: string,
     token?: UserSwapToken | ApiSwapAsset,
     amount = '0',
     isReceived = false,
@@ -72,7 +68,9 @@ function SwapTokensInfo({
         </span>
         <SensitiveData
           isActive={isSensitiveDataHidden}
-          cols={amountCols}
+          min={5}
+          max={13}
+          seed={seed}
           rows={2}
           cellSize={8}
           align="right"
@@ -92,7 +90,7 @@ function SwapTokensInfo({
 
   return (
     <div className={styles.infoBlock}>
-      {renderTokenInfo(amountInCols, tokenIn, amountIn)}
+      {renderTokenInfo(amountIn ?? '', tokenIn, amountIn)}
       <div className={styles.infoSeparator}>
         <i
           className={buildClassName(
@@ -103,7 +101,7 @@ function SwapTokensInfo({
           aria-hidden
         />
       </div>
-      {renderTokenInfo(amountOutCols, tokenOut, amountOut, true)}
+      {renderTokenInfo(amountOut ?? '', tokenOut, amountOut, true)}
     </div>
   );
 }

@@ -12,7 +12,6 @@ import { getIsActivityPendingForUser, getShouldSkipSwapWaitingStatus } from '../
 import buildClassName from '../../../../util/buildClassName';
 import { formatTime } from '../../../../util/dateFormat';
 import { formatCurrencyExtended } from '../../../../util/formatNumber';
-import getPseudoRandomNumber from '../../../../util/getPseudoRandomNumber';
 import getSwapRate from '../../../../util/swap/getSwapRate';
 
 import useLang from '../../../../hooks/useLang';
@@ -85,8 +84,6 @@ function Swap({
   const isError = ONCHAIN_ERROR_STATUSES.has(status)
     || CHANGELLY_EXPIRED_STATUSES.has(cex?.status ?? '');
   const isHold = cex?.status === 'hold';
-  const amountCols = useMemo(() => getPseudoRandomNumber(5, 13, timestamp.toString()), [timestamp]);
-
   function renderIcon() {
     let statusClass: string | undefined = styles.colorSwap;
     let pendingIndicatorColor: PendingIndicatorColor = 'Green';
@@ -121,7 +118,9 @@ function Swap({
     return (
       <SensitiveData
         isActive={isSensitiveDataHidden}
-        cols={amountCols}
+        min={5}
+        max={13}
+        seed={timestamp.toString()}
         rows={2}
         cellSize={8}
         align="right"

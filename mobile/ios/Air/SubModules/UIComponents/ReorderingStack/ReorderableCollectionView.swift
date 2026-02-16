@@ -15,6 +15,7 @@ public protocol ReorderableCollectionViewControllerDelegate: UIScrollViewDelegat
     func reorderController(_ controller: ReorderableCollectionViewController, willEndContextMenuInteraction configuration: UIContextMenuConfiguration, animator: (any UIContextMenuInteractionAnimating)?)
     func reorderController(_ controller: ReorderableCollectionViewController, didChangeReorderingStateByExternalActor isExternalActor: Bool)
     func reorderController(_ controller: ReorderableCollectionViewController, didSelectItemAt indexPath: IndexPath)
+    func reorderController(_ controller: ReorderableCollectionViewController, adjustPreviewFrame previewFrame: CGRect) -> CGRect
 }
 
 public extension ReorderableCollectionViewControllerDelegate {
@@ -27,6 +28,7 @@ public extension ReorderableCollectionViewControllerDelegate {
     func reorderController(_ controller: ReorderableCollectionViewController, willEndContextMenuInteraction configuration: UIContextMenuConfiguration, animator: (any UIContextMenuInteractionAnimating)?) { }
     func reorderController(_ controller: ReorderableCollectionViewController, didChangeReorderingStateByExternalActor isExternalActor: Bool) { }
     func reorderController(_ controller: ReorderableCollectionViewController, didSelectItemAt indexPath: IndexPath) { }
+    func reorderController(_ controller: ReorderableCollectionViewController, adjustPreviewFrame previewFrame: CGRect) -> CGRect { previewFrame }
 }
 
 /// Helper that adds drag-and-drop reordering to a collection view.
@@ -43,16 +45,29 @@ public final class ReorderableCollectionViewController: NSObject {
         case towardEnd = 1
     }
 
-    /// Extended version of `CellPreview` for internal usage
+    /// Current cell's preview context
     private struct InternalCellPreview {
         var view: UIView
         var centerOffset: CGSize
         var cornerRadius: CGFloat
 
+        /// Original cell's frame center, which is generally different from the preview's center (shifted for `centerOffset`)
         @MainActor
         var cellCenter: CGPoint {
             get { view.frame.center - centerOffset }
             set { view.center = newValue + centerOffset }
+        }
+        
+        @MainActor
+        func frameForCellCenter(_ cellCenter: CGPoint) -> CGRect {
+            let size = view.frame.size
+            let c = cellCenter + centerOffset
+            return .init(
+                x: c.x - size.width / 2,
+                y: c.y - size.height / 2,
+                width: size.width,
+                height: size.height,
+            )
         }
     }
     
@@ -111,7 +126,7 @@ public final class ReorderableCollectionViewController: NSObject {
     private var customDragPreview: InternalCellPreview?
     private weak var dropTargetCell: UICollectionViewCell?
     private var lastDragLocationInCollection = CGPoint.zero
-    private var centerOffset = CGSize.zero
+    private var centerOffset = CGSize.zero // a dictance between cell's center and the touch location
     private var currentSourceIndexPath: IndexPath?
     private var longGestureRecognizer: UILongPressGestureRecognizer?
     private var reorderThrottle = ReorderThrottle()
@@ -123,15 +138,17 @@ public final class ReorderableCollectionViewController: NSObject {
     private var currentDraggedIndexPath: IndexPath? // cell's reorderingState.dragging
 
     private var wasScrollingEnabled = true // when true, scrolling was enabled before drag; auto-scroll is applied during drag
-    private var isFlowDirectionHorizontal: Bool = false
     private var autoScrollDirection: AutoScrollDirection?
     private var autoScrollDisplayLink: CADisplayLink?
     private let autoScrollSpeed: CGFloat = 6  // Points per frame
-    private let autoScrollEdgeInset: CGFloat = 40
+    
+    public var autoScrollEdgeInset: CGFloat = 40
     
     public weak var delegate: ReorderableCollectionViewControllerDelegate?
     public let collectionView: UICollectionView
     
+    /// The controller attempts to determine the scrolling direction from the layout,
+    /// but only limited layout types are supported. Use this property to set the direction explicitly.
     public var scrollDirection: UICollectionView.ScrollDirection?
 
     private var _isReordering: Bool = false
@@ -203,7 +220,7 @@ public final class ReorderableCollectionViewController: NSObject {
         delegate?.reorderController(self, didChangeReorderingStateByExternalActor: externally)
     }
     
-    private func flowDirection(forSectionAt indexPath: IndexPath? = nil) -> UICollectionView.ScrollDirection {
+    private var effectiveScrollDirection: UICollectionView.ScrollDirection {
         if let scrollDirection {
             return scrollDirection
         }
@@ -232,7 +249,7 @@ public final class ReorderableCollectionViewController: NSObject {
             let section = currentSourceIndexPath.section
             let itemCount = collectionView.numberOfItems(inSection: section)
             if itemCount > 0, let lastAttr = collectionView.layoutAttributesForItem(at: IndexPath(item: itemCount - 1, section: section)) {
-                if isFlowDirectionHorizontal {
+                if effectiveScrollDirection == .horizontal {
                     if contentPoint.x > lastAttr.frame.minX {
                         return IndexPath(item: itemCount-1, section: section)
                     }
@@ -246,14 +263,14 @@ public final class ReorderableCollectionViewController: NSObject {
         return nil
     }
     
-    private enum previewMode {
+    private enum PreviewMode {
         case requiredFastSnapshot  // always make a snapshot
         case fastSnapshot
         case renderToImage // when dragging starts from the system menu (otherwise you get a white shadow)
         case empty         // we do not need a view, only bounds, frames and radii
     }
     
-    private func preview(ofCell cell: UICollectionViewCell, mode: previewMode) -> InternalCellPreview {
+    private func preview(ofCell cell: UICollectionViewCell, mode: PreviewMode) -> InternalCellPreview {
         let cBounds = cell.bounds
                         
         // Get view to copy from. Default view is just cell's content view
@@ -365,7 +382,6 @@ public final class ReorderableCollectionViewController: NSObject {
             cvSuperview.addSubview(v)
             v.layer.cornerRadius = preview.cornerRadius
             v.layer.masksToBounds = true
-            v.alpha = 0.8 // Simulate the system drag appearance
             customDragPreview = preview
         }
         
@@ -379,12 +395,19 @@ public final class ReorderableCollectionViewController: NSObject {
         
         currentSourceIndexPath = indexPath
         lastDragLocationInCollection = location
-        isFlowDirectionHorizontal = flowDirection(forSectionAt: indexPath) == .horizontal
 
         wasScrollingEnabled = collectionView.isScrollEnabled
         if !wasScrollingEnabled {
             collectionView.isScrollEnabled = false
         }
+    }
+    
+    private func calcCellCenterAndPreviewFrame(at location: CGPoint, customDragPreview: InternalCellPreview) -> (CGPoint, CGRect) {
+        let proposedCellCenter = location - centerOffset
+        let proposedPreviewFrame = customDragPreview.frameForCellCenter(proposedCellCenter)
+        let previewFrame = delegate?.reorderController(self, adjustPreviewFrame: proposedPreviewFrame) ?? proposedPreviewFrame
+        let newCellCenter = proposedCellCenter + (previewFrame.center - proposedPreviewFrame.center)
+        return (newCellCenter, previewFrame)
     }
         
     private func handleLongPressInOrderingMode(_ gesture: UILongPressGestureRecognizer) {
@@ -397,26 +420,27 @@ public final class ReorderableCollectionViewController: NSObject {
             beginOrderingMode(indexPath: indexPath, location: location)
 
         case .changed:
-            guard let source = currentSourceIndexPath, customDragPreview != nil else { return }
+            guard let source = currentSourceIndexPath, var customDragPreview else { return }
             
-            let adjusted = location - centerOffset
-            lastDragLocationInCollection = adjusted
-            self.customDragPreview?.cellCenter = collectionView.convert(adjusted, to: collectionView.superview)
-            
+            let (newCellCenter, previewFrame) = calcCellCenterAndPreviewFrame(at: location, customDragPreview: customDragPreview)
+            lastDragLocationInCollection = newCellCenter
+            customDragPreview.cellCenter = collectionView.convert(newCellCenter, to: collectionView.superview)
+                        
+            // Auto-scroll handing.
             if wasScrollingEnabled {
                 let visibleBounds = collectionView.bounds
-                if isFlowDirectionHorizontal {
-                    if adjusted.x < visibleBounds.minX + autoScrollEdgeInset {
+                if effectiveScrollDirection == .horizontal {
+                    if previewFrame.minX < visibleBounds.minX + autoScrollEdgeInset {
                         autoScrollDirection = .towardStart
-                    } else if adjusted.x > visibleBounds.maxX - autoScrollEdgeInset {
+                    } else if previewFrame.maxX > visibleBounds.maxX - autoScrollEdgeInset {
                         autoScrollDirection = .towardEnd
                     } else {
                         autoScrollDirection = nil
                     }
                 } else {
-                    if adjusted.y < visibleBounds.minY + autoScrollEdgeInset {
+                    if previewFrame.minY < visibleBounds.minY + autoScrollEdgeInset {
                         autoScrollDirection = .towardStart
-                    } else if adjusted.y > visibleBounds.maxY - autoScrollEdgeInset {
+                    } else if previewFrame.maxY > visibleBounds.maxY - autoScrollEdgeInset {
                         autoScrollDirection = .towardEnd
                     } else {
                         autoScrollDirection = nil
@@ -429,12 +453,12 @@ public final class ReorderableCollectionViewController: NSObject {
                 }
             }
             
-            if let proposed = indexPathForPoint(adjusted), proposed.section == source.section, proposed != source {
-                if reorderThrottle.canMove(from: source, to: proposed, at: adjusted) {
+            if let proposed = indexPathForPoint(newCellCenter), proposed.section == source.section, proposed != source {
+                if reorderThrottle.canMove(from: source, to: proposed, at: newCellCenter) {
                     moveItem(source: source, destination: proposed)
                     currentSourceIndexPath = proposed
                     currentDraggedIndexPath = proposed
-                    reorderThrottle.acceptMove(from: source, to: proposed, at: adjusted)
+                    reorderThrottle.acceptMove(from: source, to: proposed, at: newCellCenter)
                 }
             }
         
@@ -471,7 +495,7 @@ public final class ReorderableCollectionViewController: NSObject {
         var newOffset = offset
         let delta = autoScrollSpeed * autoScrollDirection.rawValue
 
-        if isFlowDirectionHorizontal {
+        if effectiveScrollDirection == .horizontal {
             newOffset.x += delta
             let maxOffsetX = max(0, collectionView.contentSize.width - collectionView.bounds.width)
             newOffset.x = max(0, min(maxOffsetX, newOffset.x))
@@ -671,6 +695,7 @@ extension ReorderableCollectionViewController: UICollectionViewDelegate {
         guard let cell = collectionView.cellForItem(at: indexPath) else { return nil }
         let preview = preview(ofCell: cell, mode: .fastSnapshot)
         let view = preview.view
+        
         let params = UIPreviewParameters(bounds: view.bounds, cornerRadius: preview.cornerRadius)
       
         let previewCenter = cell.bounds.center + preview.centerOffset

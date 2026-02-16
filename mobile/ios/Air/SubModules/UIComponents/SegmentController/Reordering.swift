@@ -134,6 +134,7 @@ private final class SegmentedControlReorderingVC: UIViewController {
         collectionView.dataSource = dataSource
 
         reorderController = ReorderableCollectionViewController(collectionView: collectionView)
+        reorderController.autoScrollEdgeInset = 20
         reorderController.delegate = self
         reorderController.isReordering = true // starts immediately. In fact this is the only mode for the VC
 
@@ -170,10 +171,10 @@ private final class SegmentedControlReorderingVC: UIViewController {
 extension SegmentedControlReorderingVC: ReorderableCollectionViewControllerDelegate {
     func reorderController(_ controller: ReorderableCollectionViewController, previewForCell cell: UICollectionViewCell) -> ReorderableCollectionViewController.CellPreview? {
         guard let tileCell = cell as? _Cell else { return nil }
-        return .init(view: tileCell.mainView, cornerRadius: 4)
+        return .init(view: tileCell.mainView)
     }
     
-    public func reorderController(_ controller: ReorderableCollectionViewController, moveItemAt sourceIndexPath: IndexPath,
+    func reorderController(_ controller: ReorderableCollectionViewController, moveItemAt sourceIndexPath: IndexPath,
                                   to destinationIndexPath: IndexPath) -> Bool {
         let movedItem = items.remove(at: sourceIndexPath.item)
         items.insert(movedItem, at: destinationIndexPath.item)
@@ -182,9 +183,18 @@ extension SegmentedControlReorderingVC: ReorderableCollectionViewControllerDeleg
         return true
     }
 
-    public func reorderController(_ controller: ReorderableCollectionViewController, sizeForItemAt indexPath: IndexPath) -> CGSize? {
+    func reorderController(_ controller: ReorderableCollectionViewController, sizeForItemAt indexPath: IndexPath) -> CGSize? {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return nil }
         return _Cell.sizeFor(item, font: font)
+    }
+    
+    func reorderController(_ controller: ReorderableCollectionViewController, adjustPreviewFrame previewFrame: CGRect) -> CGRect {
+        let insets = UIEdgeInsets(
+            top: SegmentedControlConstants.topInset, left: SegmentedControlConstants.scrollContentMargin,
+            bottom: 0, right: SegmentedControlConstants.scrollContentMargin
+        )
+        let bounds = controller.collectionView.bounds.inset(by: insets)
+        return previewFrame.clamped(to: bounds)
     }
 }
 
@@ -266,7 +276,6 @@ private final class _Cell: UICollectionViewCell, ReorderableCell {
         mainViewLeadingConstraint = mainView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 0)
         NSLayoutConstraint.activate([
             mainView.heightAnchor.constraint(equalToConstant: SegmentedControlConstants.height),
-//            mainView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: 0),
             mainView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: SegmentedControlConstants.topInset),
             mainView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: 0),
             mainViewLeadingConstraint,

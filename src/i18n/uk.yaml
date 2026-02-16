@@ -87,7 +87,7 @@ Net Worth: Вартість
 Price: Ціна
 Enter Password: Введіть пароль
 Send: Відправити
-Add Wallet: Додати
+Add Wallet: Додати гаманець
 Done: Готово
 Delete: Видалити
 Delete Saved Address: Видалити збережену адресу
@@ -499,7 +499,7 @@ Are you sure you want to disable biometrics?: Ви впевнені, що хоч
 "Yes": Так
 Biometric confirmation failed: Помилка авторизації
 No Activity: Немає активності
-Add / Buy: Поповнити
+Fund: Поповнити
 Buy with Card: Купівля з картки
 Buy with Crypto: Купівля за криптовалюту
 Cannot load widget: Неможливо завантажити віджет
@@ -994,7 +994,6 @@ All: Усі
 $view_accounts: Переглянути
 Add your first one to begin.: Додайте свій перший гаманець, щоб почати.
 You don’t have any wallets yet: У вас ще немає гаманців
-Add New Wallet: Додати новий гаманець
 Add Ledger Wallet: Додати гаманець Ledger
 Add View Wallet: Додати гаманець для перегляду
 No Ledger wallets yet: Гаманців Ledger поки немає
@@ -1061,3 +1060,4 @@ Pin: Закріпити
 Unpin: Відкріпити
 My Assets: Мої активи
 Owner: Власник
+Show All Wallets: Показати всі гаманці

@@ -72,7 +72,7 @@ public extension ApiChain {
         return config.addressRegex.matches(addressOrDomain) || isValidDomain(addressOrDomain)
     }
 
-    private func isValidDomain(_ domain: String) -> Bool {
+    func isValidDomain(_ domain: String) -> Bool {
         return config.isDnsSupported && DNSHelpers.isDnsDomain(domain)
     }
 }

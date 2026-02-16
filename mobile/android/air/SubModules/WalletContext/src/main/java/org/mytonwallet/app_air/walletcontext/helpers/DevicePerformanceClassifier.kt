@@ -6,10 +6,10 @@ import android.os.Build
 import java.io.File
 
 object DevicePerformanceClassifier {
-    enum class PerformanceClass {
-        LOW,
-        MEDIUM,
-        HIGH,
+    enum class PerformanceClass(val code: Int) {
+        LOW(1),
+        MEDIUM(2),
+        HIGH(3),
     }
 
     var performanceClass: PerformanceClass? = null

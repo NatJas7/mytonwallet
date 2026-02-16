@@ -966,7 +966,7 @@ class SplashVC(context: Context) : WViewController(context),
             }
 
             is Deeplink.View -> {
-                openASingleWallet(MBlockchainNetwork.MAINNET, deeplink.addressByChain, name = null)
+                openASingleWallet(deeplink.network, deeplink.addressByChain, name = null)
             }
 
             is Deeplink.ExpiringDns -> {
@@ -1014,16 +1014,17 @@ class SplashVC(context: Context) : WViewController(context),
 
     private fun handleReturnStrategy(strategy: ReturnStrategy?) {
         when (strategy) {
-            is ReturnStrategy.Url -> openExternalUrl(strategy.url)
+            is ReturnStrategy.Url -> strategy.uri?.let { openExternalUri(it) }
             ReturnStrategy.None, ReturnStrategy.Back, ReturnStrategy.Empty, null -> {
                 // Do nothing
             }
         }
     }
 
-    private fun openExternalUrl(url: String) {
-        val uri = runCatching { url.toUri() }.getOrNull() ?: return
-        window?.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    private fun openExternalUri(uri: Uri) {
+        runCatching {
+            window?.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        }
     }
 
     private fun importTemporaryAccount(

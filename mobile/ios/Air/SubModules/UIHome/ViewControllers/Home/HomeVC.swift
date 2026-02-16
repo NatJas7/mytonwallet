@@ -584,9 +584,7 @@ public class HomeVC: ActivitiesTableViewController, WSensitiveDataProtocol, Home
     }
     
     private func cancelReorderingIfNeeded() {
-        if walletAssetsVC.isReordering {
-            walletAssetsVC.stopReordering(isCanceled: true)
-        }
+        walletAssetsVC.stopReordering(isCanceled: true)
     }
         
     // MARK: HomeVMDelegate

@@ -29,6 +29,7 @@ import org.mytonwallet.app_air.uicomponents.widgets.WProtectedView
 import org.mytonwallet.app_air.uicomponents.widgets.WThemedView
 import org.mytonwallet.app_air.uicomponents.widgets.fadeIn
 import org.mytonwallet.app_air.uireceive.ReceiveVC
+import org.mytonwallet.app_air.uisend.send.MultisendLauncher
 import org.mytonwallet.app_air.uisend.send.SellWithCardLauncher
 import org.mytonwallet.app_air.uisend.send.SendVC
 import org.mytonwallet.app_air.uistake.earn.EarnRootVC
@@ -288,7 +289,6 @@ class HomeVC(context: Context, private val mode: MScreenMode) :
                 return@HeaderActionsView
             onClick(it)
         },
-        isSellAllowed = isSellAllowed(),
     ).apply {
         setPadding(0, 0, 0, 16.dp)
     }
@@ -336,6 +336,10 @@ class HomeVC(context: Context, private val mode: MScreenMode) :
 
             HeaderActionsView.Identifier.SELL -> {
                 openSellWithCard(TONCOIN_SLUG)
+            }
+
+            HeaderActionsView.Identifier.MULTISEND -> {
+                MultisendLauncher.launch(this)
             }
 
             HeaderActionsView.Identifier.SWAP -> {
@@ -454,7 +458,6 @@ class HomeVC(context: Context, private val mode: MScreenMode) :
             updateHeaderCards(false)
             updateBalance(false)
             configureAccountViews(shouldLoadNewWallets = true, skipSkeletonOnCache = false)
-            WalletCore.requestDAppList()
         }
 
         if (mode == MScreenMode.Default)
@@ -906,7 +909,8 @@ class HomeVC(context: Context, private val mode: MScreenMode) :
     ) {
         stickyHeaderView.updateActions()
         accountConfigChanged()
-        actionsView.updateActions(headerView.centerAccount ?: homeVM.showingAccount)
+        val account = headerView.centerAccount ?: homeVM.showingAccount
+        actionsView.updateActions(account)
         updateActionsAlpha()
         configureActivityLists(shouldLoadNewWallets, skipSkeletonOnCache)
         if (shouldLoadNewWallets) {

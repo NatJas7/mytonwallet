@@ -32,6 +32,10 @@ class WalletCollectiblesEmptyView: UICollectionViewCell, WThemedView {
     private let subtitleButton: UIButton = {
         let btn = UIButton()
         btn.translatesAutoresizingMaskIntoConstraints = false
+        btn.titleLabel?.numberOfLines = 0
+        btn.titleLabel?.font = .systemFont(ofSize: 14)
+        btn.titleLabel?.textAlignment = .center
+        btn.setTitle(lang("$nft_explore_offer"), for: .normal)
         return btn
     }()
     
@@ -62,20 +66,7 @@ class WalletCollectiblesEmptyView: UICollectionViewCell, WThemedView {
     
     func updateTheme() {
         titleLabel.textColor = WTheme.primaryLabel
-        let attr = NSMutableAttributedString(string: lang("$nft_explore_offer"), attributes: [
-            .font: UIFont.systemFont(ofSize: 14),
-            .foregroundColor: WTheme.tint,
-        ])
-        let forwardArrowImage = UIImage(systemName: "chevron.forward",
-                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 14,
-                                                                                    weight: .medium))
-        let imageAttachment = NSTextAttachment()
-        imageAttachment.image = forwardArrowImage?.withTintColor(WTheme.tint).withRenderingMode(.alwaysTemplate)
-        if imageAttachment.image != nil {
-            let imageAttachmentString = NSAttributedString(attachment: imageAttachment)
-            attr.append(imageAttachmentString)
-        }
-        subtitleButton.setAttributedTitle(attr, for: .normal)
+        subtitleButton.setTitleColor(WTheme.tint, for: .normal)
     }
     
     func config() {

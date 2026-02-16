@@ -3,6 +3,7 @@ package org.mytonwallet.app_air.uicomponents.commonViews
 import android.R
 import android.annotation.SuppressLint
 import android.os.Build
+import android.text.Spanned
 import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.Gravity
@@ -38,6 +39,7 @@ import org.mytonwallet.app_air.uicomponents.extensions.setTextIfDiffer
 import org.mytonwallet.app_air.uicomponents.extensions.styleDots
 import org.mytonwallet.app_air.uicomponents.helpers.EditTextTint
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
+import org.mytonwallet.app_air.uicomponents.helpers.spans.ScamLabelSpan
 import org.mytonwallet.app_air.uicomponents.helpers.spans.WTypefaceSpan
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
 import org.mytonwallet.app_air.uicomponents.widgets.WImageButton
@@ -71,6 +73,8 @@ class AddressInputLayout(
     val autoCompleteConfig: AutoCompleteConfig = AutoCompleteConfig(),
     onTextEntered: (text: String) -> Unit
 ) : FrameLayout(viewController.get()!!.context), WThemedView {
+
+    var pasteInterceptor: ((pastedText: String) -> Boolean)? = null
 
     var focusCallback: ((hasFocus: Boolean) -> Unit)? = null
     var activeChain: MBlockchain = MBlockchain.ton
@@ -168,6 +172,10 @@ class AddressInputLayout(
 
         override fun onTextContextMenuItem(id: Int): Boolean {
             if (id == R.id.paste || id == R.id.pasteAsPlainText) {
+                val pasted = context.getTextFromClipboard()?.trim().orEmpty()
+                if (pasted.isNotEmpty() && pasteInterceptor?.invoke(pasted) == true) {
+                    return true
+                }
                 val result = super.onTextContextMenuItem(id)
                 if (result && MBlockchain.isValidAddressOnAnyChain(text.toString())) {
                     post { onTextEntered(getKeyword()) }
@@ -294,6 +302,10 @@ class AddressInputLayout(
         }
     }
 
+    private val scamLabelSpan by lazy {
+        ScamLabelSpan(LocaleController.getString("Scam").uppercase())
+    }
+
     private val closeButton: WImageButton by lazy {
         WImageButton(context).apply {
             val closeDrawable =
@@ -343,6 +355,10 @@ class AddressInputLayout(
 
         pasteTextView.setOnClickListener {
             context.getTextFromClipboard()?.let {
+                val pasted = it.trim()
+                if (pasted.isNotEmpty() && pasteInterceptor?.invoke(pasted) == true) {
+                    return@setOnClickListener
+                }
                 textField.setTextIfDiffer(it, selectionToEnd = true)
                 onTextEntered(getKeyword())
             }
@@ -459,6 +475,10 @@ class AddressInputLayout(
         setAutocompleteResult(AutocompleteResult(account = account))
     }
 
+    fun setScamAddress(savedAddress: MSavedAddress) {
+        setAutocompleteResult(AutocompleteResult(savedAddress = savedAddress, isScam = true))
+    }
+
     private fun setAutocompleteResult(autocompleteResult: AutocompleteResult) {
         this.autocompleteResult = autocompleteResult
         textField.setText(autocompleteResult.address(activeChain.name))
@@ -541,7 +561,8 @@ class AddressInputLayout(
     private fun updateOverlayText() {
         val autocompleteResult = autocompleteResult ?: return
         val name = autocompleteResult.name
-        if (name == null) {
+        val isScam = autocompleteResult.isScam == true
+        if (name == null && !isScam) {
             this.autocompleteResult = null
             return
         }
@@ -551,11 +572,16 @@ class AddressInputLayout(
             return
         }
         overlayLabel.text = buildSpannedString {
-            inSpans(WTypefaceSpan(WFont.Medium.typeface, WColor.PrimaryText.color)) {
-                append(name)
+            if (isScam) {
+                append(" ", scamLabelSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                append(" ")
+            } else {
+                inSpans(WTypefaceSpan(WFont.Medium.typeface, WColor.PrimaryText.color)) {
+                    append("$name · ")
+                }
             }
             inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.SecondaryText.color)) {
-                append(" · $address")
+                append(address)
             }.styleDots()
         }
     }
@@ -605,7 +631,8 @@ class AddressInputLayout(
 
     data class AutocompleteResult(
         val account: MAccount? = null,
-        val savedAddress: MSavedAddress? = null
+        val savedAddress: MSavedAddress? = null,
+        val isScam: Boolean? = null
     ) {
         val name: String? get() = account?.name ?: savedAddress?.name
 

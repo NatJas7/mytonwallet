@@ -53,7 +53,7 @@ class ExploreVC(context: Context) : WViewController(context),
     WRecyclerViewAdapter.WRecyclerViewDataSource, ExploreVM.Delegate {
     override val TAG = "Explore"
 
-    override val ignoreSideGuttering: Boolean = true
+    override var ignoreSideGuttering: Boolean = false
 
     companion object {
         val EXPLORE_HEADER_CELL = WCell.Type(1)
@@ -216,7 +216,7 @@ class ExploreVC(context: Context) : WViewController(context),
     private val trendingCellWidth: Int
         get() {
             val cols = calculateNoOfColumns()
-            return (view.width - 22.dp) / cols
+            return (view.width - 4.dp) / cols
         }
 
     override fun onBackPressed(): Boolean {
@@ -416,6 +416,12 @@ class ExploreVC(context: Context) : WViewController(context),
     }
 
     override fun sitesUpdated() {
+        val newIgnoreSideGuttering = exploreVM.showingTrendingSites.size > 1
+        if (ignoreSideGuttering != newIgnoreSideGuttering) {
+            ignoreSideGuttering = newIgnoreSideGuttering
+            val padding = if (newIgnoreSideGuttering) 0f else ViewConstants.HORIZONTAL_PADDINGS.dp.toFloat()
+            topReversedCornerView?.setHorizontalPadding(padding)
+        }
         rvAdapter.reloadData()
         pendingTarget?.let { findSiteAndOpenTargetUri(it) }
     }

@@ -1,9 +1,12 @@
 package org.mytonwallet.app_air.walletcore.moshi
 
+import android.net.Uri
 import androidx.core.net.toUri
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import org.mytonwallet.app_air.walletbasecontext.utils.toUriOrNull
 import java.math.BigInteger
+import java.net.URLDecoder
 
 @JsonClass(generateAdapter = true)
 data class DeviceInfo(
@@ -99,8 +102,18 @@ sealed class ReturnStrategy {
     object None : ReturnStrategy()
     object Back : ReturnStrategy()
     object Empty : ReturnStrategy()
-    data class Url(val url: String) : ReturnStrategy()
+    data class Url(val url: String) : ReturnStrategy() {
+
+        val uri: Uri? by lazy {
+            if (url.isBlank()) {
+                return@lazy null
+            }
+            val decodedUrl = try {
+                URLDecoder.decode(url, Charsets.UTF_8.name())
+            } catch (_: Throwable) {
+                url
+            }
+            decodedUrl.toUriOrNull() ?: url.toUriOrNull()
+        }
+    }
 }
-
-
-

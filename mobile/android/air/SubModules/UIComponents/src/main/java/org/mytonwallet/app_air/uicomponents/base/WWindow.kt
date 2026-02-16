@@ -3,7 +3,9 @@ package org.mytonwallet.app_air.uicomponents.base
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -16,6 +18,7 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.WindowManager
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.animation.doOnCancel
@@ -748,6 +751,21 @@ abstract class WWindow : AppCompatActivity(), WThemedView, WProtectedView {
 
     private fun unblockTouches() {
         touchBlockerView.isGone = true
+    }
+
+    // Activity Results ////////////////////////////////////////////////////////////////////////////
+    private var activityResultListener: ((Int, Intent?) -> Unit)? = null
+    private val activityResultLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        activityResultListener?.invoke(result.resultCode, result.data)
+        activityResultListener = null
+    }
+
+    fun startActivityForResult(intent: Intent, listener: (Int, Intent?) -> Unit) {
+        activityResultListener?.invoke(RESULT_CANCELED, null)
+        activityResultListener = listener
+        activityResultLauncher.launch(intent)
     }
 
     // Permission Requests /////////////////////////////////////////////////////////////////////////

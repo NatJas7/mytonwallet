@@ -38,7 +38,7 @@ function ReceiveModal({
   const { isLandscape } = useDeviceScreen();
   const isSwapAllowed = !isTestnet && !isLedger && !isSwapDisabled;
   const isOnRampAllowed = !isTestnet && !isOnRampDisabled;
-  const modalTitle = lang(isSwapAllowed || isOnRampAllowed ? 'Add / Buy' : 'Add');
+  const modalTitle = lang(isSwapAllowed || isOnRampAllowed ? 'Fund' : 'Add');
 
   useEffect(() => {
     if (isOpen && isLandscape) {

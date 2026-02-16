@@ -79,7 +79,7 @@ struct SavedAddressButton: View {
     }
     
     func onTap() {
-        model.source = .account(account.wrappedValue)
+        model.source = .savedAccount(account.wrappedValue, saveKey: savedAddress.address)
         endEditing()
     }
 }
@@ -96,7 +96,7 @@ struct AccountButton: View {
     }
     
     func onTap() {
-        model.source = .account(account.wrappedValue)
+        model.source = .myAccount(account.wrappedValue)
         endEditing()
     }
 }

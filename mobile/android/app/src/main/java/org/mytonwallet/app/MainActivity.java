@@ -59,7 +59,7 @@ public class MainActivity extends BaseActivity {
 
     // Do not let MainActivity open again if MTW Air is already on, just pass deeplink to handle, if required.
     if (airLauncher != null && airLauncher.getIsOnTheAir()) {
-      airLauncher.handle(getIntent());
+      airLauncher.handle(activity, getIntent());
       finish();
       return;
     }

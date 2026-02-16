@@ -98,10 +98,10 @@ function useAutoScroll({
     const nextIndex = (currentIndexRef.current + 1) % items.length;
     markAutoScrollStarted();
 
-    items[nextIndex].scrollIntoView({
+    const step = getStepSize(container, items[0]);
+    container.scrollTo({
+      left: nextIndex * step,
       behavior: 'smooth',
-      block: 'nearest',
-      inline: 'start',
     });
 
     currentIndexRef.current = nextIndex;

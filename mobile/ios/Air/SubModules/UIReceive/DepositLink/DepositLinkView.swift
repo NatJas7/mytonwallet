@@ -90,11 +90,9 @@ struct TappableDepositLink: View {
     
     var body: some View {
         let link = Text(depostitLink.map { "\($0)\u{200B}" }.joined() )
-        let more: Text = Text(
-            Image(systemName: "chevron.down")
-        )
-            .font(.system(size: 14))
-            .foregroundColor(Color(WTheme.secondaryLabel))
+        let more = Text(Image.airBundle("ArrowUpDownSmall"))
+            .foregroundColor(Color(WTheme.secondaryLabel).opacity(0.8))
+            .baselineOffset(-1)
 
         Text("\(link) \(more)")
             .lineLimit(nil)

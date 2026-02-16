@@ -600,7 +600,7 @@ class WalletsTabsVC(context: Context, val defaultMode: MWalletSettingsViewMode) 
             if (isReordering) "Remove Wallet" else {
                 when (tabs[selectedTabIndex]) {
                     WalletCategory.MY, WalletCategory.ALL -> {
-                        "Add New Wallet"
+                        "Add Wallet"
                     }
 
                     WalletCategory.LEDGER -> {

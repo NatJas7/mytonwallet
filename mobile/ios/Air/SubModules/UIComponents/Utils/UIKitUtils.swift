@@ -87,6 +87,35 @@ public extension CGRect {
     var center: CGPoint {
         return CGPoint(x: self.midX, y: self.midY)
     }
+    
+    func clamped(to container: CGRect) -> CGRect {
+        var result = self
+        
+        result.size.width = min(result.width, container.width)
+        result.size.height = min(result.height, container.height)
+        
+        if result.minX < container.minX {
+            result.origin.x = container.minX
+        } else if result.maxX > container.maxX {
+            result.origin.x = container.maxX - result.width
+        }
+        if result.minY < container.minY {
+            result.origin.y = container.minY
+        } else if result.maxY > container.maxY {
+            result.origin.y = container.maxY - result.height
+        }
+        return result
+    }
+}
+
+public extension NSDirectionalEdgeInsets {
+    var vertical: CGFloat { return top + bottom }
+    var horizontal: CGFloat { return leading + trailing }
+}
+
+public extension UIEdgeInsets {
+    var vertical: CGFloat { return top + bottom }
+    var horizontal: CGFloat { return left + right }
 }
 
 public extension String {

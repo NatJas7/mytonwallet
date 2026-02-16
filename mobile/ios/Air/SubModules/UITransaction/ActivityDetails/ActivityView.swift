@@ -101,14 +101,10 @@ struct ActivityView: View {
                     Text(name)
                         .font(.system(size: 24, weight: .semibold))
                     HStack(alignment: .firstTextBaseline, spacing: 0) {
-                        Text((tx.isIncoming == true ? lang("Received from") :  lang("Sent to")) + " ") 
-                        let addressName = tx.metadata?.name
-                        let addressToCopy = tx.peerAddress ?? tx.addressToShow
+                        Text((tx.isIncoming == true ? lang("Received from") : lang("Sent to")) + " ")
                         TappableAddress(
                             account: model.accountContext,
-                            name: addressName,
-                            chain: chain.rawValue,
-                            addressOrName: addressToCopy
+                            model: .fromTransaction(tx, chain: chain.rawValue, addressKind: .peer),
                         )
                     }
                 }
@@ -220,41 +216,33 @@ struct ActivityView: View {
     }
     
     @ViewBuilder
-    var senderAddress: some View {
-        if case .transaction(let tx) = activity {
+    private func addressSection(activity: ApiActivity, address: ApiTransactionActivity.AddressKind, title: String) -> some View {
+        if case .transaction(let tx) = activity, nil != tx.getAddress(for: address) {
+            let chain = getChainBySlug(tx.slug)?.rawValue ?? ApiChain.ton.rawValue
             InsetSection {
                 InsetCell {
-                    TappableAddressFull(accountContext: model.accountContext, chain: getChainBySlug(tx.slug)?.rawValue, address: tx.fromAddress)
+                    TappableAddressFull(accountContext: model.accountContext, model: .fromTransaction(tx, chain: chain, addressKind: address))
                 }
             } header: {
-                Text(lang("Sender"))
+                Text(title)
             }
         }
+    }
+
+    @ViewBuilder
+    var senderAddress: some View {
+        addressSection(activity: activity, address: .from, title: lang("Sender"))
     }
 
     @ViewBuilder
     var recipientAddress: some View {
-        if case .transaction(let tx) = activity, let toAddress = tx.toAddress {
-            InsetSection {
-                InsetCell {
-                    TappableAddressFull(accountContext: model.accountContext, chain: getChainBySlug(tx.slug)?.rawValue, address: toAddress)
-                }
-            } header: {
-                Text(lang("Recipient"))
-            }
-        }
+        addressSection(activity: activity, address: .to, title: lang("Recipient"))
     }
 
     @ViewBuilder
     var peerAddress: some View {
-        if case .transaction(let tx) = activity, let peerAddress = tx.peerAddress {
-            InsetSection {
-                InsetCell {
-                    TappableAddressFull(accountContext: model.accountContext, chain: getChainBySlug(tx.slug)?.rawValue, address: peerAddress)
-                }
-            } header: {
-                Text(tx.isIncoming ? lang("Sender") : lang("Recipient"))
-            }
+        if case .transaction(let tx) = activity {
+           addressSection(activity: activity, address: .peer, title: tx.isIncoming ? lang("Sender") : lang("Recipient"))
         }
     }
 

@@ -40,7 +40,7 @@ class TokenActionsView: WTouchPassStackView {
         ])
         
         let addButton = WScalableButton(
-            title: IOS_26_MODE_ENABLED ? lang("Add / Buy") : lang("Add").lowercased(),
+            title: IOS_26_MODE_ENABLED ? lang("Fund") : lang("Add").lowercased(),
             image: .airBundle(IOS_26_MODE_ENABLED ? "AddIconBold" : "AddIcon"),
             onTap: { [weak self] in self?.addPressed() },
         )

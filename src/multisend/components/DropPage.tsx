@@ -6,7 +6,7 @@ import type { TransferRow, ValidationError } from '../types';
 import { ANIMATED_STICKER_BIG_SIZE_PX } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { ANIMATED_STICKERS_PATHS } from '../../components/ui/helpers/animatedAssets';
-import { downloadTemplate, MIXED_TRANSFERS_TEMPLATE } from '../utils/csvTemplates';
+import { downloadTemplateFile } from '../utils/csvTemplates';
 import { prettifyAddress } from '../utils/tonConnect';
 import { validateAndProcessTransfer } from '../utils/transferValidation';
 
@@ -183,7 +183,7 @@ function DropPage({
   });
 
   const handleDownloadTemplate = useLastCallback(() => {
-    downloadTemplate(MIXED_TRANSFERS_TEMPLATE, 'mytonwallet_multi_transfer_template.csv');
+    downloadTemplateFile();
   });
 
   useEffect(() => {

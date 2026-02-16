@@ -495,7 +495,7 @@ Are you sure you want to disable biometrics?: Sind Sie sicher, dass Sie die Biom
 "Yes": Ja
 Biometric confirmation failed: Biometrische Bestätigung fehlgeschlagen
 No Activity: Keine aktivität
-Add / Buy: Aufladen
+Fund: Aufladen
 Buy with Card: Mit Karte kaufen
 Buy with Crypto: Mit Krypto kaufen
 Cannot load widget: Widget kann nicht geladen werden
@@ -983,7 +983,6 @@ All: Alle
 $view_accounts: Anzeigen
 Add your first one to begin.: Fügen Sie Ihr erstes Wallet hinzu, um zu beginnen.
 You don’t have any wallets yet: Sie haben noch keine Wallets
-Add New Wallet: Neues Wallet hinzufügen
 Add Ledger Wallet: Ledger Wallet hinzufügen
 Add View Wallet: View Wallet hinzufügen
 No Ledger wallets yet: Noch keine Ledger Wallets
@@ -1050,3 +1049,4 @@ Pin: Anheften
 Unpin: Loslösen
 My Assets: Meine Vermögenswerte
 Owner: Eigentümer
+Show All Wallets: Alle Wallets anzeigen

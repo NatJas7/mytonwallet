@@ -19,15 +19,14 @@ public struct TappableTransactionId: View {
     public var body: some View {
         
         let tx: Text = Text(
-            formatStartEndAddress(txId, prefix: 8, suffix: 8, separator: "...")
+            formatStartEndAddress(txId)
         )
-        let more: Text = Text(
-            Image.airBundle("ChevronDown10")
-        )
-
-        HStack(alignment: .firstTextBaseline, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
             tx
-            more
+            Image.airBundle("ArrowUpDownSmall")
+                .foregroundColor(Color(WTheme.secondaryLabel))
+                .opacity(0.8)
+                .offset(y: 1)
         }
         .menuSource(menuContext: menuContext)
         .foregroundStyle(Color(WTheme.primaryLabel))
@@ -69,13 +68,12 @@ public struct ChangellyTransactionId: View {
         let tx: Text = Text(
             id
         )
-        let more: Text = Text(
-            Image.airBundle("ChevronDown10")
-        )
-
-        HStack(alignment: .firstTextBaseline, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
             tx
-            more
+            Image.airBundle("ArrowUpDownSmall")
+                .foregroundColor(Color(WTheme.secondaryLabel))
+                .opacity(0.8)
+                .offset(y: 1)
         }
         .foregroundStyle(Color(WTheme.primaryLabel))
         .opacity(hover ? 0.8 : 1)

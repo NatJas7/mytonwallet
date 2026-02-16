@@ -256,7 +256,8 @@ class WalletVersionsVC(context: Context) : WViewController(context),
                     )
                     return@activateAccount
                 }
-                navigationController?.pop(false)
+                if ((navigationController?.viewControllers?.size ?: 0) > 1)
+                    navigationController?.pop(false)
                 WalletCore.notifyEvent(WalletEvent.AddNewWalletCompletion)
             }
         }

@@ -39,6 +39,7 @@ const TON_DOMAIN_ITEM: DropdownItem<NftMenuHandler> = {
 const SEND_ITEM: DropdownItem<NftMenuHandler> = {
   name: 'Send',
   value: 'send',
+  withDelimiter: true,
 };
 const FRAGMENT_ITEM: DropdownItem<NftMenuHandler> = {
   name: 'Fragment',
@@ -314,14 +315,22 @@ export default function useNftMenu({
     const isCard = !IS_CORE_WALLET && nft.collectionAddress === MTW_CARDS_COLLECTION;
 
     return compact([
+      ...(isCard ? [!isNftInstalled ? INSTALL_CARD : RESET_CARD] : []),
+      ...(isCard ? [!isNftAccentColorInstalled ? INSTALL_ACCENT_COLOR : RESET_ACCENT_COLOR] : []),
+      isOnFragment && FRAGMENT_ITEM,
       !isViewMode && (isOnSale ? ON_SALE_ITEM : SEND_ITEM),
+      !isViewMode && isLinkable && !isOnSale && (linkedAddress ? CHANGE_LINKED_ADDRESS : LINK_TO_ADDRESS),
+      isDotTon && !isViewMode && TON_DOMAIN_ITEM,
       !isViewMode && isRenewable && !isOnSale && dnsExpireInDays !== undefined && {
         ...RENEW_ITEM,
         description: dnsExpireInDays < 0
           ? 'Expired'
           : lang('$expires_in %days%', { days: lang('$in_days', dnsExpireInDays) }, undefined, 1),
       },
-      !isViewMode && isLinkable && !isOnSale && (linkedAddress ? CHANGE_LINKED_ADDRESS : LINK_TO_ADDRESS),
+      GETGEMS_ITEM,
+      TON_EXPLORER_ITEM,
+      SHARE_LINK_ITEM,
+      collectionAddress && COLLECTION_ITEM,
       !IS_CORE_WALLET && ((!isScam && !isNftBlacklisted) || isNftWhitelisted) && HIDE_ITEM,
       !IS_CORE_WALLET && isScam && !isNftWhitelisted && NOT_SCAM,
       !IS_CORE_WALLET && !isScam && isNftBlacklisted && UNHIDE,
@@ -329,15 +338,6 @@ export default function useNftMenu({
         BURN_ITEM,
         SELECT_ITEM,
       ] : []),
-      collectionAddress && COLLECTION_ITEM,
-      isDotTon && !isViewMode && TON_DOMAIN_ITEM,
-      ...(isCard ? [!isNftInstalled ? INSTALL_CARD : RESET_CARD] : []),
-      ...(isCard ? [!isNftAccentColorInstalled ? INSTALL_ACCENT_COLOR : RESET_ACCENT_COLOR] : []),
-
-      isOnFragment && FRAGMENT_ITEM,
-      GETGEMS_ITEM,
-      TON_EXPLORER_ITEM,
-      SHARE_LINK_ITEM,
     ]);
   }, [
     nft, isViewMode, dnsExpireInDays, lang, linkedAddress, isNftBlacklisted,

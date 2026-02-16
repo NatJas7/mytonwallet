@@ -1,5 +1,6 @@
 package org.mytonwallet.app_air.walletcore.models
 
+import android.net.Uri
 import com.squareup.moshi.JsonClass
 import org.json.JSONObject
 import org.mytonwallet.app_air.walletbasecontext.utils.doubleAbsRepresentation
@@ -176,5 +177,24 @@ class MAccount(
     val firstChain: MBlockchain?
         get() {
             return MBlockchain.supportedChains.firstOrNull { addressByChain.contains(it.name) }
+        }
+
+    val shareLink: String
+        get() {
+            return Uri.Builder()
+                .scheme("https")
+                .authority("my.tt")
+                .path("view/")
+                .apply {
+                    byChain.entries.forEach { (chain, chainAccount) ->
+                        appendQueryParameter(chain, chainAccount.address)
+                    }
+
+                    if (network == MBlockchainNetwork.TESTNET) {
+                        appendQueryParameter("testnet", "true")
+                    }
+                }
+                .build()
+                .toString()
         }
 }

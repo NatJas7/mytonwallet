@@ -53,16 +53,16 @@ async function fetchPastActivities(accountId: string, slug?: string) {
 
   let fetchedActivities: ApiActivity[] = [];
   let toTimestamp = selectLastActivityTimestamp(global, accountId, slug);
-  let shouldFetchMore = true;
+  let hasMore = true;
   let isEndReached = false;
 
-  while (shouldFetchMore) {
+  while (hasMore) {
     const result = await callApi('fetchPastActivities', accountId, PAST_ACTIVITY_BATCH, slug, toTimestamp);
     if (!result) {
       return;
     }
 
-    const { activities, shouldFetchMore: apiShouldFetchMore } = result;
+    const { activities, hasMore: apiHasMore } = result;
 
     global = getGlobal();
 
@@ -84,8 +84,8 @@ async function fetchPastActivities(accountId: string, slug?: string) {
     });
 
     fetchedActivities = mergeSortedActivities(fetchedActivities, activities);
-    shouldFetchMore = apiShouldFetchMore
-      || (
+    hasMore = apiHasMore
+      && (
         filteredResult.length < PAST_ACTIVITY_BATCH
         && fetchedActivities.length < PAST_ACTIVITY_BATCH
       );

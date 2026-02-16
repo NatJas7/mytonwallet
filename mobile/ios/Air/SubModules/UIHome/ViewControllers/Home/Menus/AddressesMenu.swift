@@ -69,7 +69,7 @@ fileprivate struct AddressRowView: View {
                         }
                         Text(line1)
                             .font(.system(size: 17))
-                            .fixedSize()
+                            .lineLimit(1)
                         Image("HomeCopy", bundle: AirBundle)
                             .foregroundStyle(Color(WTheme.secondaryLabel))
                     }
@@ -91,7 +91,7 @@ fileprivate struct AddressRowView: View {
                     .foregroundStyle(Color(WTheme.secondaryLabel))
                     .frame(height: 18)
                 }
-                .padding(.trailing, 16)
+                .padding(.trailing, 0)
                 .padding(2)
                 .contentShape(.rect)
             }

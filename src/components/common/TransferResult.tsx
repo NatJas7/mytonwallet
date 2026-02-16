@@ -1,10 +1,9 @@
-import React, { memo, useMemo } from '../../lib/teact/teact';
+import React, { memo } from '../../lib/teact/teact';
 
 import { TONCOIN } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { toDecimal } from '../../util/decimals';
 import { formatCurrencyExtended } from '../../util/formatNumber';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
@@ -42,7 +41,6 @@ function TransferResult({
 }: OwnProps) {
   const amountString = toDecimal(amount, decimals);
   const [wholePart, fractionPart] = formatCurrencyExtended(amountString, '', noSign, decimals).split('.');
-  const amountCols = useMemo(() => getPseudoRandomNumber(5, 13, tokenSymbol), [tokenSymbol]);
 
   function renderButtons() {
     if (!firstButtonText && !secondButtonText) {
@@ -74,7 +72,9 @@ function TransferResult({
 
       <SensitiveData
         isActive={isSensitiveDataHidden}
-        cols={amountCols}
+        min={5}
+        max={13}
+        seed={tokenSymbol}
         rows={3}
         cellSize={18}
         align="center"

@@ -39,5 +39,5 @@ private struct ApiFetchTransactionByIdOptions: Encodable {
 
 public struct ApiActivitySliceResult: Codable, Sendable {
     public let activities: [ApiActivity]
-    public let shouldFetchMore: Bool
+    public let hasMore: Bool
 }

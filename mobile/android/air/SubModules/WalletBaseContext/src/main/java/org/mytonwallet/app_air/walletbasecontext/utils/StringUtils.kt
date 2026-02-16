@@ -1,6 +1,7 @@
 package org.mytonwallet.app_air.walletbasecontext.utils
 
 import android.graphics.Typeface
+import android.net.Uri
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.SpannableStringBuilder
@@ -8,6 +9,7 @@ import android.text.Spanned
 import android.text.SpannedString
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
+import androidx.core.net.toUri
 import org.mytonwallet.app_air.walletbasecontext.theme.WColorGradients
 import java.text.BreakIterator
 import java.util.Locale
@@ -283,6 +285,12 @@ fun String.firstGrapheme(): String {
     val start = it.first()
     val end = it.next()
     return if (end != BreakIterator.DONE) substring(start, end) else ""
+}
+
+fun String.toUriOrNull(): Uri? = try {
+    toUri()
+} catch (_: Throwable) {
+    null
 }
 
 fun SpannedString.replaceSpacesWithNbsp(): SpannedString {

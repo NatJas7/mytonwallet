@@ -1,21 +1,28 @@
 package org.mytonwallet.app_air.uisend.send
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.mytonwallet.app_air.uicomponents.commonViews.TokenAmountInputView
 import org.mytonwallet.app_air.uicomponents.extensions.collectFlow
 import org.mytonwallet.app_air.uicomponents.extensions.throttle
@@ -177,6 +184,68 @@ class SendViewModel : ViewModel(), WalletCore.EventObserver {
         TokenStore.tokensFlow,
         InputStateFull::of
     ).distinctUntilChanged()
+
+    data class AddressInfo(
+        val chain: MBlockchain,
+        val input: String,
+        val resolvedAddress: String? = null,
+        val addressName: String? = null,
+        val isMemoRequired: Boolean? = null,
+        val isScam: Boolean? = null,
+        val error: MApiAnyDisplayError? = null,
+    )
+
+    private val _addressInfoFlow = MutableStateFlow<AddressInfo?>(null)
+    val addressInfoFlow = _addressInfoFlow.asStateFlow()
+    private var addressInfoJob: Job? = null
+
+    fun onDestinationEntered(address: String) {
+        val destination = address.trim()
+        if (destination.isEmpty()) {
+            _addressInfoFlow.value = null
+            return
+        }
+        val chain = TokenStore.getToken(getTokenSlug())?.mBlockchain ?: MBlockchain.ton
+        addressInfoJob?.cancel()
+        addressInfoJob = viewModelScope.launch {
+            _addressInfoFlow.emit(fetchAddressInfo(chain, destination))
+        }
+    }
+
+    val memoRequiredFlow = addressInfoFlow
+        .map { info -> info?.isMemoRequired == true }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    private suspend fun fetchAddressInfo(chain: MBlockchain, destination: String): AddressInfo? {
+        if (destination.isEmpty()) return null
+        val isValid =
+            chain.isValidAddress(destination) || (chain == MBlockchain.ton && DNSHelpers.isDnsDomain(destination))
+        if (!isValid) return null
+        val network = AccountStore.activeAccount?.network ?: return null
+        return try {
+            val result = withTimeoutOrNull(100) {
+                WalletCore.call(
+                    ApiMethod.WalletData.GetAddressInfo(
+                        chain = chain,
+                        network = network,
+                        addressOrDomain = destination
+                    )
+                )
+            }
+            AddressInfo(
+                chain = chain,
+                input = destination,
+                resolvedAddress = result?.resolvedAddress,
+                addressName = result?.addressName,
+                isMemoRequired = result?.isMemoRequired,
+                isScam = result?.isScam,
+                error = result?.error,
+            )
+        } catch (_: Throwable) {
+            AddressInfo(chain, destination)
+        }
+    }
 
     sealed class InputStateFull {
         abstract val wallet: CurrentWalletState
@@ -515,6 +584,7 @@ class SendViewModel : ViewModel(), WalletCore.EventObserver {
     enum class ButtonStatus {
         WaitAmount,
         WaitAddress,
+        WaitMemo,
         WaitNetwork,
         ErrorAlert,
 
@@ -548,22 +618,25 @@ class SendViewModel : ViewModel(), WalletCore.EventObserver {
     data class UiState(
         internal val inputState: InputStateFull,
         internal val draft: DraftResult?,
-        val uiAddressSearch: AddressSearchState
+        val uiAddressSearch: AddressSearchState,
+        val isMemoRequired: Boolean
     ) {
         val uiInput: TokenAmountInputView.State = buildUiInputState(inputState, draft)
-        val uiButton: ButtonState = buildUiButtonState(inputState, draft)
+        val uiButton: ButtonState = buildUiButtonState(inputState, draft, isMemoRequired)
     }
 
     val uiStateFlow = combine(
         inputFlow,
         draftFlow,
         otherAccountsFlow,
-        savedAddressesFlow
-    ) { input, draft, otherAccounts, savedAddresses ->
+        savedAddressesFlow,
+        memoRequiredFlow
+    ) { input, draft, otherAccounts, savedAddresses, memoRequired ->
         UiState(
             input,
             draft,
-            AddressSearchState(otherAccounts.isNotEmpty() || savedAddresses.isNotEmpty())
+            AddressSearchState(otherAccounts.isNotEmpty() || savedAddresses.isNotEmpty()),
+            memoRequired
         )
     }
 
@@ -654,7 +727,8 @@ class SendViewModel : ViewModel(), WalletCore.EventObserver {
 
         private fun buildUiButtonState(
             input: InputStateFull,
-            estimated: DraftResult?
+            estimated: DraftResult?,
+            isMemoRequired: Boolean
         ): ButtonState {
             val destination = input.input.destination
             if (destination.isEmpty()) {
@@ -744,6 +818,15 @@ class SendViewModel : ViewModel(), WalletCore.EventObserver {
             }
 
             if (draft is DraftResult.Result) {
+                if (isMemoRequired &&
+                    state.input.binary == null &&
+                    state.input.comment.isBlank()
+                ) {
+                    return ButtonState(
+                        ButtonStatus.WaitMemo,
+                        LocaleController.getString("Continue")
+                    )
+                }
                 if (draft.explainedFee?.isGasless == true)
                     if (draft.dieselStatus == MDieselStatus.NOT_AUTHORIZED) {
                         return ButtonState(

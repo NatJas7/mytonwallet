@@ -10,7 +10,9 @@ extension View {
         isTapGestureEnabled: Bool = true,
         isHoldAndDragGestureEnabled: Bool = true,
         coordinateSpace: CoordinateSpace = .global,
-        menuContext: MenuContext?
+        menuContext: MenuContext?,
+        /// Extra insets to be added to menu.sourceFrame calculated via menu.onGetSourceFrame
+        edgeInsets: UIEdgeInsets = .zero
     ) -> some View {
         if let menuContext, isEnabled {
             modifier(
@@ -19,6 +21,7 @@ extension View {
                     menuContext: menuContext,
                     isTapGestureEnabled: isTapGestureEnabled,
                     isHoldAndDragGestureEnabled: isHoldAndDragGestureEnabled,
+                    edgeInsets: edgeInsets,
                 )
             )
         } else {
@@ -27,20 +30,13 @@ extension View {
     }
 }
 
-struct MenuSourceViewModifier: ViewModifier {
-    
-    private var coordinateSpace: CoordinateSpace
-    private var menuContext: MenuContext
-    private var isTapGestureEnabled: Bool
-    private var isHoldAndDragGestureEnabled: Bool
-    
-    init(coordinateSpace: CoordinateSpace, menuContext: MenuContext, isTapGestureEnabled: Bool, isHoldAndDragGestureEnabled: Bool) {
-        self.coordinateSpace = coordinateSpace
-        self.menuContext = menuContext
-        self.isTapGestureEnabled = isTapGestureEnabled
-        self.isHoldAndDragGestureEnabled = isHoldAndDragGestureEnabled
-    }
-    
+private struct MenuSourceViewModifier: ViewModifier {
+    let coordinateSpace: CoordinateSpace
+    let menuContext: MenuContext
+    let isTapGestureEnabled: Bool
+    let isHoldAndDragGestureEnabled: Bool
+    let edgeInsets: UIEdgeInsets
+        
     func body(content: Content) -> some View {
         content
             .padding(8)
@@ -60,7 +56,7 @@ struct MenuSourceViewModifier: ViewModifier {
                 }
             )
             .padding(-8)
-            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: coordinateSpace) }, action: { menuContext.sourceFrame = $0 })
+            .background(FrameReportingView(menuContext: menuContext, edgeInsets: edgeInsets))
     }
     
     var tapGesture: some Gesture {
@@ -71,5 +67,45 @@ struct MenuSourceViewModifier: ViewModifier {
     
     func showMenu() {
         menuContext.present()
+    }
+}
+
+/// Registers a menuContext.getSourceFrame closure to resolve frame in window coords at menu.present() time.
+/// This works more reliable than .onGeometryChange().
+private struct FrameReportingView: UIViewRepresentable {
+    let menuContext: MenuContext
+    let edgeInsets: UIEdgeInsets
+
+    func makeUIView(context: Context) -> UIView { _FrameReportingUIView(menuContext: menuContext, edgeInsets: edgeInsets) }
+    func updateUIView(_ uiView: UIView, context: Context) { (uiView as? _FrameReportingUIView)?.menuContext = menuContext }
+}
+
+private final class _FrameReportingUIView: UIView {
+    weak var menuContext: MenuContext?
+    let edgeInsets: UIEdgeInsets
+    
+    init(menuContext: MenuContext?, edgeInsets: UIEdgeInsets) {
+        self.menuContext = menuContext
+        self.edgeInsets = edgeInsets
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+                
+        // There can be a few views for the same menu context on the screen at a moment
+        // We will only respect (i.e., set the handler for) the last one, which effectively resign the former ones
+        if window != nil {
+            menuContext?.onGetSourceFrame = { [weak self] in
+                guard let self, window != nil, !bounds.isEmpty else { return nil }
+                return convert(bounds.inset(by: edgeInsets), to: nil)
+            }
+        }
     }
 }

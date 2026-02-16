@@ -41,7 +41,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           node-version: ${{ vars.NODE_VERSION }}
 
@@ -217,7 +217,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           node-version: ${{ vars.NODE_VERSION }}
 
@@ -256,7 +256,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
           node-version: ${{ vars.NODE_VERSION }}
@@ -291,7 +291,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
           node-version: ${{ vars.NODE_VERSION }}
@@ -336,7 +336,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
           node-version: ${{ vars.NODE_VERSION }}
@@ -401,7 +401,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           node-version: ${{ vars.NODE_VERSION }}
 
@@ -484,7 +484,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           node-version: ${{ vars.NODE_VERSION }}
 

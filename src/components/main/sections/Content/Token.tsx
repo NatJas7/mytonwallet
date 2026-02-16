@@ -1,4 +1,4 @@
-import React, { type ElementRef, memo, useMemo, useRef } from '../../../../lib/teact/teact';
+import React, { type ElementRef, memo, useRef } from '../../../../lib/teact/teact';
 
 import type { ApiBaseCurrency, ApiStakingState, ApiYieldType } from '../../../../api/types';
 import type { AppTheme, UserToken } from '../../../../global/types';
@@ -12,7 +12,6 @@ import { calcChangeValue } from '../../../../util/calcChangeValue';
 import { DAY, formatFullDay } from '../../../../util/dateFormat';
 import { toDecimal } from '../../../../util/decimals';
 import { formatCurrency, getShortCurrencySymbol } from '../../../../util/formatNumber';
-import getPseudoRandomNumber from '../../../../util/getPseudoRandomNumber';
 import { round } from '../../../../util/round';
 import { ANIMATED_STICKERS_PATHS } from '../../../ui/helpers/animatedAssets';
 import getTokenName from '../../helpers/getTokenName';
@@ -118,8 +117,6 @@ function Token({
   const stakingId = stakingState?.id;
   const name = getTokenName(lang, token);
   const withChainIconRendered = withChainIcon && !stakingId;
-  const amountCols = useMemo(() => getPseudoRandomNumber(4, 12, name), [name]);
-  const fiatAmountCols = 5 + (amountCols % 6);
   if (ref) {
     buttonRef = ref;
   }
@@ -279,7 +276,9 @@ function Token({
           <div className={styles.subtitle}>
             <SensitiveData
               isActive={isSensitiveDataHidden}
-              cols={fiatAmountCols}
+              min={5}
+              max={10}
+              seed={name}
               rows={2}
               cellSize={8}
             >
@@ -292,7 +291,9 @@ function Token({
         <div className={styles.secondaryCell}>
           <SensitiveData
             isActive={isSensitiveDataHidden}
-            cols={amountCols}
+            min={4}
+            max={12}
+            seed={name}
             rows={2}
             cellSize={8}
             align="right"
@@ -319,7 +320,9 @@ function Token({
           ) : (
             <SensitiveData
               isActive={isSensitiveDataHidden}
-              cols={fiatAmountCols}
+              min={5}
+              max={10}
+              seed={name}
               rows={2}
               cellSize={8}
               align="right"
@@ -406,7 +409,9 @@ function Token({
         <div className={styles.secondaryCell}>
           <SensitiveData
             isActive={isSensitiveDataHidden}
-            cols={amountCols}
+            min={4}
+            max={12}
+            seed={name}
             rows={2}
             cellSize={8}
             align="right"
@@ -421,7 +426,9 @@ function Token({
           </SensitiveData>
           <SensitiveData
             isActive={isSensitiveDataHidden}
-            cols={fiatAmountCols}
+            min={5}
+            max={10}
+            seed={name}
             rows={2}
             cellSize={8}
             align="right"

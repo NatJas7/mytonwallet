@@ -89,6 +89,20 @@ public extension ApiTransactionActivity {
     var addressToShow: String {
         metadata?.name ?? peerAddress ?? ""
     }
+    
+    enum AddressKind {
+        case from
+        case to
+        case peer
+    }
+    
+    func getAddress(for kind: AddressKind) -> String? {
+        switch kind {
+        case .from: return fromAddress
+        case .to: return toAddress
+        case .peer: return peerAddress
+        }
+    }
 }
 
 public struct ApiAddressInfo: Equatable, Hashable, Codable, Sendable {

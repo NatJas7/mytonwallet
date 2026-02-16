@@ -728,6 +728,7 @@ class TabsVC(context: Context) : WViewController(context), WThemedView, WProtect
             bottomNavigationView.itemIconTintList = colorStateList
             bottomNavigationView.itemTextColor = colorStateList
             bottomNavigationView.itemActiveIndicatorColor = indicatorColorStateList
+            bottomNavigationView.itemRippleColor = ColorStateList.valueOf(WColor.Tint.color.colorWithAlpha(38))
         }
 
         for (navView in stackNavigationControllers.values) {

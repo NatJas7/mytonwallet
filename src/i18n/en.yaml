@@ -487,7 +487,7 @@ Are you sure you want to disable biometrics?: Are you sure you want to disable b
 "Yes": "Yes"
 Biometric confirmation failed: Biometric confirmation failed
 No Activity: No Activity
-Add / Buy: Add / Buy
+Fund: Fund
 Buy with Card: Buy with Card
 Buy with Crypto: Buy with Crypto
 Cannot load widget: Cannot load widget
@@ -970,7 +970,6 @@ All: All
 $view_accounts: View
 Add your first one to begin.: Add your first one to begin.
 You don’t have any wallets yet: You don’t have any wallets yet
-Add New Wallet: Add New Wallet
 Add Ledger Wallet: Add Ledger Wallet
 Add View Wallet: Add View Wallet
 No Ledger wallets yet: No Ledger wallets yet
@@ -1037,3 +1036,4 @@ Pin: Pin
 Unpin: Unpin
 My Assets: My Assets
 Owner: Owner
+Show All Wallets: Show All Wallets

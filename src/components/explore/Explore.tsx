@@ -22,7 +22,6 @@ import {
 
 import useAutoScroll from '../../hooks/useAutoScroll';
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
-import useHorizontalScroll from '../../hooks/useHorizontalScroll';
 import useLang from '../../hooks/useLang';
 import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
 import usePrevious2 from '../../hooks/usePrevious2';
@@ -120,18 +119,11 @@ function Explore({
     });
   }, [disableSwipeToClose, enableSwipeToClose, filteredSites?.length, prevSiteCategoryIdRef]);
 
-  useHorizontalScroll({
-    containerRef: featuredContainerRef,
-    isDisabled: IS_TOUCH_ENV || featuredSites.length === 0,
-    shouldPreventDefault: true,
-    contentSelector: `.${styles.featuredList}`,
-  });
-
   useAutoScroll({
     containerRef: featuredContainerRef,
     itemSelector: `.${styles.featuredItem}`,
     interval: SLIDE_DURATION,
-    isDisabled: !isActive || featuredSites.length === 0,
+    isDisabled: !isActive || featuredSites.length <= 1,
   });
 
   const filteredCategories = useMemo(() => {

@@ -10,16 +10,14 @@ public struct TransactionOverviewView: View {
     var token: ApiToken
     var isOutgoing: Bool
     var text: String?
-    var addressName: String?
-    var addressOrDomain: String
+    var addressViewModel: AddressViewModel
     
-    public init(amount: BigInt, token: ApiToken, isOutgoing: Bool, text: String?, addressName: String?, addressOrDomain: String) {
+    public init(amount: BigInt, token: ApiToken, isOutgoing: Bool, text: String?, addressViewModel: AddressViewModel) {
         self.amount = amount
         self.token = token
         self.isOutgoing = isOutgoing
         self.text = text
-        self.addressName = addressName
-        self.addressOrDomain = addressOrDomain
+        self.addressViewModel = addressViewModel
     }
     
     public var body: some View {
@@ -75,7 +73,7 @@ public struct TransactionOverviewView: View {
                 Text(text)
                     .font17h22()
             }
-            TappableAddress(account: AccountContext(source: .current), name: addressName, chain: token.chain, addressOrName: addressOrDomain)
+            TappableAddress(account: AccountContext(source: .current), model: addressViewModel)
         }
     }
 }

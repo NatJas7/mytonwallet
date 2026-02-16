@@ -1,11 +1,10 @@
-import React, { memo, useMemo } from '../../lib/teact/teact';
+import React, { memo } from '../../lib/teact/teact';
 
 import type { UserToken } from '../../global/types';
 
 import buildClassName from '../../util/buildClassName';
 import { formatHumanDay, formatTime } from '../../util/dateFormat';
 import { formatCurrencyExtended } from '../../util/formatNumber';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
 
 import useLang from '../../hooks/useLang';
 
@@ -24,7 +23,6 @@ function StakingProfitItem({
   tonToken, timestamp, profit, isSensitiveDataHidden,
 }: OwnProps) {
   const lang = useLang();
-  const amountCols = useMemo(() => getPseudoRandomNumber(4, 10, timestamp.toString()), [timestamp]);
 
   return (
     <div className={styles.item}>
@@ -37,7 +35,9 @@ function StakingProfitItem({
         isActive={isSensitiveDataHidden}
         cellSize={8}
         rows={2}
-        cols={amountCols}
+        min={4}
+        max={10}
+        seed={timestamp.toString()}
         align="right"
         className={styles.amount}
       >

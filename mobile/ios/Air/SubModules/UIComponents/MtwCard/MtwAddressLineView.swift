@@ -139,7 +139,7 @@ public struct MtwCardAddressLine: View {
                 }
             }
             if style.showAccessories {
-                Image.airBundle("HomeCardAddressesArrow")
+                Image.airBundle("ArrowUpDownSmall")
                     .opacity(style.textOpacity == 1 ? 0.9 : 0.5)
                     .offset(x: -1, y: 0.333)
                     .padding(.vertical, -3)

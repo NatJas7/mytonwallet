@@ -126,7 +126,7 @@ final class ActionsView: WTouchPassStackView, WThemedView {
         clipsToBounds = false
         
         addButton = WScalableButton(
-            title: IOS_26_MODE_ENABLED ? lang("Add / Buy") : lang("Add").lowercased(),
+            title: IOS_26_MODE_ENABLED ? lang("Fund") : lang("Add").lowercased(),
             image: IOS_26_MODE_ENABLED ? .airBundle("AddIconBold") : .airBundle("AddIcon"),
             onTap: { AppActions.showReceive(chain: nil, title: nil) }
         )

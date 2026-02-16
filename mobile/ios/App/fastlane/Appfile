@@ -1,5 +1,4 @@
 app_identifier("org.mytonwallet.app")
-apple_id("troman.dev@icloud.com")
 
 itc_team_id("126235213")
 team_id("Y54Z4K69Z9")

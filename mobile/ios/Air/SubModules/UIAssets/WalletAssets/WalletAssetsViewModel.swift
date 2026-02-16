@@ -79,11 +79,8 @@ public final class WalletAssetsViewModel: WalletCoreData.EventsObserver {
     }
     
     func stopReordering(isCanceled: Bool, restoreTabsOnCancel: Bool = false) {
-        guard isReordering else {
-            assertionFailure()
-            return
-        }
-        // just set state, everything already saved
+        guard isReordering else { return }
+
         _isReordering = false
         delegate?.walletAssetModelDidStopReordering(isCanceled: isCanceled)
         

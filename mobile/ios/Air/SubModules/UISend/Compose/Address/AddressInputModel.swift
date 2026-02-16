@@ -9,8 +9,9 @@ private let debounceAddressResolution: Duration = .seconds(0.250)
 
 enum AddressSource: Equatable {
     case constant(String)
-    case account(MAccount)
-    
+    case myAccount(MAccount)
+    case savedAccount(MAccount, saveKey: String)
+
     var isEmpty: Bool {
         .constant("") == self
     }
@@ -74,16 +75,22 @@ final class AddressInputModel {
     }
     
     var resolvedAddress: ResolvedAddress? {
-        if case .account(let account) = source, let accountChain = account.byChain[chain.rawValue] {
-            return ResolvedAddress(title: account.displayName, address: accountChain.address, domain: accountChain.domain)
+        switch source {
+        case .myAccount(let account), .savedAccount(let account, _):
+            if let accountChain = account.byChain[chain.rawValue] {
+                return ResolvedAddress(title: account.displayName, address: accountChain.address, domain: accountChain.domain)
+            }
+        case .constant:
+            break
         }
         return nil
     }
     
-    func resolveAddress() {
+    private func resolveAddress() {
         resolveAddressTask?.cancel()
         resolveAddressTask = Task {
             do {
+                
                 let compatibleChains = account.supportedChains.filter { $0.isValidAddressOrDomain(textFieldInput) }
                 if compatibleChains.isEmpty {
                     addressInfos = nil
@@ -117,7 +124,7 @@ final class AddressInputModel {
     /// Value to use for backend validation/draft: user-entered address/domain, or account address for selected account.
     var draftAddressOrDomain: String {
         switch source {
-        case .account(let account):
+        case .myAccount(let account), .savedAccount(let account, _):
             return account.byChain[chain.rawValue]?.address ?? textFieldInput
         case .constant(let raw):
             return raw
@@ -129,7 +136,7 @@ final class AddressInputModel {
     func displayComponents() -> (primary: String?, secondary: String?) {
         let chain = self.chain
         switch source {
-        case .account(let account):
+        case .myAccount(let account), .savedAccount(let account, _):
             let title = account.displayName
             let address = account.byChain[chain.rawValue]?.address
             let formattedAddress = address.map { formatStartEndAddress($0) }

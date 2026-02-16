@@ -56,15 +56,14 @@ fun WalletCore.loadExploreSites(
     }
 }
 
-fun WalletCore.requestDAppList() {
-    val accountId = AccountStore.activeAccountId ?: return
+fun WalletCore.requestDAppList(accountId: String? = null) {
+    val accountId = accountId ?: AccountStore.activeAccountId ?: return
     CoroutineScope(Dispatchers.Main).launch {
         try {
             val apps = call(ApiMethod.DApp.GetDapps(accountId))
             DappsStore.setDapps(accountId, apps)
             notifyEvent(WalletEvent.DappsCountUpdated)
-        } catch (e: JSWebViewBridge.ApiError) {
-            // todo: repeat request
+        } catch (_: JSWebViewBridge.ApiError) {
         }
     }
 }

@@ -12,6 +12,7 @@ export default tseslint.config(
     'src/lib/rlottie/rlottie-wasm.js',
     'src/lib/aes-js/index.js',
     'src/lib/noble-ed25519/index.js',
+    'src/lib/tonConnectFriendlyPatch.js',
     'src/lib/dexie/',
     'src/lib/axios-retry/',
     'src/lib/is-retry-allowed/',

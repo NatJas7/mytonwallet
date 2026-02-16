@@ -61,8 +61,8 @@ public final class MenuLayerView: UIView {
         addGestureRecognizer(tapGesture)
     }
     
-    public func showMenu(menuContext: MenuContext) {
-        
+    func showMenu(menuContext: MenuContext) {
+        menuContext.menuTriggered = true
         Haptics.play(.transition)
         
         if let sourceView = menuContext.sourceView, let window = sourceView.window, let portalView = makePortalView(of: sourceView) {
@@ -73,7 +73,7 @@ public final class MenuLayerView: UIView {
             if !menuContext.sourceFrame.isEmpty {
                 let sourceFrameInPortal = window.convert(menuContext.sourceFrame, to: portalView)
                 let mask = UIView()
-                mask.frame = sourceFrameInPortal.insetBy(dx: -16, dy: -16)
+                mask.frame = sourceFrameInPortal
                 mask.backgroundColor = .white
                 portalView.mask = mask
             }
@@ -112,6 +112,7 @@ public final class MenuLayerView: UIView {
     
     @objc public func dismissMenu() {
         if let menuContext {
+            menuContext.menuTriggered = false
             menuContext.onDismiss?()
             withAnimation(.spring(response: 0.4, dampingFraction: 0.9, blendDuration: 1)) {
                 menuContext.menuShown = false

@@ -15,6 +15,7 @@ import org.mytonwallet.app_air.walletcore.moshi.ApiSubmitTransfersResult
 import org.mytonwallet.app_air.walletcore.moshi.ApiTonConnectProof
 import org.mytonwallet.app_air.walletcore.moshi.ApiTransferToSign
 import org.mytonwallet.app_air.walletcore.moshi.DeviceInfo
+import org.mytonwallet.app_air.walletcore.moshi.MApiGetAddressInfoResult
 import org.mytonwallet.app_air.walletcore.moshi.MApiCheckNftDraftOptions
 import org.mytonwallet.app_air.walletcore.moshi.MApiCheckStakeDraftResult
 import org.mytonwallet.app_air.walletcore.moshi.MApiCheckTransactionDraftOptions
@@ -168,6 +169,20 @@ sealed class ApiMethod<T> {
 
     /* Wallet Data */
     object WalletData {
+        class GetAddressInfo(
+            chain: MBlockchain,
+            network: MBlockchainNetwork,
+            addressOrDomain: String,
+        ) : ApiMethod<MApiGetAddressInfoResult>() {
+            override val name: String = "getAddressInfo"
+            override val type: Type = MApiGetAddressInfoResult::class.java
+            override val arguments: String = ArgumentsBuilder()
+                .string(chain.name)
+                .string(network.value)
+                .string(addressOrDomain)
+                .build()
+        }
+
         class DecryptComment(
             accountId: String,
             activity: MApiTransaction,
@@ -204,7 +219,7 @@ sealed class ApiMethod<T> {
             @JsonClass(generateAdapter = true)
             data class Result(
                 val activities: List<MApiTransaction>,
-                val shouldFetchMore: Boolean
+                val hasMore: Boolean
             )
 
             override val name: String = "fetchPastActivities"

@@ -32,7 +32,7 @@ extension WalletFilter {
     var addTitle: String {
         switch self {
         case .all, .my:
-            lang("Add New Wallet")
+            lang("Add Wallet")
         case .ledger:
             lang("Add Ledger Wallet")
         case .view:

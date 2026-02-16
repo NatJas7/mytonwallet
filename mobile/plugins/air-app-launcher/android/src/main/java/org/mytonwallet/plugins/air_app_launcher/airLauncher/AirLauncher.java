@@ -160,16 +160,34 @@ public class AirLauncher {
     currentActivity.finish();
   }
 
-  public void handle(Intent intent) {
+  private void bringAirToFront(Activity currentActivity) {
+    Intent intent = new Intent(currentActivity, MainWindow.class);
+    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+    intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+    intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+    currentActivity.startActivity(intent);
+  }
+
+  public boolean handle(Intent intent) {
+    return handle(null, intent);
+  }
+
+  public boolean handle(Activity currentActivity, Intent intent) {
     Deeplink deeplink = DeeplinkParser.Companion.parse(intent);
-    if (deeplink != null) {
-      DeeplinkNavigator deeplinkNavigator = SplashVC.Companion.getSharedInstance();
-      if (deeplinkNavigator != null) {
-        deeplinkNavigator.handle(deeplink);
-      } else {
-        SplashVC.Companion.setPendingDeeplink(deeplink);
-      }
+    if (deeplink == null)
+      return false;
+    DeeplinkNavigator deeplinkNavigator = SplashVC.Companion.getSharedInstance();
+    if (deeplinkNavigator != null) {
+      deeplinkNavigator.handle(deeplink);
+    } else {
+      SplashVC.Companion.setPendingDeeplink(deeplink);
     }
+    if (isOnTheAir && currentActivity != null) {
+      // clear any activities stacked above Air in the same task
+      // so after handling a deeplink user returns to Air immediately
+      bringAirToFront(currentActivity);
+    }
+    return true;
   }
 
 }

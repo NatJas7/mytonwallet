@@ -32,7 +32,6 @@ type StateProps = {
   currencyRates: ApiCurrencyRates;
   currentAccountId?: string;
   baseCurrency: ApiBaseCurrency;
-  isSortByValueEnabled?: boolean;
   areTokensWithNoCostHidden?: boolean;
   settingsByAccountId: GlobalState['settings']['byAccountId'];
   isSensitiveDataHidden?: true;
@@ -40,7 +39,7 @@ type StateProps = {
 
 type OwnProps = {
   currentWalletRef?: ElementRef<HTMLDivElement>;
-  onCloseSettings: NoneToVoidFunction;
+  onAddAccount: NoneToVoidFunction;
 };
 
 const MAX_VISIBLE_WALLETS = 4;
@@ -54,12 +53,11 @@ const SettingsWallets = ({
   currencyRates,
   currentAccountId,
   baseCurrency,
-  isSortByValueEnabled,
   areTokensWithNoCostHidden,
   settingsByAccountId,
   isSensitiveDataHidden,
   currentWalletRef,
-  onCloseSettings,
+  onAddAccount,
 }: OwnProps & StateProps) => {
   const {
     switchAccount,
@@ -110,6 +108,7 @@ const SettingsWallets = ({
   const shouldShowAllWalletsButton = allAccountsExceptCurrent.length > MAX_VISIBLE_WALLETS;
 
   const handleAddWalletClick = useLastCallback(() => {
+    onAddAccount();
     openAddAccountModal({
       initialState: AccountSelectorState.AddAccountInitial,
       shouldHideBackButton: true,
@@ -118,7 +117,6 @@ const SettingsWallets = ({
 
   const handleSwitchAccount = useLastCallback((accountId: string) => {
     switchAccount({ accountId });
-    onCloseSettings();
   });
 
   return (

@@ -177,6 +177,7 @@ object WalletCore {
             notify = false,
             saveToStorage = false
         )
+        WalletCore.requestDAppList(accountId)
         //WalletContextManager.delegate?.protectedModeChanged()
         notifyEvent(
             WalletEvent.AccountChanged(
@@ -386,7 +387,7 @@ object WalletCore {
     }
 
     fun <T> call(method: ApiMethod<T>, callback: (String?, T?, JSWebViewBridge.ApiError?) -> Unit) {
-        return bridge!!.callApi(method.name, method.arguments, method.type, callback)
+        bridge?.callApi(method.name, method.arguments, method.type, callback)
     }
 
     fun <T> call(method: ApiMethod<T>, callback: (T?, JSWebViewBridge.ApiError?) -> Unit) {

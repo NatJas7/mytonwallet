@@ -336,7 +336,7 @@ public final class WalletTokensVC: WViewController, WalletCoreData.EventsObserve
                 }
             } else {
                 if !isServiceToken {
-                    primaryActions.append(UIAction(title: lang("Add / Buy"), image: UIImage(systemName: "plus")) { _ in
+                    primaryActions.append(UIAction(title: lang("Fund"), image: UIImage(systemName: "plus")) { _ in
                         AppActions.showReceive(chain: token.chainValue, title: nil)
                     })
                 }

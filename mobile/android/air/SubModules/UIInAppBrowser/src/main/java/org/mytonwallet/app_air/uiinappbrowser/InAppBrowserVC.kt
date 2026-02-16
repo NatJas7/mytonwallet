@@ -1,23 +1,29 @@
 package org.mytonwallet.app_air.uiinappbrowser
 
 import android.Manifest
+import android.app.Activity
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Message
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.webkit.CookieManager
 import android.webkit.PermissionRequest
+import android.webkit.URLUtil
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.widget.AppCompatImageView
@@ -137,6 +143,7 @@ class InAppBrowserVC(
 
     private var savedInExploreVisitedHistory = false
     private var shouldClearHistoryOnLoad = false
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     private val topBar: InAppBrowserTopBarView by lazy {
         InAppBrowserTopBarView(
@@ -189,6 +196,23 @@ class InAppBrowserVC(
         wv.settings.javaScriptEnabled = true
         wv.settings.domStorageEnabled = true
         wv.settings.setSupportMultipleWindows(true)
+        wv.setDownloadListener { url, userAgent, contentDisposition, mimetype, _ ->
+            val request = DownloadManager.Request(url.toUri()).apply {
+                setMimeType(mimetype)
+                addRequestHeader("User-Agent", userAgent)
+
+                val cookie = CookieManager.getInstance().getCookie(url)
+                if (!cookie.isNullOrEmpty()) addRequestHeader("Cookie", cookie)
+
+                setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+
+                val filename = URLUtil.guessFileName(url, contentDisposition, mimetype)
+                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename)
+            }
+
+            val dm = webView.context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(request)
+        }
         wv.setWebViewClient(object : WebViewClient() {
             override fun shouldOverrideUrlLoading(
                 view: WebView,
@@ -198,6 +222,7 @@ class InAppBrowserVC(
             }
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                applyTopBarColorInitial()
                 if (config.injectDarkModeStyles)
                     IABDarkModeStyleHelpers.applyOn(webView)
                 injectedInterface?.let {
@@ -225,7 +250,9 @@ class InAppBrowserVC(
                     savedInExploreVisitedHistory = true
                     saveInExploreVisitedHistory()
                 }
-                setBarColorBasedOnContent()
+                if (config.topBarColorMode == InAppBrowserConfig.TopBarColorMode.CONTENT_BASED) {
+                    setBarColorBasedOnContent()
+                }
             }
 
             private fun shouldOverride(url: String): Boolean {
@@ -313,6 +340,17 @@ class InAppBrowserVC(
                 }
             }
 
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                if (filePathCallback == null) {
+                    return false
+                }
+                return openFileChooser(filePathCallback, fileChooserParams)
+            }
+
             override fun onReceivedTitle(view: WebView?, title: String?) {
                 super.onReceivedTitle(view, title)
                 if (config.title != null || title == lastTitle || config.options != null)
@@ -365,6 +403,8 @@ class InAppBrowserVC(
             toTop(topBar)
             toCenterX(topBar)
         }
+
+        applyTopBarColorInitial()
 
         injectedInterface?.let {
             webView.addJavascriptInterface(
@@ -429,7 +469,15 @@ class InAppBrowserVC(
 
     override fun onDestroy() {
         super.onDestroy()
-        webView.destroy()
+        fileChooserCallback?.onReceiveValue(null)
+        fileChooserCallback = null
+        webView.apply {
+            stopLoading()
+            webChromeClient = null
+            setDownloadListener(null)
+            removeAllViews()
+            destroy()
+        }
     }
 
     private fun addWebView() {
@@ -492,20 +540,30 @@ class InAppBrowserVC(
         }
     }
 
+    private fun applyTopBarColorInitial() {
+        when (config.topBarColorMode) {
+            InAppBrowserConfig.TopBarColorMode.SYSTEM ->
+                animateBarBackground(null)
+            InAppBrowserConfig.TopBarColorMode.CONTENT_BASED ->
+                animateBarBackground(null)
+            InAppBrowserConfig.TopBarColorMode.FIXED ->
+                animateBarBackground(config.topBarColor)
+        }
+    }
+
     private fun setBarColorBasedOnContent() {
         webView.evaluateJavascript(FETCH_HEADER_COLOR_JS) { result ->
             val cssColor = result?.trim('"')
-
-            if (!cssColor.isNullOrEmpty() && cssColor != "null") {
-                try {
-                    val parsedColor = cssColor.toColorInt()
-                    animateBarBackground(parsedColor)
-                } catch (_: IllegalArgumentException) {
-                    animateBarBackground(null)
+            val parsedColor = cssColor
+                ?.takeIf { it.isNotEmpty() && it != "null" }
+                ?.let {
+                    try {
+                        it.toColorInt()
+                    } catch (_: IllegalArgumentException) {
+                        null
+                    }
                 }
-            } else {
-                animateBarBackground(null)
-            }
+            animateBarBackground(parsedColor)
         }
     }
 
@@ -571,6 +629,46 @@ class InAppBrowserVC(
             }
         }
         request.grant(request.resources)
+    }
+
+    private fun openFileChooser(
+        filePathCallback: ValueCallback<Array<Uri>>,
+        fileChooserParams: WebChromeClient.FileChooserParams?
+    ): Boolean {
+        this.fileChooserCallback?.onReceiveValue(null)
+        this.fileChooserCallback = filePathCallback
+
+        val chooserIntent = try {
+            fileChooserParams?.createIntent()
+        } catch (_: Exception) {
+            null
+        } ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+
+        val window = window ?: run {
+            this.fileChooserCallback?.onReceiveValue(null)
+            this.fileChooserCallback = null
+            return false
+        }
+
+        return try {
+            window.startActivityForResult(chooserIntent) { resultCode, data ->
+                val result = if (resultCode == Activity.RESULT_OK) {
+                    WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+                } else {
+                    null
+                }
+                this.fileChooserCallback?.onReceiveValue(result)
+                this.fileChooserCallback = null
+            }
+            true
+        } catch (_: Exception) {
+            this.fileChooserCallback?.onReceiveValue(null)
+            this.fileChooserCallback = null
+            false
+        }
     }
 
     companion object {

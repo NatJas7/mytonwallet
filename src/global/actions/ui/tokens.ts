@@ -11,6 +11,14 @@ addActionHandler('showTokenActivity', (global, actions, { slug }) => {
 });
 
 addActionHandler('toggleTokensWithNoCost', (global, actions, { isEnabled }) => {
+  const accountSettings = selectCurrentAccountSettings(global) ?? {};
+
+  global = updateCurrentAccountSettings(global, {
+    ...accountSettings,
+    alwaysShownSlugs: [],
+    alwaysHiddenSlugs: [],
+  });
+
   return updateSettings(global, { areTokensWithNoCostHidden: isEnabled });
 });
 

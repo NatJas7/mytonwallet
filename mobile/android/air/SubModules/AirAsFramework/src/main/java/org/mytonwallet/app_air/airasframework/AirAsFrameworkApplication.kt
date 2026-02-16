@@ -147,7 +147,7 @@ class AirAsFrameworkApplication {
             DevicePerformanceClassifier.init(applicationContext)
             Logger.i(
                 Logger.LogTag.AIR_APPLICATION,
-                "DevicePerformanceClassifier.init: ${System.currentTimeMillis() - t}ms"
+                "DevicePerformanceClassifier.init: class=${DevicePerformanceClassifier.performanceClass?.code} time=${System.currentTimeMillis() - t}ms"
             )
 
             val end = System.currentTimeMillis()

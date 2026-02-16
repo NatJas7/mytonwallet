@@ -87,7 +87,7 @@ Net Worth: Стоимость
 Price: Цена
 Enter Password: Введите пароль
 Send: Отправить
-Add Wallet: Добавить
+Add Wallet: Добавить кошелёк
 Done: Готово
 Delete: Удалить
 Delete Saved Address: Удалить сохранённый адрес
@@ -496,7 +496,7 @@ Are you sure you want to disable Touch ID?: Вы уверены, что хоти
 Are you sure you want to disable biometrics?: Вы уверены, что хотите отключить биометрию?
 "Yes": Да
 No Activity: Нет активности
-Add / Buy: Пополнить
+Fund: Пополнить
 Buy with Card: Покупка с карты
 Buy with Crypto: Покупка за криптовалюту
 Cannot load widget: Невозможно загрузить виджет
@@ -989,7 +989,6 @@ All: Все
 $view_accounts: Просмотр
 Add your first one to begin.: Добавьте свой первый кошелек, чтобы начать.
 You don’t have any wallets yet: У вас ещё нет кошельков
-Add New Wallet: Добавить новый кошелёк
 Add Ledger Wallet: Добавить кошелёк Ledger
 Add View Wallet: Добавить кошелёк для просмотра
 No Ledger wallets yet: Кошельков Ledger пока нет
@@ -1056,3 +1055,4 @@ Pin: Закрепить
 Unpin: Открепить
 My Assets: Мои активы
 Owner: Владелец
+Show All Wallets: Показать все кошельки

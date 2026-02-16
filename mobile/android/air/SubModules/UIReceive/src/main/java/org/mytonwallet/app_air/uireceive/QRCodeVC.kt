@@ -20,6 +20,7 @@ import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.unspecified
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
+import org.mytonwallet.app_air.uicomponents.commonViews.cells.HeaderCell
 import org.mytonwallet.app_air.uicomponents.widgets.CopyTextView
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
 import org.mytonwallet.app_air.uicomponents.widgets.WQRCodeView
@@ -124,10 +125,13 @@ class QRCodeVC(
         setText(walletAddress, walletAddress)
     }
 
-    private val titleLabel: WLabel = WLabel(context).apply {
-        setStyle(16f, WFont.Medium)
-        text = LocaleController.getString("Your %blockchain% Address")
-            .replace("%blockchain%", title.toString())
+    private val titleLabel = HeaderCell(context).apply {
+        configure(
+            title = LocaleController.getString("Your %blockchain% Address")
+                .replace("%blockchain%", title.toString()),
+            titleColor = WColor.Tint,
+            topRounding = HeaderCell.TopRounding.NORMAL
+        )
     }
 
     private val warningLabel = WLabel(context).apply {
@@ -146,9 +150,8 @@ class QRCodeVC(
     }
 
     val addressView = WView(context).apply {
-        setPadding(20.dp, 16.dp, 20.dp, 16.dp)
+        setPadding(20.dp, 8.dp, 20.dp, 16.dp)
 
-        addView(titleLabel, LayoutParams(LayoutParams.MATCH_CONSTRAINT, WRAP_CONTENT))
         addView(
             addressLabel,
             LayoutParams(LayoutParams.MATCH_CONSTRAINT, WRAP_CONTENT)
@@ -159,9 +162,7 @@ class QRCodeVC(
         )
 
         setConstraints {
-            toTop(titleLabel)
-            toCenterX(titleLabel)
-            topToBottom(addressLabel, titleLabel, 8f.dp)
+            toTop(addressLabel)
             toCenterX(addressLabel)
             topToBottom(warningLabel, addressLabel, 8f.dp)
             toCenterX(warningLabel)
@@ -180,6 +181,10 @@ class QRCodeVC(
             LayoutParams(230.dp, 230.dp)
         )
         view.addView(
+            titleLabel,
+            LayoutParams(LayoutParams.MATCH_CONSTRAINT, WRAP_CONTENT)
+        )
+        view.addView(
             addressView,
             LayoutParams(LayoutParams.MATCH_CONSTRAINT, WRAP_CONTENT)
         )
@@ -188,7 +193,9 @@ class QRCodeVC(
             toCenterX(qrCodeView)
             centerYToCenterY(ornamentView, qrCodeView, 16f.dp)
             toCenterX(ornamentView)
-            topToBottom(addressView, qrCodeView, 40f)
+            topToBottom(titleLabel, qrCodeView, 40f)
+            toCenterX(titleLabel)
+            topToBottom(addressView, titleLabel)
             toCenterX(addressView)
         }
 
@@ -207,7 +214,7 @@ class QRCodeVC(
             )
         }
         addressLabel.setTextColor(WColor.PrimaryText.color)
-        titleLabel.setTextColor(WColor.PrimaryText.color)
+        titleLabel.updateTheme()
         warningLabel.setTextColor(WColor.SecondaryText.color)
         addressView.setBackgroundColor(WColor.Background.color)
 

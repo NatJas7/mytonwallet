@@ -434,7 +434,7 @@ function Settings({
           {isPortrait && (
             <SettingsWallets
               currentWalletRef={currentWalletRef}
-              onCloseSettings={handleCloseSettings}
+              onAddAccount={handleCloseSettings}
             />
           )}
 

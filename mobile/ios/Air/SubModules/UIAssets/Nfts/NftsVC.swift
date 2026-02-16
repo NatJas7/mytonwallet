@@ -692,6 +692,19 @@ extension NftsVC: ReorderableCollectionViewControllerDelegate {
             self.contextMenuExtraBlurView = nil
         }
     }
+
+    public func reorderController(_ controller: ReorderableCollectionViewController, adjustPreviewFrame previewFrame: CGRect) -> CGRect {
+        var result = previewFrame
+        
+        // In compact mode, the tiles are sandboxed within their own section.
+        if mode == .compact {
+            let insets = layoutGeometry.calcCompactModeNftInsets(itemCount: allShownNftsCount)
+            let bounds = collectionView.bounds.inset(by: insets)
+            result = result.clamped(to: bounds)
+        }
+        
+        return result
+    }
 }
 
 extension NftsVC: WalletCoreData.EventsObserver {
@@ -721,7 +734,9 @@ private class LayoutGeometry {
     private let compactModeMinColumnCount: Int = 2 // occupy place as if at least 2 items are here
     private let compactModeMaxColumnCount: Int = 3
     private let compactModeMaxRowCount: Int = 2
-    
+    private let compactModeTopInset: CGFloat = 8
+    private let compactModeBottomInset: CGFloat = 12
+
     var compactModeMaxVisibleItemCount: Int { compactModeMaxColumnCount * compactModeMaxRowCount } // 6
     
     let spacing: CGFloat
@@ -765,23 +780,32 @@ private class LayoutGeometry {
         var result: CGFloat = 0
         if shouldShowShowAllAction(itemCount: itemCount) {
             let (height, contentInsets) = calcActionsItemGeometry()
-            result += height + contentInsets.top + contentInsets.bottom
+            result += height + contentInsets.vertical
         } else {
-            result += 12 // just padding
+            result += compactModeBottomInset // just padding
         }
         if itemCount == 0 {
             let (height, contentInsets) = calcPlaceholderItemGeometry(collectionView: collectionView)
-            result += height + contentInsets.top + contentInsets.bottom
+            result += height + contentInsets.vertical
         } else {
             let (cellSize, contentInsets) = calcNftItemGeometry(itemCount: itemCount, collectionView: collectionView)
             let rowCount = min(compactModeMaxRowCount, (itemCount + compactModeMaxColumnCount - 1) / compactModeMaxColumnCount)
-            result += (cellSize.height + spacing) * CGFloat(rowCount) - spacing + contentInsets.top + contentInsets.bottom
+            result += (cellSize.height + spacing) * CGFloat(rowCount) - spacing + contentInsets.vertical
         }
         return result
     }
     
     func calcActionsItemGeometry() -> (height: CGFloat,  contentInsets: NSDirectionalEdgeInsets) {
         return (height: 44, contentInsets: .init(top: 8, leading: 0, bottom: 0, trailing: 0))
+    }
+    
+    func calcCompactModeNftInsets(itemCount: Int) -> UIEdgeInsets {
+        var result = UIEdgeInsets(top: compactModeTopInset, left: horizontalMargins, bottom: compactModeBottomInset, right: horizontalMargins)
+        if shouldShowShowAllAction(itemCount: itemCount) {
+            let ag = calcActionsItemGeometry()
+            result.bottom = ag.height + ag.contentInsets.vertical
+        }
+        return result
     }
     
     func calcPlaceholderItemGeometry(collectionView: UICollectionView) -> (height: CGFloat, contentInsets: NSDirectionalEdgeInsets) {
@@ -826,7 +850,7 @@ private class LayoutGeometry {
             let sideInset = floor(containerWidth - occupiedSpace) / 2
             return (
                 cellSize: CGSize(width: cellWidth, height: cellWidth),
-                contentInsets: .init(top: 8, leading: sideInset, bottom: 0, trailing: sideInset)
+                contentInsets: .init(top: compactModeTopInset, leading: sideInset, bottom: 0, trailing: sideInset)
             )
         }
         

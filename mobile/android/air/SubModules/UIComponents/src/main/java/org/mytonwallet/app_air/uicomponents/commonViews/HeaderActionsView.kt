@@ -38,6 +38,7 @@ import org.mytonwallet.app_air.walletbasecontext.theme.WColor
 import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcore.models.MAccount
+import org.mytonwallet.app_air.walletcore.stores.ConfigStore
 import kotlin.math.roundToInt
 
 @SuppressLint("ViewConstructor")
@@ -45,7 +46,6 @@ class HeaderActionsView(
     context: Context,
     var tabs: List<Item>,
     var onClick: ((Identifier) -> Unit)?,
-    var isSellAllowed: Boolean = false,
 ) : WCell(context), WThemedView {
 
     private var actionViews = HashMap<Identifier, View>()
@@ -146,7 +146,6 @@ class HeaderActionsView(
             if (identifier == Identifier.SEND) {
                 itemView.setOnLongClickListener {
                     if (alpha > 0) {
-                        if (!isSellAllowed) return@setOnLongClickListener false
                         Haptics.play(this, HapticType.LIGHT_TAP)
                         presentSendSellMenu(itemView)
                         return@setOnLongClickListener true
@@ -182,25 +181,41 @@ class HeaderActionsView(
             updateActions(account)
         }
     }
+    private fun isSellAllowed(): Boolean {
+        return account?.supportsBuyWithCard == true && ConfigStore.isLimited != true
+    }
 
     private fun presentSendSellMenu(anchorView: View) {
-        if (!isSellAllowed) return
-        WMenuPopup.present(
-            anchorView,
-            listOf(
-                WMenuPopup.Item(
-                    R.drawable.ic_header_popup_menu_send_outline,
-                    LocaleController.getString("Send"),
-                ) {
-                    onClick?.invoke(Identifier.SEND)
-                },
+        val items = mutableListOf<WMenuPopup.Item>()
+        items.add(
+            WMenuPopup.Item(
+                R.drawable.ic_header_popup_menu_send_outline,
+                LocaleController.getString("Send"),
+            ) {
+                onClick?.invoke(Identifier.SEND)
+            }
+        )
+        items.add(
+            WMenuPopup.Item(
+                R.drawable.ic_header_popup_menu_multisend_outline,
+                LocaleController.getString("Multisend"),
+            ) {
+                onClick?.invoke(Identifier.MULTISEND)
+            }
+        )
+        if (isSellAllowed()) {
+            items.add(
                 WMenuPopup.Item(
                     R.drawable.ic_header_popup_menu_sell_outline,
                     LocaleController.getString("Sell"),
                 ) {
                     onClick?.invoke(Identifier.SELL)
                 }
-            ),
+            )
+        }
+        WMenuPopup.present(
+            anchorView,
+            items,
             positioning = Positioning.BELOW
         )
     }
@@ -214,6 +229,7 @@ class HeaderActionsView(
     enum class Identifier {
         RECEIVE,
         SEND,
+        MULTISEND,
         SELL,
         EARN,
         SWAP,
@@ -391,18 +407,14 @@ class HeaderActionsView(
                             context,
                             R.drawable.ic_header_add_outline
                         )!!,
-                        LocaleController.getString("Add / Buy")
+                        LocaleController.getString("Fund")
                     )
                 )
                 add(
                     Item(
                         Identifier.SEND,
                         ContextCompat.getDrawable(context, R.drawable.ic_header_send_outline)!!,
-                        if (LocaleController.activeLanguage.langCode == "en") {
-                            "${LocaleController.getString("Send")} / ${LocaleController.getString("Sell")}"
-                        } else {
-                            LocaleController.getString("Send")
-                        }
+                        LocaleController.getString("Send")
                     )
                 )
                 add(

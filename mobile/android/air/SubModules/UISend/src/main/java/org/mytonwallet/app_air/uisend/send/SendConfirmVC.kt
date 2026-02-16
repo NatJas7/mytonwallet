@@ -3,6 +3,7 @@ package org.mytonwallet.app_air.uisend.send
 import android.annotation.SuppressLint
 import android.content.Context
 import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
@@ -25,8 +26,9 @@ import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
 import org.mytonwallet.app_air.uicomponents.extensions.styleDots
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
-import org.mytonwallet.app_air.uicomponents.helpers.spans.WForegroundColorSpan
+import org.mytonwallet.app_air.uicomponents.helpers.spans.ScamLabelSpan
 import org.mytonwallet.app_air.uicomponents.helpers.spans.WTypefaceSpan
+import org.mytonwallet.app_air.uicomponents.helpers.spans.WForegroundColorSpan
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
 import org.mytonwallet.app_air.uicomponents.image.Content
 import org.mytonwallet.app_air.uicomponents.widgets.CopyTextView
@@ -60,7 +62,8 @@ class SendConfirmVC(
     private val config: SendViewModel.DraftResult.Result,
     private val transferOptions: MApiSubmitTransferOptions,
     private val slug: String,
-    private val name: String? = null
+    private val name: String? = null,
+    private val isScam: Boolean = false
 ) : WViewController(context) {
     override val TAG = "SendConfirm"
 
@@ -70,6 +73,9 @@ class SendConfirmVC(
         WGlobalStorage.isMultichain(AccountStore.activeAccountId!!)
 
     private var task: ((passcode: String?) -> Unit)? = null
+    private val scamLabelSpan by lazy {
+        ScamLabelSpan(LocaleController.getString("Scam").uppercase())
+    }
 
     fun setNextTask(task: (passcode: String?) -> Unit) {
         this.task = task
@@ -114,20 +120,12 @@ class SendConfirmVC(
 
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             setLineHeight(TypedValue.COMPLEX_UNIT_SP, 24f)
-            val resolvedAddress = config.resolvedAddress
-            val displayText = if (name != null && resolvedAddress != null) {
-                buildSpannedString {
-                    inSpans(WTypefaceSpan(WFont.Medium.typeface, WColor.PrimaryText.color)) {
-                        append(name)
-                    }
-                    inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.SecondaryText.color)) {
-                        append(" · $resolvedAddress")
-                    }.styleDots()
-                }.replaceSpacesWithNbsp()
-            } else {
-                resolvedAddress
-            }
-            setText(displayText, resolvedAddress ?: "")
+            val destination = config.request.input.destination
+            val resolved = resolvedAddress(destination)
+            setText(
+                buildRecipientPreview(resolved),
+                resolved
+            )
             clipLabel = "Address"
             clipToast = LocaleController.getString("Address was copied!")
         }
@@ -320,6 +318,10 @@ class SendConfirmVC(
         setupNavBar(true)
         navigationBar?.addCloseButton()
 
+        if (isScam) {
+            confirmButton.type = WButton.Type.DESTRUCTIVE
+        }
+
         view.addView(scrollView, ViewGroup.LayoutParams(MATCH_PARENT, 0))
         view.addView(
             bottomReversedCornerViewUpsideDown,
@@ -406,6 +408,13 @@ class SendConfirmVC(
         gap2.showSeparator = false
         gap1.invalidate()
         gap2.invalidate()
+
+        val destination = config.request.input.destination
+        val resolved = resolvedAddress(destination)
+        addressInputView.setText(
+            buildRecipientPreview(resolved),
+            resolved
+        )
     }
 
     override fun insetsUpdated() {
@@ -423,6 +432,57 @@ class SendConfirmVC(
                     (window?.imeInsets?.bottom ?: 0)
                 )
             )
+        }
+    }
+
+    private fun resolvedAddress(destination: String): String {
+        return config.resolvedAddress ?: destination
+    }
+
+    private fun resolvedName(): String? {
+        return name ?: config.addressName
+    }
+
+    private fun buildRecipientPreview(address: String): CharSequence {
+        val name = resolvedName()?.takeIf { it.isNotBlank() }
+        return buildSpannedString {
+            if (isScam) {
+                append(" ", scamLabelSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                append(" ")
+            }
+
+            if (!isScam && name != null) {
+                inSpans(WTypefaceSpan(WFont.Medium.typeface, WColor.PrimaryText.color)) {
+                    append(name)
+                }
+                append(" · ")
+            }
+
+            append(buildAddressSpan(address)).styleDots()
+        }.replaceSpacesWithNbsp()
+    }
+
+    private fun buildAddressSpan(address: String): CharSequence {
+        if (address.length <= 12) {
+            return buildSpannedString {
+                inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.PrimaryText.color)) {
+                    append(address)
+                }
+            }
+        }
+        val prefix = address.take(6)
+        val suffix = address.takeLast(6)
+        val middle = address.substring(6, address.length - 6)
+        return buildSpannedString {
+            inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.PrimaryText.color)) {
+                append(prefix)
+            }
+            inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.SecondaryText.color)) {
+                append(middle)
+            }
+            inSpans(WTypefaceSpan(WFont.Regular.typeface, WColor.PrimaryText.color)) {
+                append(suffix)
+            }
         }
     }
 

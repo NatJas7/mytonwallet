@@ -28,6 +28,7 @@ import org.mytonwallet.app_air.uicomponents.base.WViewController
 import org.mytonwallet.app_air.uicomponents.commonViews.cells.HeaderCell
 import org.mytonwallet.app_air.uicomponents.commonViews.TokenAmountInputView
 import org.mytonwallet.app_air.uicomponents.extensions.dp
+import kotlin.math.roundToInt
 import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
 import org.mytonwallet.app_air.uicomponents.helpers.HapticType
 import org.mytonwallet.app_air.uicomponents.helpers.Haptics
@@ -337,12 +338,13 @@ class InvoiceVC(context: Context) : WViewController(context) {
         val ss = SpannableStringBuilder(txt)
         ContextCompat.getDrawable(
             context,
-            org.mytonwallet.app_air.icons.R.drawable.ic_arrow_bottom_8
+            org.mytonwallet.app_air.icons.R.drawable.ic_arrows_14
         )?.let { drawable ->
             drawable.mutate()
             drawable.setTint(WColor.SecondaryText.color)
-            val width = 8.dp
-            val height = 4.dp
+            drawable.alpha = 204
+            val width = 7.dp
+            val height = 14.dp
             drawable.setBounds(0, 0, width, height)
             val imageSpan = VerticalImageSpan(drawable)
             ss.append(" ", imageSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

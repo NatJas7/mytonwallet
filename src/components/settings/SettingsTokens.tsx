@@ -11,7 +11,7 @@ import buildClassName from '../../util/buildClassName';
 import { toDecimal } from '../../util/decimals';
 import { stopEvent } from '../../util/domEvents';
 import { formatCurrency, getShortCurrencySymbol } from '../../util/formatNumber';
-import { getPseudoRandom } from '../../util/math';
+import getDeterministicRandom from '../../util/getDeterministicRandom';
 import getTokenName from '../main/helpers/getTokenName';
 
 import useLang from '../../hooks/useLang';
@@ -114,7 +114,7 @@ function SettingsTokens({
           <div className={styles.tokenDescription}>
             <SensitiveData
               isActive={isSensitiveDataHidden}
-              cols={getPseudoRandom(4, 9, index)}
+              cols={getDeterministicRandom(4, 9, index)}
               rows={2}
               cellSize={8}
               contentClassName={styles.tokenAmount}

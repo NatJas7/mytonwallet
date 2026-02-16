@@ -12,8 +12,16 @@ data class InAppBrowserConfig(
     val saveInVisitedHistory: Boolean = false,
     val options: List<Option>? = null,
     val selectedOption: String? = null,
+    val topBarColorMode: TopBarColorMode = TopBarColorMode.CONTENT_BASED,
+    val topBarColor: Int? = null,
     val optionsOnTitle: Boolean = false,
 ) {
+    enum class TopBarColorMode {
+        SYSTEM,
+        CONTENT_BASED,
+        FIXED,
+    }
+
     data class Option(
         val identifier: String,
         val title: String,

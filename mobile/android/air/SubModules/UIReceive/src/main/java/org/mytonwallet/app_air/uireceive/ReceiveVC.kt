@@ -22,7 +22,6 @@ import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProvider
 import org.mytonwallet.app_air.uicomponents.AnimationConstants
 import org.mytonwallet.app_air.uicomponents.base.WNavigationBar
-import org.mytonwallet.app_air.uicomponents.base.WNavigationController
 import org.mytonwallet.app_air.uicomponents.base.WViewControllerWithModelStore
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.helpers.HapticType
@@ -37,7 +36,7 @@ import org.mytonwallet.app_air.uicomponents.widgets.fadeOut
 import org.mytonwallet.app_air.uicomponents.widgets.segmentedController.WSegmentedController
 import org.mytonwallet.app_air.uicomponents.widgets.segmentedController.WSegmentedControllerItem
 import org.mytonwallet.app_air.uicomponents.widgets.setBackgroundColor
-import org.mytonwallet.app_air.uiinappbrowser.InAppBrowserVC
+import org.mytonwallet.app_air.uiinappbrowser.CustomTabsBrowser
 import org.mytonwallet.app_air.uiswap.screens.swap.SwapVC
 import org.mytonwallet.app_air.walletbasecontext.localization.LocaleController
 import org.mytonwallet.app_air.walletbasecontext.models.MBaseCurrency
@@ -47,13 +46,14 @@ import org.mytonwallet.app_air.walletbasecontext.theme.color
 import org.mytonwallet.app_air.walletcore.TONCOIN_SLUG
 import org.mytonwallet.app_air.walletcore.TRON_USDT_SLUG
 import org.mytonwallet.app_air.walletcore.WalletCore
-import org.mytonwallet.app_air.walletcore.models.InAppBrowserConfig
 import org.mytonwallet.app_air.walletcore.models.MBlockchain
 import org.mytonwallet.app_air.walletcore.models.MBridgeError
 import org.mytonwallet.app_air.walletcore.moshi.MApiSwapAsset
 import org.mytonwallet.app_air.walletcore.stores.AccountStore
 import org.mytonwallet.app_air.walletcore.stores.ConfigStore
 import org.mytonwallet.app_air.walletcore.stores.TokenStore
+import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup
+import org.mytonwallet.app_air.uicomponents.widgets.menu.WMenuPopup.BackgroundStyle
 import java.lang.ref.WeakReference
 
 // TODO:: Refactor required. The current implementation is too tightly coupled with Ton and Tron.
@@ -272,7 +272,7 @@ class ReceiveVC(
                         return@setOnClickListener
                     }
                 }
-                openBuyWithCard(tokenSymbol)
+                openBuyWithCard(tokenSymbol, v)
             }
         }
         v
@@ -499,7 +499,7 @@ class ReceiveVC(
         }
     }
 
-    private fun openBuyWithCard(chain: String) {
+    private fun openBuyWithCard(chain: String, anchorView: View? = null) {
         val baseCurrencies = listOfNotNull(
             MBaseCurrency.USD,
             MBaseCurrency.EUR,
@@ -514,55 +514,44 @@ class ReceiveVC(
                 preferredBaseCurrency
             else
                 MBaseCurrency.USD
+        if (anchorView != null && baseCurrencies.size > 1) {
+            WMenuPopup.present(
+                anchorView,
+                baseCurrencies.map { currency ->
+                    WMenuPopup.Item(
+                        WMenuPopup.Item.Config.Item(
+                            icon = null,
+                            title = currency.currencyName,
+                            subtitle = currency.currencyCode,
+                        ),
+                        onTap = {
+                            openBuyWithCardUrl(chain, currency)
+                        }
+                    )
+                },
+                positioning = WMenuPopup.Positioning.ALIGNED,
+                windowBackgroundStyle = BackgroundStyle.Cutout.fromView(
+                    view = anchorView,
+                    roundRadius = 16f.dp,
+                    horizontalOffset = 8.dp,
+                    verticalOffset = 0
+                )
+            )
+            return
+        }
+
+        openBuyWithCardUrl(chain, baseCurrency)
+    }
+
+    private fun openBuyWithCardUrl(chain: String, baseCurrency: MBaseCurrency) {
         receiveViewModel.buyWithCardUrl(chain, baseCurrency) { url ->
             url?.let {
-                openBuyWithCardWebView(
-                    chain,
-                    baseCurrencies,
-                    url,
-                    baseCurrency
-                )
+                CustomTabsBrowser.open(context, it)
             } ?: run {
                 if (!WalletCore.isConnected())
                     showError(MBridgeError.SERVER_ERROR)
             }
         }
-    }
-
-    private fun openBuyWithCardWebView(
-        chain: String,
-        baseCurrencies: List<MBaseCurrency>,
-        url: String,
-        defaultCurrency: MBaseCurrency
-    ) {
-        val nav = WNavigationController(window!!)
-        nav.setRoot(
-            InAppBrowserVC(
-                context,
-                null,
-                InAppBrowserConfig(
-                    url,
-                    title = LocaleController.getString("Buy with Card"),
-                    injectTonConnectBridge = false,
-                    forceCloseOnBack = true,
-                    options = baseCurrencies.map { baseCurrency ->
-                        InAppBrowserConfig.Option(
-                            identifier = baseCurrency.currencyCode,
-                            title = baseCurrency.currencyName,
-                            onClick = { vc ->
-                                receiveViewModel.buyWithCardUrl(chain, baseCurrency, { url ->
-                                    url?.let {
-                                        (vc.get() as? InAppBrowserVC)?.navigate(url)
-                                    }
-                                })
-                            }
-                        )
-                    },
-                    selectedOption = defaultCurrency.currencyCode
-                )
-            )
-        )
-        window?.present(nav)
     }
 
     override fun viewWillAppear() {

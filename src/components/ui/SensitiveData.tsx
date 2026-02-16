@@ -5,6 +5,7 @@ import type { SensitiveDataMaskSkin } from '../common/SensitiveDataMask';
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 import { stopEvent } from '../../util/domEvents';
+import getDeterministicRandom from '../../util/getDeterministicRandom';
 import { vibrate } from '../../util/haptics';
 
 import useShowTransition from '../../hooks/useShowTransition';
@@ -13,10 +14,13 @@ import SensitiveDataMask from '../common/SensitiveDataMask';
 
 import styles from './SensitiveData.module.scss';
 
-interface OwnProps {
+type ColsProps =
+  | { cols: number; min?: never; max?: never; seed?: never }
+  | { cols?: never; min: number; max: number; seed: string };
+
+type OwnProps = ColsProps & {
   isActive?: boolean;
   rows: number;
-  cols: number;
   cellSize: number;
   align?: 'left' | 'center' | 'right';
   maskSkin?: SensitiveDataMaskSkin;
@@ -25,12 +29,15 @@ interface OwnProps {
   maskClassName?: string;
   contentClassName?: string;
   children: TeactNode;
-}
+};
 
 function SensitiveData({
   isActive,
   rows,
   cols,
+  min,
+  max,
+  seed,
   cellSize = 0,
   align = 'left',
   maskSkin,
@@ -40,6 +47,7 @@ function SensitiveData({
   contentClassName,
   children,
 }: OwnProps) {
+  const resolvedCols = cols ?? getDeterministicRandom(min, max, seed);
   const [isShown, setIsShown] = useState(false);
 
   const isMaskActive = isActive && !isShown;
@@ -87,7 +95,7 @@ function SensitiveData({
     styles[align],
   );
   const wrapperStyle = buildStyle(
-    `--spoiler-width: calc(${cellSize * cols}px + var(--sensitive-data-extra-width, 0px))`,
+    `--spoiler-width: calc(${cellSize * resolvedCols}px + var(--sensitive-data-extra-width, 0px))`,
     `min-height: ${cellSize * rows}px`,
     (isMaskActive || shouldHoldSize) && 'min-width: var(--spoiler-width);',
   );
@@ -107,7 +115,7 @@ function SensitiveData({
       {shouldRenderSpoiler && (
         <SensitiveDataMask
           ref={spoilerRef}
-          cols={cols}
+          cols={resolvedCols}
           rows={rows}
           cellSize={cellSize}
           skin={maskSkin}

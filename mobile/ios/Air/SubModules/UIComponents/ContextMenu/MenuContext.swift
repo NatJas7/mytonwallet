@@ -12,14 +12,20 @@ private let distanceFromAnchor: CGFloat = 8
     @PerceptionIgnored
     public var sourceView: UIView? = nil
     @PerceptionIgnored
-    public var sourceFrame: CGRect = .zero
+    var sourceFrame: CGRect = .zero
+    /// Closure to update `sourceFrame` just at the menu's presentation time. Makes sense if sourceView is SwiftUI-based
+    @PerceptionIgnored
+    var onGetSourceFrame: (() -> CGRect?)?
     @PerceptionIgnored
     var anchor: Alignment = .bottom
     
     var locations: [String: CGRect] = [:]
     var currentLocation: CGPoint?
     var currentItem: String?
-    public var menuShown: Bool = false
+    var menuShown: Bool = false
+    /// Set when menu is about to be shown; cleared on dismiss. Used by gesture handlers to suppress conflicting actions (e.g. segment tap).
+    @PerceptionIgnored
+    var menuTriggered: Bool = false
     var submenuId = "0"
     var visibleSubmenus: Set<String> = []
     
@@ -84,8 +90,11 @@ private let distanceFromAnchor: CGFloat = 8
         }
     }
     
-    @MainActor public func present() {
+    @MainActor func present() {
         if !menuShown {
+            if let frame = onGetSourceFrame?() {
+                sourceFrame = frame
+            }
             if let view = getMenuLayerView() {
                 view.showMenu(menuContext: self)
             }

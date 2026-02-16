@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import org.mytonwallet.app_air.walletcontext.helpers.AddressHelpers
+import org.mytonwallet.app_air.walletcontext.models.MBlockchainNetwork
 import org.mytonwallet.app_air.walletcore.TRON_USDT_SLUG
 import org.mytonwallet.app_air.walletcore.models.InAppBrowserConfig
 import org.mytonwallet.app_air.walletcore.models.MBlockchain
@@ -83,6 +84,7 @@ sealed class Deeplink {
     data class SwitchToLegacy(override val accountAddress: String?) : Deeplink()
     data class View(
         override val accountAddress: String?,
+        val network: MBlockchainNetwork,
         val addressByChain: Map<String, String>
     ) : Deeplink()
 }
@@ -325,7 +327,13 @@ class DeeplinkParser {
                             }
                         }
                     }
-                    return Deeplink.View(accountAddress = null, addressByChain = addressByChain)
+                    val network =
+                        if (uri.getQueryParameter("testnet") == "true") MBlockchainNetwork.TESTNET else MBlockchainNetwork.MAINNET
+                    return Deeplink.View(
+                        accountAddress = null,
+                        network = network,
+                        addressByChain = addressByChain
+                    )
                 }
 
                 else -> {

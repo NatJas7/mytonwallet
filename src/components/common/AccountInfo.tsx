@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from '../../lib/teact/teact';
+import React, { memo } from '../../lib/teact/teact';
 import { withGlobal } from '../../global';
 
 import type { ApiNft } from '../../api/types';
@@ -9,7 +9,6 @@ import { selectAccountSettings, selectCurrentAccount, selectCurrentAccountId } f
 import buildClassName from '../../util/buildClassName';
 import { formatAccountAddresses } from '../../util/formatAccountAddress';
 import { formatCurrency } from '../../util/formatNumber';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
 import isViewAccount from '../../util/isViewAccount';
 
 import CustomCardPreview from '../main/modals/accountSelector/CustomCardPreview';
@@ -44,9 +43,6 @@ function AccountInfo({
   const isView = isViewAccount(currentAccount.type);
   const formattedAddress = formatAccountAddresses(currentAccount.byChain, 'list');
 
-  const amountCols = useMemo(() => getPseudoRandomNumber(4, 12, currentAccount.title || ''), [currentAccount.title]);
-  const fiatAmountCols = 5 + (amountCols % 6);
-
   return (
     <div className={styles.info}>
       <WalletAvatar
@@ -62,7 +58,9 @@ function AccountInfo({
           <SensitiveData
             isActive={isSensitiveDataHidden}
             rows={2}
-            cols={fiatAmountCols}
+            min={5}
+            max={10}
+            seed={currentAccount.title || ''}
             cellSize={8}
             align="right"
           >

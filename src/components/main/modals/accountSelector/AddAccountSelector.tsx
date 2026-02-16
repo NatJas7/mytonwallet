@@ -66,7 +66,7 @@ function AddAccountSelector({
       <div className={styles.actionsSection}>
         <ListItem
           icon="key"
-          label={lang(IS_CORE_WALLET ? '24 Secret Words' : '12/24 Secret Words')}
+          label={lang('%counts% Secret Words', { counts: IS_CORE_WALLET ? '24' : '12/24' })}
           onClick={onImportAccountClick}
           isLoading={isNewAccountImporting && isLoading}
         />

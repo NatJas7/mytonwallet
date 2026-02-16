@@ -199,7 +199,10 @@ class HomeVM(
         } ?: false
 
         if (missingNativeTokens) {
-            Logger.d(Logger.LogTag.HomeVM, "dataUpdated: Native token balances not loaded yet for all chains")
+            Logger.d(
+                Logger.LogTag.HomeVM,
+                "dataUpdated: Native token balances not loaded yet for all chains"
+            )
             return
         }
 
@@ -262,7 +265,10 @@ class HomeVM(
         }
 
         // update actions view
-        delegate.get()?.configureAccountViews(shouldLoadNewWallets = !fromHome, skipSkeletonOnCache = fromHome)
+        delegate.get()?.configureAccountViews(
+            shouldLoadNewWallets = !fromHome,
+            skipSkeletonOnCache = fromHome
+        )
         delegate.get()?.updateBalance(accountChangedFromOtherScreens = !fromHome)
     }
 
@@ -311,7 +317,7 @@ class HomeVM(
                 if (waitingForNetwork) {
                     waitingForNetwork = false
                     delegate.get()?.loadStakingData()
-                    WalletCore.requestDAppList()
+                    WalletCore.requestDAppList(showingAccountId)
                 } else {
                     waitingForNetwork = false
                     updateStatus()
@@ -377,7 +383,10 @@ class HomeVM(
 
             WalletEvent.AccountsReordered -> {
                 delegate.get()?.updateHeaderCards(false)
-                delegate.get()?.configureAccountViews(shouldLoadNewWallets = true, skipSkeletonOnCache = false)
+                delegate.get()?.configureAccountViews(
+                    shouldLoadNewWallets = true,
+                    skipSkeletonOnCache = false
+                )
             }
 
             else -> {}

@@ -18,8 +18,12 @@ struct SegmentedControlItemView: View {
             )
             .contentShape(.capsule)
             .simultaneousGesture(TapGesture().onEnded {
-                model.onSelect(item)
-            }, isEnabled: model.selectedItem?.id != item.id)
+                DispatchQueue.main.async {
+                    if item.menuContext?.menuTriggered == false, model.selectedItem?.id != item.id {
+                        model.onSelect(item)
+                    }
+                }
+            }, isEnabled: true)
         }
     }
 }
@@ -46,7 +50,11 @@ struct _SegmentedControlItemView: View {
                 _SegmentedControlItemAccessory(distanceToItem: distanceToItem)
             }
         }
-        .menuSource(isTapGestureEnabled: isSelected, menuContext: item.menuContext)
+        .menuSource(
+            isTapGestureEnabled: isSelected,
+            menuContext: item.menuContext,
+            edgeInsets: .init(top: -6, left: -SegmentedControlConstants.innerPadding, bottom: -6, right: -SegmentedControlConstants.innerPadding)
+        )
     }
 }
 

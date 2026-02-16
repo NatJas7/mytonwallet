@@ -80,7 +80,7 @@ extension SettingsItem.Identifier {
                 id: .addAccount,
                 icon: UIImage.airBundle("AddAccountIcon").withRenderingMode(.alwaysTemplate),
                 highlightIcon: false,
-                title: lang("Add Account"),
+                title: lang("Add Wallet"),
                 hasPrimaryColor: true,
                 hasChild: false,
                 isDangerous: false

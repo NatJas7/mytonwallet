@@ -24,7 +24,7 @@ struct DappSendTransactionDetailView: View {
             
             InsetSection {
                 InsetCell {
-                    TappableAddressFull(accountContext: accountContext, chain: "ton", address: message.toAddress)
+                    TappableAddressFull(accountContext: accountContext, model: .init(chain: ApiChain.ton.rawValue, apiAddress: message.toAddress))
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 3)

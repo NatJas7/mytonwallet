@@ -308,7 +308,8 @@ object ActivityStore : IStore {
             }, 3000)
         }
 
-        fun handleSuccess(fetchedTransactions: List<MApiTransaction>) {
+        fun handleSuccess(result: ApiMethod.WalletData.FetchPastActivities.Result) {
+            val fetchedTransactions = result.activities
             processReceivedActivities(
                 context = context,
                 accountId = accountId,
@@ -322,7 +323,7 @@ object ActivityStore : IStore {
                     FetchResult(
                         transactions = fetchedTransactions,
                         isFromCache = false,
-                        loadedAll = fetchedTransactions.isEmpty()
+                        loadedAll = !result.hasMore
                     )
                 )
             }
@@ -342,7 +343,7 @@ object ActivityStore : IStore {
                 if (result == null || err != null) {
                     retry()
                 } else {
-                    handleSuccess(result.activities)
+                    handleSuccess(result)
                 }
             }
         }

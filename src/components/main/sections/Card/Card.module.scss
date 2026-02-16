@@ -627,7 +627,6 @@ $signSizeDiff: 0.375rem;
 
 .addressText {
   cursor: var(--custom-cursor, pointer);
-  color: var(--color-gray-3);
 
   @include mixins.transition(color 200ms);
 

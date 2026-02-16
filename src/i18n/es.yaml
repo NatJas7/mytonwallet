@@ -493,7 +493,7 @@ Are you sure you want to disable biometrics?: ¿Estás seguro de que quieres des
 "Yes": Sí
 Biometric confirmation failed: La confirmación biométrica ha fallado
 No Activity: Sin Actividad
-Add / Buy: Recargar
+Fund: Recargar
 Buy with Card: Comprar con Tarjeta
 Buy with Crypto: Comprar con Cripto
 Cannot load widget: No se puede cargar el widget
@@ -981,7 +981,6 @@ All: Todos
 $view_accounts: Ver
 Add your first one to begin.: Agrega tu primera billetera para comenzar.
 You don’t have any wallets yet: Aún no tienes ninguna billetera
-Add New Wallet: Agregar nueva billetera
 Add Ledger Wallet: Agregar billetera Ledger
 Add View Wallet: Agregar billetera de visualización
 No Ledger wallets yet: Aún no hay billeteras Ledger
@@ -1048,3 +1047,4 @@ Pin: Fijar
 Unpin: Desfijar
 My Assets: Mis Activos
 Owner: Propietario
+Show All Wallets: Mostrar todas las billeteras

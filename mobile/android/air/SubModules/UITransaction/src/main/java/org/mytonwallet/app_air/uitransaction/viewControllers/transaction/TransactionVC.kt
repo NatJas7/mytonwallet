@@ -527,7 +527,7 @@ class TransactionVC(
     private val transactionDetailsLabel: WLabel by lazy {
         WLabel(context).apply {
             setStyle(14f, WFont.DemiBold)
-            text = LocaleController.getString("Transaction Details")
+            text = LocaleController.getString("Details")
             setPadding(0, 0, 0, 10.dp)
         }
     }
@@ -910,17 +910,18 @@ class TransactionVC(
                 addressSpans = colorSpans
             }
             val expandDrawable = ContextCompat.getDrawable(
-                context, org.mytonwallet.app_air.icons.R.drawable.ic_arrow_bottom_from_center
+                context, org.mytonwallet.app_air.icons.R.drawable.ic_arrows_14
             )?.mutate()?.apply {
                 setTint(WColor.SecondaryText.color)
-                setSizeBounds(16.dp, 16.dp)
+                alpha = 204
+                setSizeBounds(7.dp, 14.dp)
             }
             if (expandDrawable != null) {
                 append(WORD_JOIN)
                 inSpans(
                     VerticalImageSpan(
                         expandDrawable,
-                        startPadding = 2.dp,
+                        startPadding = 4.5f.dp.roundToInt(),
                         verticalAlignment = VerticalImageSpan.VerticalAlignment.TOP_BOTTOM
                     )
                 ) { append(" ") }
@@ -1283,6 +1284,7 @@ class TransactionVC(
             )?.let { drawable ->
                 drawable.mutate()
                 drawable.setTint(WColor.SecondaryText.color)
+                drawable.alpha = 204
                 val width = 7.dp
                 val height = 14.dp
                 val leftPadding = 3.5f.dp.roundToInt()
@@ -1368,6 +1370,7 @@ class TransactionVC(
             )?.let { drawable ->
                 drawable.mutate()
                 drawable.setTint(WColor.SecondaryText.color)
+                drawable.alpha = 204
                 val width = 7.dp
                 val height = 14.dp
                 val leftPadding = 3.5f.dp.roundToInt()

@@ -28,7 +28,6 @@ import buildClassName from '../../util/buildClassName';
 import { getChainConfig, getSupportedChains, getTrustedUsdtSlugs } from '../../util/chain';
 import { toDecimal } from '../../util/decimals';
 import { formatCurrency, getShortCurrencySymbol } from '../../util/formatNumber';
-import getPseudoRandomNumber from '../../util/getPseudoRandomNumber';
 import { getChainFromAddress } from '../../util/isValidAddress';
 import { disableSwipeToClose, enableSwipeToClose } from '../../util/modalSwipeManager';
 import getChainNetworkName from '../../util/swap/getChainNetworkName';
@@ -560,7 +559,6 @@ function Token({
   onSelect: (token: TokenType) => void;
 }) {
   const handleClick = isAvailable ? () => onSelect(token) : undefined;
-  const cols = useMemo(() => getPseudoRandomNumber(4, 10, token.slug), [token.slug]);
 
   return (
     <div
@@ -595,7 +593,9 @@ function Token({
       <div className={styles.tokenPriceContainer}>
         <SensitiveData
           isActive={isSensitiveDataHidden}
-          cols={cols}
+          min={4}
+          max={10}
+          seed={token.slug}
           rows={2}
           cellSize={8}
           align="right"

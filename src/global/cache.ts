@@ -27,7 +27,7 @@ import { bigintReviver } from '../util/bigint';
 import { getTokenInfo } from '../util/chain';
 import isEmptyObject from '../util/isEmptyObject';
 import {
-  cloneDeep, extractKey, filterValues, mapValues, omit, pick, pickTruthy,
+  cloneDeep, extractKey, filterValues, mapValues, omit, pick, pickTruthy, unique,
 } from '../util/iteratees';
 import {
   clearPoisoningCache,
@@ -575,6 +575,28 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
   if (cached.stateVersion === 50) {
     clearActivities();
     cached.stateVersion = 51;
+  }
+
+  if (cached.stateVersion === 51) {
+    if (cached.byAccountId && cached.settings?.byAccountId) {
+      for (const accountId of Object.keys(cached.byAccountId)) {
+        const accountState = cached.byAccountId[accountId];
+        const stateById = accountState.staking?.stateById;
+        if (!stateById) continue;
+
+        const stakingSlugs = Object.values(stateById)
+          .filter((state: any) => state?.tokenSlug)
+          .map((state: any) => `staking-${state.tokenSlug}`);
+
+        if (stakingSlugs.length > 0) {
+          const accountSettings = cached.settings.byAccountId[accountId] ??= {} as any;
+          const { pinnedSlugs = [] } = accountSettings;
+          accountSettings.pinnedSlugs = unique([...stakingSlugs, ...pinnedSlugs]);
+        }
+      }
+    }
+
+    cached.stateVersion = 52;
   }
 
   // When adding migration here, increase `STATE_VERSION`

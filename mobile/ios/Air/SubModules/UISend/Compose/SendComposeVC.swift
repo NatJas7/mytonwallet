@@ -1,5 +1,5 @@
 //
-//  SendConfirmVC.swift
+//  SendComposeVC.swift
 //  UISend
 //
 //  Created by Sina on 4/20/24.

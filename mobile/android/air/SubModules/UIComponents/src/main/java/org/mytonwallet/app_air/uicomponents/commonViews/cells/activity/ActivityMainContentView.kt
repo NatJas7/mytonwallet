@@ -1,7 +1,6 @@
 package org.mytonwallet.app_air.uicomponents.commonViews.cells.activity
 
 import android.content.Context
-import android.graphics.drawable.GradientDrawable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextUtils
@@ -10,13 +9,14 @@ import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import androidx.core.content.ContextCompat
+import androidx.core.text.buildSpannedString
 import androidx.core.view.isGone
 import org.mytonwallet.app_air.uicomponents.commonViews.IconView
 import org.mytonwallet.app_air.uicomponents.extensions.dp
 import org.mytonwallet.app_air.uicomponents.extensions.exactly
-import org.mytonwallet.app_air.uicomponents.extensions.setPaddingDp
 import org.mytonwallet.app_air.uicomponents.extensions.styleDots
 import org.mytonwallet.app_air.uicomponents.helpers.WFont
+import org.mytonwallet.app_air.uicomponents.helpers.spans.ScamLabelSpan
 import org.mytonwallet.app_air.uicomponents.helpers.spans.WTypefaceSpan
 import org.mytonwallet.app_air.uicomponents.helpers.typeface
 import org.mytonwallet.app_air.uicomponents.widgets.WLabel
@@ -39,7 +39,6 @@ import org.mytonwallet.app_air.walletcore.moshi.ApiTransactionType
 import org.mytonwallet.app_air.walletcore.moshi.MApiTransaction
 import org.mytonwallet.app_air.walletcore.stores.StakingStore
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 class ActivityMainContentView(context: Context) : WView(context), WProtectedView {
 
@@ -57,13 +56,9 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
         ellipsize = TextUtils.TruncateAt.END
     }
 
-    private val scamLabel = WLabel(context).apply {
-        text = LocaleController.getString("Scam")
-        setStyle(11f, WFont.SemiBold)
-        setTextColor(WColor.Red.color)
-        setPaddingDp(3, 0, 3, 0)
+    private val scamLabelSpan by lazy {
+        ScamLabelSpan(LocaleController.getString("Scam").uppercase())
     }
-    var scamWidth = 0
 
     private val topRightView: ActivityAmountView by lazy {
         ActivityAmountView(context)
@@ -101,8 +96,6 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
         addView(bottomLeftLabel)
         addView(topRightView, LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         addView(bottomRightLabel)
-        addView(scamLabel)
-
         setConstraints {
             // Icon View
             toTop(iconView, ApplicationContextHolder.adaptiveIconTopMargin)
@@ -119,10 +112,6 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
             startToEnd(topRightView, topLeftLabel, 4f)
             toTop(topRightView, 9f)
             toEnd(topRightView, 16f)
-
-            // Scam Label
-            startToEndPx(scamLabel, topLeftLabel, -scamWidth)
-            centerYToCenterY(scamLabel, topLeftLabel)
 
             // Bottom Views
             toEnd(bottomRightLabel, 16f)
@@ -161,6 +150,7 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
         topLeftLabel.setTextColor(WColor.PrimaryText.color)
         topRightView.updateTheme()
         bottomRightLabel.contentView.setTextColor(WColor.PrimaryLightText.color)
+        (transaction as? MApiTransaction.Transaction)?.let(iconView::config)
     }
 
     override fun updateProtectedView() {
@@ -170,8 +160,7 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
     private fun configureTransaction(accountId: String, isMultichain: Boolean) {
         val transaction = transaction as MApiTransaction.Transaction
         iconView.config(transaction)
-        topLeftLabel.text = transaction.title
-        configureScamLabel()
+        topLeftLabel.text = buildTopLeftTitle(transaction.title)
         topRightView.configure(transaction)
         configureTransactionSubtitle(accountId, isMultichain)
         configureTransactionEquivalentAmount()
@@ -180,11 +169,10 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
     private fun configureSwap() {
         val swap = transaction as MApiTransaction.Swap
         iconView.config(swap)
-        topLeftLabel.text = swap.title
+        topLeftLabel.text = buildTopLeftTitle(swap.title)
         topRightView.configure(swap)
         configureSwapSubtitle()
         configureSwapRate()
-        configureScamLabel()
     }
 
     private fun configureTransactionEquivalentAmount() {
@@ -214,31 +202,14 @@ class ActivityMainContentView(context: Context) : WView(context), WProtectedView
         updateBottomRightLabelMaskCols()
     }
 
-    private fun configureScamLabel() {
+    private fun buildTopLeftTitle(title: String): CharSequence {
         if (transaction?.isScam != true) {
-            scamLabel.visibility = GONE
-            topLeftLabel.setPadding(0, 0, 0, 0)
-            return
+            return title
         }
-        scamLabel.visibility = VISIBLE
-        scamLabel.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(WColor.Background.color)
-            setStroke(4, WColor.Red.color)
-            cornerRadius = 3f.dp
-        }
-        scamWidth =
-            (scamLabel.paint.measureText(scamLabel.text.toString()) + scamLabel.paddingLeft + scamLabel.paddingRight).roundToInt()
-        topLeftLabel.setPadding(
-            0,
-            0,
-            scamWidth + 4.dp,
-            0
-        )
-        (scamLabel.layoutParams as? MarginLayoutParams)?.let {
-            scamLabel.layoutParams = it.apply {
-                leftMargin = -scamWidth
-            }
+        return buildSpannedString {
+            append(title)
+            append(" ")
+            append(" ", scamLabelSpan, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
     }
 

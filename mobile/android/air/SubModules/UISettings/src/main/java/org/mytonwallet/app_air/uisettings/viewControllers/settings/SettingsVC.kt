@@ -35,6 +35,7 @@ import org.mytonwallet.app_air.uisettings.viewControllers.appInfo.AppInfoVC
 import org.mytonwallet.app_air.uisettings.viewControllers.appearance.AppearanceVC
 import org.mytonwallet.app_air.uisettings.viewControllers.assetsAndActivities.AssetsAndActivitiesVC
 import org.mytonwallet.app_air.uisettings.viewControllers.connectedApps.ConnectedAppsVC
+import org.mytonwallet.app_air.uisettings.viewControllers.debugMenu.DebugMenuVC
 import org.mytonwallet.app_air.uisettings.viewControllers.language.LanguageVC
 import org.mytonwallet.app_air.uisettings.viewControllers.notificationSettings.NotificationSettingsVC
 import org.mytonwallet.app_air.uisettings.viewControllers.security.SecurityVC
@@ -639,7 +640,11 @@ class SettingsVC(context: Context) : WViewController(context),
             }
 
             VERSION_CELL -> {
-                SettingsVersionCell(window!!)
+                SettingsVersionCell(window!!) {
+                    navigationController?.tabBarController?.navigationController?.push(
+                        DebugMenuVC(context)
+                    )
+                }
             }
 
             else -> {

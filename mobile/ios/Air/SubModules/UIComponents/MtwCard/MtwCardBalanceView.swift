@@ -151,7 +151,7 @@ public struct MtwCardBalanceView: View, Equatable {
             .lineLimit(1)
 
             if style.showChevron {
-                Image.airBundle("HomeCardBalanceArrow")
+                Image.airBundle("ArrowUpDown")
                     .opacity(secondaryOpacity == 1 ? 0.75 : 0.5)
                     .offset(y: -1)
                     .padding(.vertical, -8)
