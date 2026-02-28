@@ -1,54 +1,59 @@
-import { Dialog } from 'native-dialog';
-import React, {
-  memo, type TeactNode, useEffect, useMemo, useState,
-} from '../../lib/teact/teact';
+import React, { memo, type TeactNode, useCallback, useEffect, useMemo, useState } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiStakingState, ApiTokenWithPrice } from '../../api/types';
+import type { ApiBaseCurrency, ApiCurrencyRates, ApiStakingState, ApiTokenWithPrice } from '../../api/types';
 import type { UserToken } from '../../global/types';
+import type { Big } from '../../lib/big.js';
 import { StakingState } from '../../global/types';
 
 import {
   ANIMATED_STICKER_MIDDLE_SIZE_PX,
   ANIMATED_STICKER_SMALL_SIZE_PX,
+  CURRENCIES,
+  DEFAULT_PRICE_CURRENCY,
+  ETHENA_ELIGIBILITY_CHECK_URL,
   JVAULT_URL,
-  NOMINATORS_STAKING_MIN_AMOUNT,
   SHORT_FRACTION_DIGITS,
-  STAKING_MIN_AMOUNT,
   TONCOIN,
 } from '../../config';
+import { getHelpCenterUrl } from '../../global/helpers/getHelpCenterUrl';
 import renderText from '../../global/helpers/renderText';
-import { buildStakingDropdownItems } from '../../global/helpers/staking';
 import {
   selectAccountStakingState,
   selectAccountStakingStates,
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
+  selectIsCurrentAccountViewMode,
 } from '../../global/selectors';
 import { bigintMax } from '../../util/bigint';
 import buildClassName from '../../util/buildClassName';
-import { vibrate } from '../../util/capacitor';
-import { fromDecimal, toBig, toDecimal } from '../../util/decimals';
+import { getChainTitle } from '../../util/chain';
+import { toBig, toDecimal } from '../../util/decimals';
+import { stopEvent } from '../../util/domEvents';
 import { getTonStakingFees } from '../../util/fee/getTonOperationFees';
 import { formatCurrency } from '../../util/formatNumber';
+import { vibrate } from '../../util/haptics';
+import { openUrl } from '../../util/openUrl';
 import { throttle } from '../../util/schedulers';
+import { getStakingMinAmount, getStakingTitle } from '../../util/staking';
 import { buildUserToken, getIsNativeToken, getNativeToken } from '../../util/tokens';
 import calcJettonStakingApr from '../../util/ton/calcJettonStakingApr';
-import { IS_DELEGATED_BOTTOM_SHEET } from '../../util/windowEnvironment';
+import { getHostnameFromUrl } from '../../util/url';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
-import useSyncEffect from '../../hooks/useSyncEffect';
+import { useAmountInputState } from '../ui/hooks/useAmountInputState';
+import { useTokenDropdown } from './hooks/useTokenDropdown';
 
+import AmountInput from '../ui/AmountInput';
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
 import Button from '../ui/Button';
-import Dropdown from '../ui/Dropdown';
 import Fee from '../ui/Fee';
 import Modal from '../ui/Modal';
 import RichNumberField from '../ui/RichNumberField';
-import RichNumberInput from '../ui/RichNumberInput';
 import Transition from '../ui/Transition';
 
 import modalStyles from '../ui/Modal.module.scss';
@@ -61,13 +66,25 @@ interface OwnProps {
 
 interface StateProps {
   isLoading?: boolean;
+  isComplete?: boolean;
+  isViewMode: boolean;
   apiError?: string;
   tokens?: UserToken[];
   tokenBySlug?: Record<string, ApiTokenWithPrice>;
-  fee?: bigint;
   stakingState?: ApiStakingState;
   states?: ApiStakingState[];
   shouldUseNominators?: boolean;
+  isSensitiveDataHidden?: true;
+  baseCurrency: ApiBaseCurrency;
+  currencyRates: ApiCurrencyRates;
+}
+
+const enum BottomRightSlide {
+  Fee,
+  InsufficientBalance,
+  InsufficientFee,
+  BelowMinimumAmount,
+  ApiError,
 }
 
 const ACTIVE_STATES = new Set([StakingState.StakeInitial, StakingState.None]);
@@ -78,13 +95,17 @@ function StakingInitial({
   isActive,
   isStatic,
   isLoading,
+  isComplete,
+  isViewMode,
   apiError,
   tokens,
   tokenBySlug,
-  fee,
   stakingState,
   states,
   shouldUseNominators,
+  isSensitiveDataHidden,
+  baseCurrency,
+  currencyRates,
 }: OwnProps & StateProps) {
   const {
     submitStakingInitial, fetchStakingFee, cancelStaking, changeCurrentStaking,
@@ -94,16 +115,15 @@ function StakingInitial({
 
   const [isSafeInfoModalOpen, openSafeInfoModal, closeSafeInfoModal] = useFlag();
   const [amount, setAmount] = useState<bigint | undefined>();
-  const [isIncorrectAmount, setIsIncorrectAmount] = useState<boolean>(false);
-  const [isInsufficientBalance, setIsInsufficientBalance] = useState<boolean>(false);
-  const [isInsufficientFee, setIsInsufficientFee] = useState(false);
-  const [isBelowMinimumAmount, setIsBelowMinimumAmount] = useState(false);
-  const [shouldUseAllBalance, setShouldUseAllBalance] = useState<boolean>(false);
+  let isIncorrectAmount = false;
+  let isInsufficientBalance = false;
+  let isInsufficientFee = false;
+  let isBelowMinimumAmount = false;
 
   const {
+    id: stakingId,
     type: stakingType,
     tokenSlug,
-    balance: stakingBalance = 0n,
   } = stakingState ?? {};
 
   const token: UserToken | undefined = useMemo(() => {
@@ -117,12 +137,16 @@ function StakingInitial({
   const { amount: balance = 0n, symbol, decimals = TONCOIN.decimals } = token ?? {};
 
   let { annualYield = 0 } = stakingState ?? {};
+  let annualYieldText = `${annualYield}%`;
   if (stakingState?.type === 'jetton' && amount) {
     annualYield = calcJettonStakingApr({
       tvl: stakingState.tvl + amount,
       dailyReward: stakingState.dailyReward,
       decimals,
     });
+  } else if (stakingState?.type === 'ethena') {
+    const { annualYieldStandard, annualYieldVerified } = stakingState;
+    annualYieldText = `${annualYieldStandard}%–${annualYieldVerified}%`;
   }
 
   const isNativeToken = getIsNativeToken(token?.slug);
@@ -134,8 +158,7 @@ function StakingInitial({
   }, [tokens, token, isNativeToken]);
   const nativeBalance = nativeToken?.amount ?? 0n;
 
-  const hasAmountError = Boolean(isInsufficientBalance || apiError);
-  const minAmount = stakingType === 'nominators' ? NOMINATORS_STAKING_MIN_AMOUNT : STAKING_MIN_AMOUNT;
+  const minAmount = getStakingMinAmount(stakingType);
 
   const { gas: networkFee, real: realFee } = getTonStakingFees(stakingState?.type).stake;
 
@@ -150,53 +173,33 @@ function StakingInitial({
     return bigintMax(0n, value);
   })();
 
-  const validateAndSetAmount = useLastCallback((newAmount: bigint | undefined, noReset = false) => {
-    if (!noReset) {
-      setShouldUseAllBalance(false);
-      setIsIncorrectAmount(false);
-      setIsInsufficientBalance(false);
-      setIsBelowMinimumAmount(false);
-      setIsInsufficientFee(false);
-    }
+  const title = getStakingTitle();
 
-    if (newAmount === undefined) {
-      setAmount(undefined);
-      return;
-    }
-
-    if (Number.isNaN(newAmount) || newAmount < 0) {
-      setIsIncorrectAmount(true);
-      return;
-    }
-
-    if (newAmount < minAmount) {
-      setIsBelowMinimumAmount(true);
-    } else if (!maxAmount || newAmount > balance) {
-      setIsInsufficientBalance(true);
+  if (amount !== undefined) {
+    if (Number.isNaN(amount) || amount < 0) {
+      isIncorrectAmount = true;
+    } else if (amount < minAmount) {
+      isBelowMinimumAmount = true;
+    } else if (!maxAmount || amount > balance) {
+      isInsufficientBalance = true;
     } else if (nativeBalance < networkFee || (isNativeToken && nativeAmount > balance)) {
-      setIsInsufficientFee(true);
+      isInsufficientFee = true;
     }
+  }
 
-    setAmount(newAmount);
+  const [selectedToken, selectableTokens] = useTokenDropdown({
+    tokenBySlug,
+    states,
+    shouldUseNominators,
+    selectedStakingId: stakingId,
+    baseCurrency,
+    currencyRates,
   });
 
-  const dropDownItems = useMemo(() => {
-    if (!tokenBySlug || !states) {
-      return [];
-    }
-
-    return buildStakingDropdownItems({ tokenBySlug, states, shouldUseNominators });
-  }, [tokenBySlug, states, shouldUseNominators]);
-
-  useEffect(() => {
-    if (shouldUseAllBalance && maxAmount) {
-      const newAmount = maxAmount;
-
-      validateAndSetAmount(newAmount, true);
-    } else {
-      validateAndSetAmount(amount, true);
-    }
-  }, [amount, fee, shouldUseAllBalance, validateAndSetAmount, maxAmount]);
+  const handleHelpCenterClick = useLastCallback(() => {
+    const url = getHelpCenterUrl(lang.code, 'ethenaStaking');
+    void openUrl(url, { title: lang('Help Center'), subtitle: getHostnameFromUrl(url) });
+  });
 
   useEffect(() => {
     if (!amount) {
@@ -210,133 +213,67 @@ function StakingInitial({
     });
   }, [amount, fetchStakingFee]);
 
-  useSyncEffect(() => {
-    if (!IS_DELEGATED_BOTTOM_SHEET) return;
-
-    if (isSafeInfoModalOpen) {
-      const text = stakingState && stakingState.type === 'jetton'
-        ? [
-          // We use `replace` instead of `lang` argument to avoid JSX output
-          `${lang('$safe_staking_description_jetton1').replace('%jvault_link%', 'JVault')}`,
-          `${lang('$safe_staking_description_jetton2')}`,
-        ]
-        : [
-          `1. ${lang('$safe_staking_description1')}`,
-          `2. ${lang('$safe_staking_description2')}`,
-          `3. ${lang('$safe_staking_description3')}`,
-        ];
-
-      Dialog.alert({
-        title: lang('Why is staking safe?'),
-        message: text.join('\n\n').replace(/\*\*/g, ''),
-      })
-        .then(closeSafeInfoModal);
-    }
-  }, [isSafeInfoModalOpen, lang, stakingState]);
-
-  const handleMaxAmountClick = useLastCallback((e: React.MouseEvent<HTMLElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (!maxAmount) {
-      return;
-    }
-
-    vibrate();
-
-    setShouldUseAllBalance(true);
-  });
-
   const canSubmit = amount
     && maxAmount
+    && !isViewMode
     && !isIncorrectAmount
     && !isBelowMinimumAmount
     && !isInsufficientFee
     && !isInsufficientBalance;
 
-  const handleSubmit = useLastCallback((e) => {
-    e.preventDefault();
+  const handleSubmit = useLastCallback((e: React.FormEvent | React.UIEvent) => {
+    stopEvent(e);
 
     if (!canSubmit) {
       return;
     }
 
-    vibrate();
+    void vibrate();
 
     submitStakingInitial({ amount });
   });
 
-  const handleAmountChange = useLastCallback((stringValue?: string) => {
-    const value = stringValue ? fromDecimal(stringValue, decimals) : undefined;
-    validateAndSetAmount(value);
+  useEffect(() => {
+    if (isComplete) setAmount(undefined);
+  }, [isComplete]);
+
+  const handleCheckEligibility = useLastCallback(() => {
+    void openUrl(ETHENA_ELIGIBILITY_CHECK_URL);
   });
 
-  function getError() {
+  const [error, errorTransitionKey] = useMemo(() => {
     if (isInsufficientBalance) {
-      return lang('Insufficient balance');
+      return [
+        lang('Insufficient balance'),
+        BottomRightSlide.InsufficientBalance,
+      ];
     }
 
     if (isInsufficientFee) {
-      return lang('$insufficient_fee', { fee: formatCurrency(toDecimal(networkFee), nativeToken?.symbol ?? '') });
+      return [
+        lang('$insufficient_fee', { fee: formatCurrency(toDecimal(networkFee), nativeToken?.symbol ?? '') }),
+        BottomRightSlide.InsufficientFee,
+      ];
     }
 
     if (isBelowMinimumAmount) {
-      return lang('$min_value', {
-        value: (
-          <span className={styles.minAmountValue}>
-            {formatCurrency(toDecimal(minAmount), symbol ?? '')}
-          </span>
-        ),
-      });
+      return [
+        lang('$min_value', { value: formatCurrency(toDecimal(minAmount, decimals), symbol ?? '') }),
+        BottomRightSlide.BelowMinimumAmount,
+      ];
     }
 
-    return apiError ? lang(apiError) : undefined;
-  }
+    return apiError
+      ? [lang(apiError), BottomRightSlide.ApiError]
+      : [undefined, BottomRightSlide.Fee];
+  }, [
+    apiError, decimals, isBelowMinimumAmount, isInsufficientBalance, isInsufficientFee, lang, minAmount,
+    nativeToken?.symbol, networkFee, symbol,
+  ]);
 
-  function renderTopRight() {
-    if (!symbol) return undefined;
-
-    const hasBalance = !!token;
-    const balanceButton = lang('$max_balance', {
-      balance: (
-        <div
-          role="button"
-          tabIndex={0}
-          className={styles.balanceLink}
-          onClick={handleMaxAmountClick}
-        >
-          {hasBalance ? formatCurrency(toDecimal(maxAmount, decimals), symbol) : lang('Loading...')}
-        </div>
-      ),
-    });
-
-    return (
-      <Transition
-        className={buildClassName(styles.amountTopRight, isStatic && styles.amountTopRight_static)}
-        slideClassName={styles.amountTopRight_slide}
-        name="fade"
-        activeKey={0}
-      >
-        <div className={styles.balanceContainer}>
-          <span className={styles.balance}>
-            {balanceButton}
-          </span>
-        </div>
-      </Transition>
-    );
-  }
-
-  function renderBottomRight() {
-    const error = getError();
-
-    const activeKey = isInsufficientBalance ? 0
-      : isInsufficientFee ? 1
-        : isBelowMinimumAmount ? 2
-          : apiError ? 3
-            : !stakingBalance && !hasAmountError ? 4
-              : 5;
-
-    let content: string | TeactNode[] | React.JSX.Element = ' ';
+  // It is necessary to use useCallback instead of useLastCallback here
+  const renderBottomRight = useCallback((className?: string) => {
+    let content: string | TeactNode[] | React.JSX.Element;
 
     if (error) {
       content = (
@@ -350,15 +287,19 @@ function StakingInitial({
 
     return (
       <Transition
-        className={buildClassName(styles.amountBottomRight, isIncorrectAmount && styles.amountBottomRight_error)}
+        className={buildClassName(
+          styles.amountBottomRight,
+          isIncorrectAmount && styles.amountBottomRight_error,
+          className,
+        )}
         slideClassName={styles.amountBottomRight_slide}
-        name="fade"
-        activeKey={activeKey}
+        name="semiFade"
+        activeKey={errorTransitionKey}
       >
         {content}
       </Transition>
     );
-  }
+  }, [error, errorTransitionKey, isIncorrectAmount, lang, realFee, token]);
 
   function renderJettonDescription() {
     return (
@@ -384,7 +325,7 @@ function StakingInitial({
           {renderText(lang('$safe_staking_description1'))}
         </p>
         <p className={modalStyles.text}>
-          {renderText(lang('$safe_staking_description2'))}
+          {renderText(lang('$safe_staking_description2', { chain: getChainTitle('ton') }))}
         </p>
         <p className={modalStyles.text}>
           {renderText(lang('$safe_staking_description3'))}
@@ -393,19 +334,51 @@ function StakingInitial({
     );
   }
 
-  function renderSafeInfoModal() {
-    if (IS_DELEGATED_BOTTOM_SHEET) return undefined;
+  function renderEthenaDescription() {
+    return (
+      <>
+        <p className={modalStyles.text}>
+          {renderText(lang('$safe_staking_ethena_description1'))}
+        </p>
+        <p className={modalStyles.text}>
+          {renderText(lang('$safe_staking_ethena_description2'))}
+        </p>
+        <p className={modalStyles.text}>
+          {renderText(lang('$safe_staking_ethena_description3'))}
+        </p>
+      </>
+    );
+  }
 
+  function renderSafeDescription() {
+    switch (stakingState!.type) {
+      case 'jetton':
+        return renderJettonDescription();
+
+      case 'ethena':
+        return renderEthenaDescription();
+
+      default:
+        return renderTonDescription();
+    }
+  }
+
+  function renderSafeInfoModal() {
     return (
       <Modal
         isCompact
         isOpen={isSafeInfoModalOpen}
-        title={lang('Why is staking safe?')}
+        title={lang(title)}
         onClose={closeSafeInfoModal}
         dialogClassName={styles.stakingSafeDialog}
       >
-        {stakingState && stakingState.type === 'jetton' ? renderJettonDescription() : renderTonDescription()}
+        {!!stakingState && renderSafeDescription()}
         <div className={modalStyles.buttons}>
+          {stakingState!.type === 'ethena' && (
+            <Button onClick={handleHelpCenterClick}>
+              {lang('Help Center')}
+            </Button>
+          )}
           <Button onClick={closeSafeInfoModal}>{lang('Close')}</Button>
         </div>
       </Modal>
@@ -413,21 +386,46 @@ function StakingInitial({
   }
 
   function renderStakingResult() {
-    const balanceResult = amount
-      ? toBig(amount).mul((annualYield / 100) + 1).round(SHORT_FRACTION_DIGITS).toString()
-      : '0';
+    const amountBig = toBig(amount ?? 0, decimals);
+    let currentAmount: Big;
+    let prefix: string | undefined;
+    let suffix: string | undefined;
+
+    if (amountInputProps.isBaseCurrency) {
+      currentAmount = amountBig.mul(token?.price ?? 0);
+      const { shortSymbol } = CURRENCIES[baseCurrency];
+      if (shortSymbol) {
+        prefix = shortSymbol;
+      } else {
+        suffix = baseCurrency;
+      }
+    } else {
+      currentAmount = amountBig;
+    }
+
+    const balanceResult = currentAmount.mul((annualYield / 100) + 1).toString();
 
     return (
-      <RichNumberField
-        labelText={lang('Est. balance in a year')}
-        zeroValue="..."
-        value={balanceResult}
-        decimals={decimals}
+      <Transition
+        activeKey={amountInputProps.isBaseCurrency ? 0 : 1}
+        name="semiFade"
         className={styles.balanceResultWrapper}
-        inputClassName={buildClassName(styles.balanceResultInput, isStatic && styles.inputRichStatic)}
-        labelClassName={styles.balanceResultLabel}
-        valueClassName={styles.balanceResult}
-      />
+        slideClassName={styles.balanceResultWrapper__slide}
+        shouldCleanup
+      >
+        <RichNumberField
+          labelText={lang('Est. balance in a year')}
+          zeroValue="..."
+          value={balanceResult}
+          decimals={SHORT_FRACTION_DIGITS}
+          prefix={prefix}
+          suffix={suffix}
+          isStatic={isStatic}
+          inputClassName={styles.balanceResultInput}
+          labelClassName={styles.balanceResultLabel}
+          valueClassName={styles.balanceResult}
+        />
+      </Transition>
     );
   }
 
@@ -435,6 +433,14 @@ function StakingInitial({
     cancelStaking();
 
     changeCurrentStaking({ stakingId: id, shouldReopenModal: !isStatic });
+  });
+
+  const amountInputProps = useAmountInputState({
+    amount,
+    token,
+    baseCurrency,
+    onAmountChange: setAmount,
+    onTokenChange: handleChangeStaking,
   });
 
   return (
@@ -454,86 +460,84 @@ function StakingInitial({
         />
         <div className={buildClassName(styles.welcomeInformation, isStatic && styles.welcomeInformation_static)}>
           <div>{lang('Earn from your tokens while holding them', { symbol })}</div>
-          <div className={styles.stakingApy}>{lang('Est. %annual_yield%', { annual_yield: `${annualYield}%` })}</div>
+          <div className={styles.stakingApy}>{lang('Est. %annual_yield%', { annual_yield: annualYieldText })}</div>
+          {stakingType === 'ethena' && (
+            <Button isText className={styles.textButton} onClick={handleCheckEligibility}>
+              {lang('Check eligibility')}
+            </Button>
+          )}
           <Button isText className={styles.textButton} onClick={openSafeInfoModal}>
-            {lang('Why this is safe')}
+            {lang(getStakingTitle(stakingType))}
           </Button>
         </div>
       </div>
 
-      {renderTopRight()}
-      <RichNumberInput
-        key="staking_amount"
-        id="staking_amount"
+      <AmountInput
+        {...amountInputProps}
+        maxAmount={maxAmount}
+        token={selectedToken}
+        allTokens={selectableTokens}
+        isStatic={isStatic}
         hasError={isIncorrectAmount || isInsufficientBalance}
-        value={amount === undefined ? undefined : toDecimal(amount)}
-        labelText={lang('Amount')}
-        onChange={handleAmountChange}
+        isMaxAmountLoading={!selectedToken}
+        isSensitiveDataHidden={isSensitiveDataHidden}
+        renderBottomRight={renderBottomRight}
         onPressEnter={handleSubmit}
-        decimals={decimals}
-        inputClassName={isStatic ? styles.inputRichStatic : undefined}
-        className={styles.amountInput}
-      >
-        <Dropdown
-          items={dropDownItems}
-          selectedValue={stakingState?.id}
-          className={styles.tokenDropdown}
-          itemClassName={styles.tokenDropdownItem}
-          onChange={handleChangeStaking}
-        />
-      </RichNumberInput>
-      <div className={buildClassName(styles.amountBottomWrapper, isStatic && styles.amountBottomWrapper_static)}>
-        <div className={styles.amountBottom}>
-          {renderBottomRight()}
-        </div>
-      </div>
+      />
 
       {renderStakingResult()}
 
-      <div className={modalStyles.buttons}>
-        <Button
-          isPrimary
-          isSubmit
-          isDisabled={!canSubmit}
-          isLoading={isLoading}
-        >
-          {lang('$stake_asset', { symbol: token?.symbol })}
-        </Button>
-      </div>
+      {!isViewMode && (
+        <div className={modalStyles.buttons}>
+          <Button
+            isPrimary
+            isSubmit
+            isDisabled={!canSubmit}
+            isLoading={isLoading}
+          >
+            {lang('$stake_asset', { symbol: token?.symbol })}
+          </Button>
+        </div>
+      )}
       {renderSafeInfoModal()}
     </form>
   );
 }
 
 export default memo(
-  withGlobal(
+  withGlobal<OwnProps>(
     (global): StateProps => {
-      const accountId = global.currentAccountId;
+      const currentAccountId = selectCurrentAccountId(global);
       const accountState = selectCurrentAccountState(global);
       const tokens = selectCurrentAccountTokens(global);
       const tokenBySlug = global.tokenInfo.bySlug;
 
+      const { baseCurrency = DEFAULT_PRICE_CURRENCY, isSensitiveDataHidden } = global.settings;
+
       const {
         state,
         isLoading,
-        fee,
         error: apiError,
       } = global.currentStaking;
 
-      const states = accountId ? selectAccountStakingStates(global, accountId) : undefined;
-      const stakingState = selectAccountStakingState(global, global.currentAccountId!) ?? global.stakingDefault;
+      const states = currentAccountId ? selectAccountStakingStates(global, currentAccountId) : undefined;
+      const stakingState = currentAccountId ? selectAccountStakingState(global, currentAccountId) : undefined;
 
       return {
+        isViewMode: selectIsCurrentAccountViewMode(global),
         isLoading: isLoading && ACTIVE_STATES.has(state),
+        isComplete: state === StakingState.StakeComplete,
         tokens,
         tokenBySlug,
         apiError,
-        fee,
         stakingState,
         states,
         shouldUseNominators: accountState?.staking?.shouldUseNominators,
+        isSensitiveDataHidden,
+        baseCurrency,
+        currencyRates: global.currencyRates,
       };
     },
-    (global, _, stickToFirst) => stickToFirst(global.currentAccountId),
+    (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)),
   )(StakingInitial),
 );

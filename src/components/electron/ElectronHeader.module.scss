@@ -2,7 +2,7 @@
   position: relative;
 
   width: 100%;
-  height: 3rem;
+  height: var(--electron-header-height);
 
   background-color: var(--color-background-second);
 
@@ -10,9 +10,9 @@
 
   -webkit-app-region: drag;
 
+  :global(html.is-modal-open) &,
   :global(body.is-media-viewer-open) & {
     pointer-events: none;
-
     opacity: 0;
 
     -webkit-app-region: no-drag;
@@ -28,19 +28,21 @@
   height: 100%;
   margin: auto;
   padding: 0 1rem;
-
-  :global(html.is-electron.is-windows) & {
+  :global(html.is-electron.is-windows) &,
+  :global(html.is-electron.is-linux) & {
     justify-content: flex-start;
-
     max-width: 100%;
   }
 }
 
+.buttons,
+.windowsButton {
+  -webkit-app-region: no-drag; // only on actual interactive controls
+}
+
 .applicationName {
   user-select: none;
-
   align-self: center;
-
   font-size: 0.9375rem;
   font-weight: 700;
 }
@@ -59,7 +61,8 @@
     right: 0.75rem;
   }
 
-  :global(html.is-electron.is-windows) & {
+  :global(html.is-electron.is-windows) &,
+  :global(html.is-electron.is-linux) & {
     -webkit-app-region: no-drag;
   }
 }

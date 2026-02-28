@@ -22,17 +22,17 @@ export interface Storage {
 }
 
 export type StorageKey = 'accounts'
-| 'stateVersion'
-| 'currentAccountId'
-| 'clientId'
-| 'baseCurrency'
-// For extension
-| 'dapps'
-| 'dappMethods:lastAccountId'
-| 'windowId'
-| 'windowState'
-| 'isTonMagicEnabled'
-| 'isTonProxyEnabled'
-| 'isDeeplinkHookEnabled'
-// For TonConnect SSE
-| 'sseLastEventId';
+  | 'stateVersion'
+  | 'currentAccountId'
+  | 'clientId'
+  | 'referrer'
+  | 'langCode'
+  // For extension
+  | 'dapps'
+  | 'dappMethods:lastAccountId'
+  | 'windowId'
+  | 'windowState'
+  | 'isTonProxyEnabled'
+  | 'isDeeplinkHookEnabled'
+  // For TonConnect SSE
+  | 'sseLastEventId';

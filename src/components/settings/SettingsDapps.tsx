@@ -1,9 +1,10 @@
 import React, { memo, useState } from '../../lib/teact/teact';
 
-import type { ApiDapp } from '../../api/types';
+import type { StoredDappConnection } from '../../api/dappProtocols/storage';
 
-import { ANIMATED_STICKER_BIG_SIZE_PX } from '../../config';
+import { ANIMATED_STICKER_BIG_SIZE_PX, APP_NAME } from '../../config';
 import buildClassName from '../../util/buildClassName';
+import { getDappConnectionUniqueId } from '../../util/getDappConnectionUniqueId';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useFlag from '../../hooks/useFlag';
@@ -23,7 +24,7 @@ import styles from './Settings.module.scss';
 
 interface OwnProps {
   isActive: boolean;
-  dapps: ApiDapp[];
+  dapps: StoredDappConnection[];
   handleBackClick: () => void;
   isInsideModal?: boolean;
 }
@@ -37,7 +38,7 @@ function SettingsDapps({
   const lang = useLang();
 
   const [isDisconnectModalOpen, openDisconnectModal, closeDisconnectModal] = useFlag();
-  const [dappToDelete, setDappToDelete] = useState<ApiDapp | undefined>();
+  const [dappToDelete, setDappToDelete] = useState<StoredDappConnection | undefined>();
 
   useHistoryBack({
     isActive,
@@ -49,8 +50,8 @@ function SettingsDapps({
     isScrolled,
   } = useScrolledState();
 
-  const handleDisconnectDapp = useLastCallback((origin: string) => {
-    const dapp = dapps.find((d) => d.origin === origin);
+  const handleDisconnectDapp = useLastCallback((url: string) => {
+    const dapp = dapps.find((d) => d.url === url);
     setDappToDelete(dapp);
     openDisconnectModal();
   });
@@ -60,29 +61,9 @@ function SettingsDapps({
     openDisconnectModal();
   });
 
-  function renderDapp(dapp: ApiDapp) {
-    const {
-      iconUrl, name, url, origin,
-    } = dapp;
-
-    return (
-      <DappInfo
-        key={origin}
-        iconUrl={iconUrl}
-        name={name}
-        url={url}
-        origin={origin}
-        className={styles.dapp}
-        onDisconnect={handleDisconnectDapp}
-      />
-    );
-  }
-
   function renderDapps() {
-    const dappList = dapps.map(renderDapp);
-
     return (
-      <>
+      <div className={styles.dapps}>
         <div className={styles.disconnectAllBlock}>
           <Button
             className={styles.disconnectButton}
@@ -91,15 +72,22 @@ function SettingsDapps({
           >
             {lang('Disconnect All Dapps')}
           </Button>
-          <p className={styles.blockDescription}>{lang('$dapps-description')}</p>
+          <p className={styles.blockDescription}>{lang('$dapps-description', { app_name: APP_NAME })}</p>
         </div>
 
-        <p className={styles.blockTitle}>{lang('Logged in with MyTonWallet')}</p>
+        <p className={styles.blockTitle}>{lang('Logged in with %app_name%', { app_name: APP_NAME })}</p>
 
         <div className={styles.block}>
-          {dappList}
+          {dapps.map((dapp) => (
+            <DappInfo
+              variant="settings"
+              key={`dapp-${dapp.url}-${getDappConnectionUniqueId(dapp)}`}
+              dapp={dapp}
+              onDisconnect={handleDisconnectDapp}
+            />
+          ))}
         </div>
-      </>
+      </div>
     );
   }
 

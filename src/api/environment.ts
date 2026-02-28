@@ -2,36 +2,53 @@
  * This module is to be used instead of /src/util/environment.ts
  * when `window` is not available (e.g. in a web worker).
  */
-import type { ApiInitArgs } from './types';
+import type { ApiInitArgs, ApiNetwork } from './types';
 
 import {
-  ELECTRON_TONHTTPAPI_MAINNET_API_KEY,
-  ELECTRON_TONHTTPAPI_TESTNET_API_KEY,
+  ELECTRON_TONCENTER_MAINNET_KEY,
+  ELECTRON_TONCENTER_TESTNET_KEY,
   IS_CAPACITOR,
   IS_EXTENSION,
-  TONHTTPAPI_MAINNET_API_KEY,
-  TONHTTPAPI_TESTNET_API_KEY,
+  TONCENTER_MAINNET_KEY,
+  TONCENTER_TESTNET_KEY,
 } from '../config';
 
 const ELECTRON_ORIGIN = 'file://';
 
-let environment: ApiInitArgs & {
-  isDappSupported: boolean;
-  isSseSupported: boolean;
+export type AppEnvironment = ApiInitArgs & {
+  isDappSupported?: boolean;
+  isSseSupported?: boolean;
   apiHeaders?: AnyLiteral;
-  tonhttpapiMainnetKey?: string;
-  tonhttpapiTestnetKey?: string;
+  byNetwork: Record<ApiNetwork, { toncenterKey?: string }>;
 };
 
+let environment: AppEnvironment;
+
+function getAppOrigin(args: ApiInitArgs): string | undefined {
+  if (args.isElectron) {
+    return ELECTRON_ORIGIN;
+  } else if (IS_CAPACITOR || IS_EXTENSION) {
+    return self?.origin;
+  } else {
+    return undefined;
+  }
+}
+
 export function setEnvironment(args: ApiInitArgs) {
+  const appOrigin = getAppOrigin(args);
   environment = {
     ...args,
-    isDappSupported: IS_EXTENSION || IS_CAPACITOR || args.isElectron,
-    isSseSupported: args.isElectron || (IS_CAPACITOR && !args.isNativeBottomSheet),
-    // eslint-disable-next-line no-restricted-globals
-    apiHeaders: { 'X-App-Origin': args.isElectron ? ELECTRON_ORIGIN : self?.origin },
-    tonhttpapiMainnetKey: args.isElectron ? ELECTRON_TONHTTPAPI_MAINNET_API_KEY : TONHTTPAPI_MAINNET_API_KEY,
-    tonhttpapiTestnetKey: args.isElectron ? ELECTRON_TONHTTPAPI_TESTNET_API_KEY : TONHTTPAPI_TESTNET_API_KEY,
+    isDappSupported: true,
+    isSseSupported: args.isElectron || IS_CAPACITOR,
+    apiHeaders: appOrigin ? { 'X-App-Origin': appOrigin } : {},
+    byNetwork: {
+      mainnet: {
+        toncenterKey: args.isElectron ? ELECTRON_TONCENTER_MAINNET_KEY : TONCENTER_MAINNET_KEY,
+      },
+      testnet: {
+        toncenterKey: args.isElectron ? ELECTRON_TONCENTER_TESTNET_KEY : TONCENTER_TESTNET_KEY,
+      },
+    },
   };
   return environment;
 }

@@ -1,26 +1,29 @@
 import '../../util/bigintPatch';
 
+export { destroy } from './init';
+export * from './activities';
 export * from './auth';
 export * from './wallet';
-export * from './transactions';
+export * from './transfer';
 export * from './nfts';
-export * from './polling';
+export * from './domains';
+export {
+  initPolling,
+} from './polling';
 export * from './accounts';
 export * from './staking';
 export * from './tokens';
 export {
   initDapps,
-  getActiveDapp,
   getDapps,
-  getDappsByOrigin,
+  getDappsByUrl,
   deleteDapp,
   deleteAllDapps,
-  deactivateDapp,
   loadExploreSites,
+  signDappProof,
+  signDappTransfers,
+  signDappData,
 } from './dapps';
-export {
-  startSseConnection,
-} from '../tonConnect/sse';
 export * from './swap';
 export * from './other';
 export * from './prices';

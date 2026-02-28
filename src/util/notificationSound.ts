@@ -4,7 +4,6 @@ import { IS_CAPACITOR } from '../config';
 import { SECOND } from './dateFormat';
 import { logDebug, logDebugError } from './logs';
 import { debounce } from './schedulers';
-import { IS_DELEGATED_BOTTOM_SHEET } from './windowEnvironment';
 
 import incomingTransactionSound from '../assets/incoming-transaction.mp3';
 
@@ -31,14 +30,20 @@ export function initializeSounds() {
     });
 }
 
-function loadSound() {
+async function loadSound() {
+  const audioSettings = {
+    assetId: 'incomingTransactionSound',
+    assetPath: 'public/incoming-transaction.mp3',
+    audioChannelNum: 1,
+    isUrl: false,
+  };
+
   if (IS_CAPACITOR) {
-    NativeAudio.preload({
-      assetId: 'incomingTransactionSound',
-      assetPath: 'public/incoming-transaction.mp3',
-      audioChannelNum: 1,
-      isUrl: false,
-    }).catch((err : any) => {
+    if (await NativeAudio.isPreloaded(audioSettings)) {
+      return;
+    }
+
+    NativeAudio.preload(audioSettings).catch((err: any) => {
       logDebugError('appSounds:loadSound', err);
     });
   } else {
@@ -54,11 +59,9 @@ function loadSound() {
   }
 }
 
-loadSound();
+void loadSound();
 
 export const playIncomingTransactionSound = debounce(() => {
-  if (IS_DELEGATED_BOTTOM_SHEET) return;
-
   if (!isSoundInitialized) {
     logDebug('appSounds:playIncomingTransactionSound', 'sound is not initialized');
     return;

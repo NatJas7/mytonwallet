@@ -1,11 +1,12 @@
 import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { Account, AccountSettings, GlobalState } from '../../global/types';
+import type { Account, AccountSettings, AccountType, GlobalState } from '../../global/types';
 
 import { MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT } from '../../config';
-import { selectNetworkAccounts } from '../../global/selectors';
+import { selectOrderedAccounts } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
+import { getChainConfig } from '../../util/chain';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
@@ -27,7 +28,7 @@ interface OwnProps {
 }
 
 interface StateProps {
-  accounts?: Record<string, Account>;
+  orderedAccounts: Array<[string, Account]>;
   canPlaySounds?: boolean;
   settingsByAccountId?: Record<string, AccountSettings>;
   pushNotifications: GlobalState['pushNotifications'];
@@ -36,11 +37,11 @@ interface StateProps {
 function SettingsPushNotifications({
   isActive,
   handleBackClick,
-  accounts,
+  orderedAccounts,
   canPlaySounds,
   pushNotifications: {
     enabledAccounts,
-    isAvailable,
+    isAvailable: arePushNotificationsAvailable,
   },
   isInsideModal,
   settingsByAccountId,
@@ -48,8 +49,9 @@ function SettingsPushNotifications({
   const lang = useLang();
 
   const { toggleNotifications, toggleNotificationAccount, toggleCanPlaySounds } = getActions();
-  const iterableAccounts = useMemo(() => Object.entries(accounts || {}), [accounts]);
-  const arePushNotificationsEnabled = Boolean(Object.keys(enabledAccounts).length);
+  const arePushNotificationsEnabled = enabledAccounts.length > 0;
+  const headerTitle = arePushNotificationsAvailable ? lang('Notifications & Sounds') : lang('Sounds');
+  const enabledAccountsSet = useMemo(() => new Set(enabledAccounts), [enabledAccounts]);
 
   const handlePushNotificationsToggle = useLastCallback(() => {
     toggleNotifications({ isEnabled: !arePushNotificationsEnabled });
@@ -69,33 +71,42 @@ function SettingsPushNotifications({
     isScrolled,
   } = useScrolledState();
 
-  function renderAccount(accountId: string, address: string, title?: string, isHardware?: boolean) {
-    const onClick = () => {
+  function renderAccount(
+    accountId: string,
+    byChain: Account['byChain'],
+    accountType: AccountType,
+    title?: string,
+  ) {
+    const hasSupportedChain = useMemo(() => {
+      return (Object.keys(byChain) as (keyof typeof byChain)[])
+        .some((chain) => getChainConfig(chain).doesSupportPushNotifications);
+    }, [byChain]);
+
+    const onClick = !hasSupportedChain ? undefined : () => {
       toggleNotificationAccount({ accountId });
     };
 
     const { cardBackgroundNft } = settingsByAccountId?.[accountId] || {};
 
-    const isDisabled = enabledAccounts
-      && !enabledAccounts[accountId]
-      && Object.keys(enabledAccounts).length >= MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT;
+    const isActive = enabledAccountsSet.has(accountId);
+    const isDisabled = !isActive && enabledAccounts.length >= MAX_PUSH_NOTIFICATIONS_ACCOUNT_COUNT;
 
     return (
       <AccountButton
+        key={accountId}
+        accountId={accountId}
+        byChain={byChain}
+        title={title}
         className={buildClassName(
           styles.account,
           isDisabled ? styles.accountDisabled : undefined,
         )}
-        key={accountId}
-        accountId={accountId}
-        address={address}
-        title={title}
-        ariaLabel={lang('Switch Account')}
-        isHardware={isHardware}
+        titleClassName={styles.pushAccountName}
+        accountType={accountType}
         withCheckbox
         isLoading={isDisabled}
-        isActive={Boolean(enabledAccounts && enabledAccounts[accountId])}
-        // eslint-disable-next-line react/jsx-no-bind
+        isActive={isActive}
+
         onClick={onClick}
         cardBackgroundNft={cardBackgroundNft}
       />
@@ -105,12 +116,12 @@ function SettingsPushNotifications({
   function renderAccounts() {
     return (
       <AccountButtonWrapper
-        accountLength={iterableAccounts.length}
+        accountLength={orderedAccounts.length}
         className={styles.settingsBlock}
       >
-        {iterableAccounts.map(
-          ([accountId, { title, addressByChain, isHardware }]) => {
-            return renderAccount(accountId, addressByChain.ton, title, isHardware);
+        {orderedAccounts.map(
+          ([accountId, { title, byChain, type }]) => {
+            return renderAccount(accountId, byChain, type, title);
           },
         )}
       </AccountButtonWrapper>
@@ -121,7 +132,7 @@ function SettingsPushNotifications({
     <div className={styles.slide}>
       {isInsideModal ? (
         <ModalHeader
-          title={lang('Notifications & Sounds')}
+          title={headerTitle}
           withNotch={isScrolled}
           onBackButtonClick={handleBackClick}
           className={styles.modalHeader}
@@ -132,14 +143,14 @@ function SettingsPushNotifications({
             <i className={buildClassName(styles.iconChevron, 'icon-chevron-left')} aria-hidden />
             <span>{lang('Back')}</span>
           </Button>
-          <span className={styles.headerTitle}>{lang('Notifications & Sounds')}</span>
+          <span className={styles.headerTitle}>{headerTitle}</span>
         </div>
       )}
       <div
         className={buildClassName(styles.content, 'custom-scroll')}
         onScroll={handleContentScroll}
       >
-        {isAvailable && (
+        {arePushNotificationsAvailable && (
           <>
             <div className={styles.settingsBlock}>
               <div className={buildClassName(styles.item, styles.item_small)} onClick={handlePushNotificationsToggle}>
@@ -179,9 +190,10 @@ function SettingsPushNotifications({
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const accounts = selectNetworkAccounts(global);
+  const orderedAccounts = selectOrderedAccounts(global);
+
   return {
-    accounts,
+    orderedAccounts,
     canPlaySounds: global.settings.canPlaySounds,
     pushNotifications: global.pushNotifications,
     settingsByAccountId: global.settings.byAccountId,

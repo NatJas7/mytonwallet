@@ -1,13 +1,14 @@
 import React, { memo, useState } from '../../../lib/teact/teact';
 
 import buildClassName from '../../../util/buildClassName';
+import { getChainTitle } from '../../../util/chain';
 
 import useHistoryBack from '../../../hooks/useHistoryBack';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
 import useScrolledState from '../../../hooks/useScrolledState';
 
-import SaferyRulesContent from '../../common/backup/SaferyRulesContent';
+import SafetyRulesContent from '../../common/backup/SafetyRulesContent';
 import Button from '../../ui/Button';
 import ModalHeader from '../../ui/ModalHeader';
 
@@ -74,13 +75,14 @@ function BackupSafetyRules({
         className={buildClassName(settingsStyles.content, styles.content)}
         onScroll={handleContentScroll}
       >
-        <SaferyRulesContent
+        <SafetyRulesContent
           isActive={isActive}
           isFullSizeButton
           textFirst={lang(
             backupType === 'key'
               ? '$safety_rules_private_key_one'
               : '$safety_rules_one',
+            { chain: getChainTitle('ton') },
           )}
           textSecond={lang(
             backupType === 'key'

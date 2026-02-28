@@ -10,21 +10,32 @@ import type {
   WalletResponse,
 } from '@tonconnect/protocol';
 
+// We must import DappProtocolType as type bc in extension we cant import real enum from its context
+import type {
+  DappConnectionRequest,
+  DappConnectionResult,
+  DappMethodResult,
+  DappProtocolType,
+} from '../../api/dappProtocols/types';
 import type { Connector } from '../../util/PostMessageConnector';
 
 import { TONCONNECT_PROTOCOL_VERSION, TONCONNECT_WALLET_JSBRIDGE_KEY } from '../../config';
 import { tonConnectGetDeviceInfo } from '../../util/tonConnectEnvironment';
+import { transformTonConnectMessageToUnified } from '../../api/dappProtocols/adapters/tonConnect/utils';
 
 declare global {
   interface Window {
-    [TONCONNECT_WALLET_JSBRIDGE_KEY] : {
+    mytonwallet: {
+      tonconnect: TonConnect;
+    };
+    tonwallet: {
       tonconnect: TonConnect;
     };
   }
 }
 
 // This is imported from @tonconnect/protocol library
-// eslint-disable-next-line @typescript-eslint/naming-convention
+
 enum CONNECT_EVENT_ERROR_CODES {
   UNKNOWN_ERROR = 0,
   BAD_REQUEST_ERROR = 1,
@@ -38,7 +49,7 @@ enum CONNECT_EVENT_ERROR_CODES {
 type TonConnectCallback = (event: WalletEvent) => void;
 type AppMethodMessage = AppRequest<keyof RpcRequests>;
 type WalletMethodMessage = WalletResponse<RpcMethod>;
-type RequestMethods = 'connect' | 'reconnect' | keyof RpcRequests | 'deactivate';
+type RequestMethods = 'connect' | 'reconnect' | keyof RpcRequests;
 
 export interface ExtensionTonConnectBridge {
   deviceInfo: DeviceInfo; // see Requests/Responses spec
@@ -79,41 +90,65 @@ class TonConnect implements ExtensionTonConnectBridge {
       );
     }
 
-    const response = await this.request('connect', [message, id]);
-    if (response?.event === 'connect') {
-      response.payload.device = tonConnectGetDeviceInfo();
+    const unifiedPayload: DappConnectionRequest<DappProtocolType.TonConnect> = {
+      protocolType: 'tonConnect',
+      transport: 'extension',
+      protocolData: message,
+      // We will rewrite permissions in connect method after parsing payload anyway
+      permissions: {
+        isPasswordRequired: false,
+        isAddressRequired: true,
+      },
+      requestedChains: [{
+        chain: 'ton',
+        network: 'mainnet',
+      }],
+    };
 
-      this.addEventListeners();
+    const response = await this.request(
+      'connect',
+      [unifiedPayload, id],
+    ) as DappConnectionResult<DappProtocolType.TonConnect>;
+
+    if (response.success) {
+      return this.emit<ConnectEvent>(response.session.protocolData);
     }
 
-    return this.emit<ConnectEvent>(response || TonConnect.buildConnectError(id));
+    return this.emit<ConnectEvent>(TonConnect.buildConnectError(
+      id,
+      response.error.message,
+      response.error.code as any,
+    ));
   }
 
   async restoreConnection(): Promise<ConnectEvent> {
     const id = ++this.lastGeneratedId;
+    const response = await this.request('reconnect', [id]) as DappConnectionResult<DappProtocolType.TonConnect>;
 
-    const response = await this.request('reconnect', [id]);
-    if (response?.event === 'connect') {
-      response.payload.device = tonConnectGetDeviceInfo();
-
-      this.addEventListeners();
+    if (!response.success) {
+      return this.emit<ConnectEvent>(TonConnect.buildConnectError(id));
     }
 
-    return this.emit<ConnectEvent>(response || TonConnect.buildConnectError(id));
+    return this.emit<ConnectEvent>(response.session.protocolData);
   }
 
   async send(message: AppMethodMessage) {
     const { id } = message;
-    const response = await this.request(message.method, [message]);
+    const unifiedMessage = transformTonConnectMessageToUnified(message);
 
-    if (message.method === 'disconnect') {
-      this.removeEventListeners();
+    const response = await this.request(
+      message.method,
+      [unifiedMessage],
+    ) as DappMethodResult<DappProtocolType.TonConnect>;
+
+    if (response.success) {
+      return response.result;
     }
 
-    return response || {
+    return {
       error: {
-        code: 0,
-        message: 'Unknown error.',
+        code: response.error.code as any,
+        message: response.error.message,
       },
       id,
     };
@@ -142,8 +177,6 @@ class TonConnect implements ExtensionTonConnectBridge {
       id,
       payload: {},
     });
-
-    this.removeEventListeners();
   }
 
   private request(name: RequestMethods, args: any[] = []) {
@@ -170,22 +203,7 @@ class TonConnect implements ExtensionTonConnectBridge {
     return event;
   }
 
-  private addEventListeners() {
-    this.removeEventListeners();
-
-    window.addEventListener('beforeunload', this.unloadEventListener);
-  }
-
-  private removeEventListeners() {
-    window.removeEventListener('beforeunload', this.unloadEventListener);
-  }
-
-  private unloadEventListener = () => {
-    void this.request('deactivate');
-  };
-
   private destroy() {
-    this.removeEventListeners();
     this.callbacks = [];
     this.apiConnector.destroy();
   }

@@ -1,4 +1,4 @@
-import { IS_CAPACITOR } from '../config';
+import { IS_CAPACITOR, IS_TELEGRAM_APP } from '../config';
 import { requestMutation } from '../lib/fasterdom/fasterdom';
 import { applyStyles } from './animation';
 import { SECOND } from './dateFormat';
@@ -6,10 +6,11 @@ import safeExec from './safeExec';
 import { throttle } from './schedulers';
 import { IS_ANDROID, IS_IOS } from './windowEnvironment';
 
-const WINDOW_RESIZE_THROTTLE_MS = 250;
+const WINDOW_RESIZE_THROTTLE_MS = IS_TELEGRAM_APP ? 25 : 250;
 const WINDOW_ORIENTATION_CHANGE_THROTTLE_MS = IS_IOS ? 350 : 250;
 const SAFE_AREA_INITIALIZATION_DELAY = SECOND;
 
+const { documentElement } = document;
 const initialHeight = window.innerHeight;
 const virtualKeyboardOpenListeners: NoneToVoidFunction[] = [];
 
@@ -26,18 +27,30 @@ if (!IS_IOS) {
 }
 
 if (IS_CAPACITOR) {
-  import('@capacitor/keyboard')
+  void import('@capacitor/keyboard')
     .then(({ Keyboard }) => {
-      Keyboard.addListener('keyboardDidShow', async (info) => {
-        await patchCapacitorAppVh(info.keyboardHeight);
+      void Keyboard.addListener('keyboardWillShow', () => {
+        documentElement.classList.add('is-keyboard-open');
+      });
+
+      void Keyboard.addListener('keyboardDidShow', async (info) => {
+        // Due to a bug in Android, extra space is added to the bottom of the screen when the keyboard is opened only on iOS
+        // https://capacitorjs.com/docs/apis/keyboard#configuration (resizeOnFullScreen)
+        if (IS_IOS) {
+          await adjustBodyPaddingForKeyboard(info.keyboardHeight);
+        }
 
         for (const cb of virtualKeyboardOpenListeners) {
           safeExec(cb);
         }
       });
 
-      Keyboard.addListener('keyboardWillHide', () => {
-        void patchCapacitorAppVh(0);
+      void Keyboard.addListener('keyboardWillHide', () => {
+        documentElement.classList.remove('is-keyboard-open');
+
+        if (IS_IOS) {
+          void adjustBodyPaddingForKeyboard(0);
+        }
       });
     });
 }
@@ -45,12 +58,11 @@ if (IS_CAPACITOR) {
 if ('visualViewport' in window && (IS_IOS || IS_ANDROID)) {
   window.visualViewport!.addEventListener('resize', throttle((e: Event) => {
     const target = e.target as VisualViewport;
+
+    patchVh();
     currentWindowSize = {
-      width: window.innerWidth,
+      ...getWindowSize(),
       height: target.height,
-      screenHeight: window.screen.height,
-      safeAreaTop: getSafeAreaTop(),
-      safeAreaBottom: getSafeAreaBottom(),
     };
   }, WINDOW_RESIZE_THROTTLE_MS, true));
 }
@@ -59,6 +71,10 @@ export function updateSizes() {
   patchVh();
   patchSafeAreaProperty();
 
+  return getWindowSize();
+}
+
+function getWindowSize() {
   return {
     width: window.innerWidth,
     height: window.innerHeight,
@@ -79,17 +95,16 @@ export function onVirtualKeyboardOpen(cb: NoneToVoidFunction) {
 }
 
 function patchVh() {
-  if (!(IS_IOS || IS_ANDROID) || IS_CAPACITOR) return;
+  if (!(IS_IOS || IS_ANDROID) || IS_CAPACITOR || (IS_IOS && IS_TELEGRAM_APP)) return;
 
-  const height = IS_IOS ? window.visualViewport!.height + window.visualViewport!.pageTop : window.innerHeight;
+  const height = window.innerHeight;
 
   requestMutation(() => {
-    const vh = height * 0.01;
-    document.documentElement.style.setProperty('--vh', `${vh}px`);
+    document.documentElement.style.setProperty('--vh', IS_IOS ? '1dvh' : `${height * 0.01}px`);
   });
 }
 
-function patchCapacitorAppVh(keyboardHeight: number) {
+function adjustBodyPaddingForKeyboard(keyboardHeight: number) {
   return new Promise<void>((resolve) => {
     requestMutation(() => {
       applyStyles(document.body, { paddingBottom: keyboardHeight ? `${keyboardHeight}px` : '' });
@@ -99,24 +114,13 @@ function patchCapacitorAppVh(keyboardHeight: number) {
 }
 
 function patchSafeAreaProperty() {
-  const { documentElement } = document;
+  toggleSafeAreaClasses();
 
   // WebKit has issues with this property on page load
   // https://bugs.webkit.org/show_bug.cgi?id=191872
   setTimeout(() => {
-    currentWindowSize = updateSizes();
-    const { safeAreaTop, safeAreaBottom } = currentWindowSize;
-
-    if (!Number.isNaN(safeAreaTop) && safeAreaTop > 0) {
-      requestMutation(() => {
-        documentElement.classList.add('with-safe-area-top');
-      });
-    }
-    if (!Number.isNaN(safeAreaBottom) && safeAreaBottom > 0) {
-      requestMutation(() => {
-        documentElement.classList.add('with-safe-area-bottom');
-      });
-    }
+    toggleSafeAreaClasses();
+    updateSafeAreaValues();
   }, SAFE_AREA_INITIALIZATION_DELAY);
 }
 
@@ -130,4 +134,24 @@ function getSafeAreaBottom() {
   const value = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--safe-area-bottom-value'), 10);
 
   return Number.isNaN(value) ? 0 : value;
+}
+
+function toggleSafeAreaClasses() {
+  const { safeAreaTop, safeAreaBottom } = getWindowSize();
+  const { documentElement } = document;
+
+  requestMutation(() => {
+    documentElement.classList.toggle('with-safe-area-top', !Number.isNaN(safeAreaTop) && safeAreaTop > 0);
+    documentElement.classList.toggle('with-safe-area-bottom', !Number.isNaN(safeAreaBottom) && safeAreaBottom > 0);
+  });
+}
+
+function updateSafeAreaValues() {
+  const { safeAreaTop, safeAreaBottom } = getWindowSize();
+
+  currentWindowSize = {
+    ...currentWindowSize,
+    safeAreaTop,
+    safeAreaBottom,
+  };
 }

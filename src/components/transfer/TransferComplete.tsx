@@ -23,7 +23,7 @@ import styles from '../common/TransferResult.module.scss';
 import modalStyles from '../ui/Modal.module.scss';
 
 interface OwnProps {
-  isActive?: boolean;
+  isActive: boolean;
   amount?: bigint;
   symbol: string;
   txId?: string;
@@ -91,7 +91,7 @@ function TransferComplete({
               tgsUrl={ANIMATED_STICKERS_PATHS.thumbUp}
               previewUrl={ANIMATED_STICKERS_PATHS.thumbUpPreview}
             />
-            {nfts!.length === 1 ? <NftInfo nft={nfts![0]} /> : <NftChips nfts={nfts!} />}
+            {nfts.length === 1 ? <NftInfo nft={nfts[0]} /> : <NftChips nfts={nfts} />}
             {Boolean(txId) && (
               <div className={buildClassName(styles.buttons, styles.buttonsAfterNft)}>
                 <Button className={styles.button} onClick={onInfoClick}>{lang('Details')}</Button>

@@ -1,51 +1,63 @@
-import { TransferState } from '../../types';
+import { SignDataState, TransferState } from '../../types';
 
 import { TONCOIN } from '../../../config';
 import { processDeeplink } from '../../../util/deeplink';
-import { callActionInNative } from '../../../util/multitab';
-import { IS_DELEGATING_BOTTOM_SHEET } from '../../../util/windowEnvironment';
 import { addActionHandler, setGlobal } from '../../index';
 import {
   clearCurrentDappTransfer,
   clearCurrentSignature,
   clearCurrentTransfer,
   clearDappConnectRequest,
-  updateAccountState,
+  updateCurrentDappSignData,
+  updateCurrentDappTransfer,
   updateCurrentSignature,
   updateCurrentTransfer,
+  updateCurrentTransferByCheckResult,
 } from '../../reducers';
-import { selectAccountState } from '../../selectors';
 
 addActionHandler('apiUpdate', (global, actions, update) => {
   switch (update.type) {
+    case 'tonConnectOnline': {
+      actions.closeLoadingOverlay();
+      break;
+    }
+
     case 'createTransaction': {
       const {
         promiseId,
         amount,
         toAddress,
-        fee,
-        realFee,
         comment,
         rawPayload,
-        parsedPayload,
         stateInit,
+        checkResult,
       } = update;
 
       global = clearCurrentTransfer(global);
       global = updateCurrentTransfer(global, {
         state: TransferState.Confirm,
         toAddress,
+        resolvedAddress: checkResult.resolvedAddress,
+        isToNewAddress: checkResult.isToAddressNew,
         amount,
-        fee,
-        realFee,
         comment,
         promiseId,
         tokenSlug: TONCOIN.slug,
         rawPayload,
-        parsedPayload,
         stateInit,
       });
+      global = updateCurrentTransferByCheckResult(global, checkResult);
       setGlobal(global);
+
+      break;
+    }
+
+    case 'completeTransaction': {
+      const { activityId } = update;
+      setGlobal(updateCurrentTransfer(global, {
+        state: TransferState.Complete,
+        txId: activityId,
+      }));
 
       break;
     }
@@ -71,10 +83,6 @@ addActionHandler('apiUpdate', (global, actions, update) => {
     }
 
     case 'dappConnect': {
-      if (IS_DELEGATING_BOTTOM_SHEET) {
-        callActionInNative('apiUpdateDappConnect', update);
-      }
-
       actions.apiUpdateDappConnect(update);
 
       break;
@@ -87,24 +95,10 @@ addActionHandler('apiUpdate', (global, actions, update) => {
       break;
     }
 
-    case 'updateActiveDapp': {
-      const { accountId, origin } = update;
-
-      global = updateAccountState(global, accountId, {
-        activeDappOrigin: origin,
-      });
-      setGlobal(global);
-      break;
-    }
-
     case 'dappDisconnect': {
-      const { accountId, origin } = update;
-      const accountState = selectAccountState(global, accountId);
+      const { url } = update;
 
-      if (accountState?.activeDappOrigin === origin) {
-        global = updateAccountState(global, accountId, {
-          activeDappOrigin: undefined,
-        });
+      if (global.currentDappTransfer.dapp?.url === url) {
         global = clearCurrentDappTransfer(global);
         setGlobal(global);
       }
@@ -112,40 +106,28 @@ addActionHandler('apiUpdate', (global, actions, update) => {
     }
 
     case 'dappLoading': {
-      if (IS_DELEGATING_BOTTOM_SHEET) {
-        callActionInNative('apiUpdateDappLoading', update);
-      }
-
       actions.apiUpdateDappLoading(update);
 
       break;
     }
 
     case 'dappCloseLoading': {
-      if (IS_DELEGATING_BOTTOM_SHEET) {
-        callActionInNative('apiUpdateDappCloseLoading');
-      }
-
-      actions.apiUpdateDappCloseLoading();
+      actions.apiUpdateDappCloseLoading(update);
 
       break;
     }
 
     case 'dappSendTransactions': {
-      if (IS_DELEGATING_BOTTOM_SHEET) {
-        callActionInNative('apiUpdateDappSendTransaction', update);
-      }
-
       actions.apiUpdateDappSendTransaction(update);
+      break;
+    }
 
+    case 'dappSignData': {
+      actions.apiUpdateDappSignData(update);
       break;
     }
 
     case 'updateDapps': {
-      if (IS_DELEGATING_BOTTOM_SHEET) {
-        callActionInNative('getDapps');
-      }
-
       actions.getDapps();
       break;
     }
@@ -175,7 +157,29 @@ addActionHandler('apiUpdate', (global, actions, update) => {
     case 'processDeeplink': {
       const { url } = update;
 
-      processDeeplink(url);
+      void processDeeplink(url);
+      break;
+    }
+
+    case 'dappTransferComplete': {
+      if (global.currentDappTransfer.state !== TransferState.None) {
+        global = updateCurrentDappTransfer(global, {
+          state: TransferState.Complete,
+          isLoading: false,
+        });
+        setGlobal(global);
+      }
+      break;
+    }
+
+    case 'dappSignDataComplete': {
+      if (global.currentDappSignData.state !== SignDataState.None) {
+        global = updateCurrentDappSignData(global, {
+          state: SignDataState.Complete,
+          isLoading: false,
+        });
+        setGlobal(global);
+      }
       break;
     }
   }

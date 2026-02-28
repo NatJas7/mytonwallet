@@ -1,13 +1,16 @@
+import { AirAppLauncher } from '@mytonwallet/air-app-launcher';
 import React, {
   memo, useMemo, useRef, useState,
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiBaseCurrency, ApiNft } from '../../api/types';
+import type { ApiBaseCurrency, ApiCurrencyRates, ApiNft, ApiStakingState } from '../../api/types';
 import { SettingsState, type UserToken } from '../../global/types';
 
-import { CURRENCY_LIST, DEFAULT_PRICE_CURRENCY, TINY_TRANSFER_MAX_COST } from '../../config';
+import { CURRENCIES, IS_CAPACITOR, TINY_TRANSFER_MAX_COST } from '../../config';
 import {
+  selectAccountStakingStates,
+  selectCurrentAccountId,
   selectCurrentAccountSettings,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
@@ -20,9 +23,10 @@ import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useScrolledState from '../../hooks/useScrolledState';
+import useTokensWithStaking from '../../hooks/useTokensWithStaking';
 
 import Button from '../ui/Button';
-import Dropdown from '../ui/Dropdown';
+import Dropdown, { type DropdownItem } from '../ui/Dropdown';
 import IconWithTooltip from '../ui/IconWithTooltip';
 import ModalHeader from '../ui/ModalHeader';
 import Switcher from '../ui/Switcher';
@@ -38,47 +42,60 @@ interface OwnProps {
 
 interface StateProps {
   isInvestorViewEnabled?: boolean;
-  isSortByValueEnabled?: boolean;
   areTinyTransfersHidden?: boolean;
   areTokensWithNoCostHidden?: boolean;
-  baseCurrency?: ApiBaseCurrency;
+  isSensitiveDataHidden?: true;
+  baseCurrency: ApiBaseCurrency;
   isMultichainAccount: boolean;
   tokens?: UserToken[];
-  orderedSlugs?: string[];
+  pinnedSlugs?: string[];
+  alwaysHiddenSlugs?: string[];
   nftsByAddress?: Record<string, ApiNft>;
   blacklistedNftAddresses: string[];
   whitelistedNftAddresses: string[];
+  states?: ApiStakingState[];
+  currencyRates?: ApiCurrencyRates;
 }
 
 function SettingsAssets({
   isActive,
   isInsideModal,
   isInvestorViewEnabled,
-  isSortByValueEnabled,
+  isSensitiveDataHidden,
   areTinyTransfersHidden,
   areTokensWithNoCostHidden,
   baseCurrency,
   isMultichainAccount,
   tokens,
-  orderedSlugs,
+  pinnedSlugs,
+  alwaysHiddenSlugs = MEMO_EMPTY_ARRAY,
   nftsByAddress,
   blacklistedNftAddresses,
   whitelistedNftAddresses,
+  states,
+  currencyRates,
   onBack,
 }: OwnProps & StateProps) {
   const {
     toggleTinyTransfersHidden,
     toggleInvestorView,
     toggleTokensWithNoCost,
-    toggleSortByValue,
     changeBaseCurrency,
     setSettingsState,
   } = getActions();
 
   const lang = useLang();
 
-  // eslint-disable-next-line no-null/no-null
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>();
+
+  const tokensWithStaking = useTokensWithStaking({
+    tokens,
+    states,
+    baseCurrency,
+    currencyRates,
+    pinnedSlugs,
+    alwaysHiddenSlugs,
+  });
 
   useHistoryBack({ isActive, onBack });
 
@@ -86,6 +103,11 @@ function SettingsAssets({
     handleScroll: handleContentScroll,
     isScrolled,
   } = useScrolledState();
+
+  const currencyItems = useMemo<DropdownItem<ApiBaseCurrency>[]>(() => (
+    Object.entries(CURRENCIES)
+      .map(([currency, { name }]) => ({ value: currency as keyof typeof CURRENCIES, name }))
+  ), []);
 
   const handleTinyTransfersHiddenToggle = useLastCallback(() => {
     toggleTinyTransfersHidden({ isEnabled: !areTinyTransfersHidden });
@@ -103,15 +125,12 @@ function SettingsAssets({
     toggleTokensWithNoCost({ isEnabled: !areTokensWithNoCostHidden });
   });
 
-  const handleSortByValueToggle = useLastCallback(() => {
-    toggleSortByValue({ isEnabled: !isSortByValueEnabled });
-  });
-
   const [localBaseCurrency, setLocalBaseCurrency] = useState(baseCurrency);
 
-  const handleBaseCurrencyChange = useLastCallback((currency: string) => {
-    setLocalBaseCurrency(currency as ApiBaseCurrency);
-    changeBaseCurrency({ currency: currency as ApiBaseCurrency });
+  const handleBaseCurrencyChange = useLastCallback((currency: ApiBaseCurrency) => {
+    setLocalBaseCurrency(currency);
+    changeBaseCurrency({ currency });
+    if (IS_CAPACITOR) void AirAppLauncher.setBaseCurrency({ currency });
   });
 
   const {
@@ -158,8 +177,8 @@ function SettingsAssets({
         <div className={styles.settingsBlock}>
           <Dropdown
             label={lang('Base Currency')}
-            items={CURRENCY_LIST}
-            selectedValue={baseCurrency ?? DEFAULT_PRICE_CURRENCY}
+            items={currencyItems}
+            selectedValue={baseCurrency}
             theme="light"
             shouldTranslateOptions
             className={buildClassName(styles.item, styles.item_small)}
@@ -167,15 +186,13 @@ function SettingsAssets({
             isLoading={localBaseCurrency !== baseCurrency}
           />
           <div className={buildClassName(styles.item, styles.item_small)} onClick={handleInvestorViewToggle}>
-            <div className={styles.blockWithTooltip}>
+            <div>
               {lang('Investor View')}
-
+              {' '}
               <IconWithTooltip
                 message={lang('Focus on asset value rather than current balance')}
-                tooltipClassName={styles.tooltip}
                 iconClassName={styles.iconQuestion}
               />
-
             </div>
 
             <Switcher
@@ -185,9 +202,9 @@ function SettingsAssets({
             />
           </div>
           <div className={buildClassName(styles.item, styles.item_small)} onClick={handleTinyTransfersHiddenToggle}>
-            <div className={styles.blockWithTooltip}>
+            <div>
               {lang('Hide Tiny Transfers')}
-
+              {' '}
               <IconWithTooltip
                 message={
                   lang(
@@ -195,7 +212,7 @@ function SettingsAssets({
                     { value: TINY_TRANSFER_MAX_COST },
                   ) as string
                 }
-                tooltipClassName={buildClassName(styles.tooltip, styles.tooltip_wide)}
+                tooltipClassName={buildClassName(styles.wideTooltip)}
                 iconClassName={styles.iconQuestion}
               />
             </div>
@@ -222,19 +239,10 @@ function SettingsAssets({
         }
         <p className={styles.blockTitle}>{lang('Token Settings')}</p>
         <div className={styles.settingsBlock}>
-          <div className={buildClassName(styles.item, styles.item_small)} onClick={handleSortByValueToggle}>
-            {lang('Sort By Cost')}
-
-            <Switcher
-              className={styles.menuSwitcher}
-              label={lang('Sort By Cost')}
-              checked={isSortByValueEnabled}
-            />
-          </div>
           <div className={buildClassName(styles.item, styles.item_small)} onClick={handleTokensWithNoPriceToggle}>
-            <div className={styles.blockWithTooltip}>
+            <div>
               {lang('Hide Tokens With No Cost')}
-
+              {' '}
               <IconWithTooltip
                 message={
                   lang(
@@ -242,7 +250,7 @@ function SettingsAssets({
                     { value: TINY_TRANSFER_MAX_COST },
                   ) as string
                 }
-                tooltipClassName={buildClassName(styles.tooltip, styles.tooltip_wide)}
+                tooltipClassName={buildClassName(styles.wideTooltip)}
                 iconClassName={styles.iconQuestion}
               />
             </div>
@@ -256,10 +264,9 @@ function SettingsAssets({
         </div>
 
         <SettingsTokens
-          parentContainer={scrollContainerRef}
-          tokens={tokens}
-          orderedSlugs={orderedSlugs}
-          isSortByValueEnabled={isSortByValueEnabled}
+          isSensitiveDataHidden={isSensitiveDataHidden}
+          tokens={tokensWithStaking}
+          pinnedSlugs={pinnedSlugs}
           baseCurrency={baseCurrency}
           withChainIcon={isMultichainAccount}
         />
@@ -271,16 +278,15 @@ function SettingsAssets({
 export default memo(withGlobal<OwnProps>((global): StateProps => {
   const {
     isInvestorViewEnabled,
-    isSortByValueEnabled,
     areTinyTransfersHidden,
     areTokensWithNoCostHidden,
     baseCurrency,
+    isSensitiveDataHidden,
   } = global.settings;
 
-  const {
-    orderedSlugs,
-  } = selectCurrentAccountSettings(global) ?? {};
+  const { pinnedSlugs, alwaysHiddenSlugs } = selectCurrentAccountSettings(global) ?? {};
 
+  const currentAccountId = selectCurrentAccountId(global);
   const {
     blacklistedNftAddresses = MEMO_EMPTY_ARRAY,
     whitelistedNftAddresses = MEMO_EMPTY_ARRAY,
@@ -291,15 +297,18 @@ export default memo(withGlobal<OwnProps>((global): StateProps => {
 
   return {
     isInvestorViewEnabled,
-    isSortByValueEnabled,
     areTinyTransfersHidden,
     areTokensWithNoCostHidden,
     baseCurrency,
-    isMultichainAccount: selectIsMultichainAccount(global, global.currentAccountId!),
+    isMultichainAccount: selectIsMultichainAccount(global, currentAccountId!),
     tokens: selectCurrentAccountTokens(global),
-    orderedSlugs,
+    pinnedSlugs,
+    alwaysHiddenSlugs,
     nftsByAddress,
     blacklistedNftAddresses,
     whitelistedNftAddresses,
+    isSensitiveDataHidden,
+    states: selectAccountStakingStates(global, currentAccountId!),
+    currencyRates: global.currencyRates,
   };
 })(SettingsAssets));

@@ -41,14 +41,14 @@ function BackupSecretWords({
   useEffect(() => {
     async function loadMnemonic() {
       if (isBackupSlideActive && enteredPassword) {
-        const mnemonicResult = await callApi('fetchMnemonic', currentAccountId!, enteredPassword);
+        const mnemonicResult = await callApi('fetchMnemonic', currentAccountId, enteredPassword);
 
         setMnemonic(mnemonicResult);
       } else {
         setMnemonic(undefined);
       }
     }
-    loadMnemonic();
+    void loadMnemonic();
   }, [currentAccountId, enteredPassword, isBackupSlideActive]);
 
   useHistoryBack({

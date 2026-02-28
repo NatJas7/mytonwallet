@@ -1,15 +1,17 @@
+import { AirAppLauncher } from '@mytonwallet/air-app-launcher';
 import React, { memo } from '../../lib/teact/teact';
 import { getActions } from '../../global';
 
 import type { LangCode } from '../../global/types';
 
-import { LANG_LIST } from '../../config';
+import { IS_CAPACITOR, LANG_LIST } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { setLanguage } from '../../util/langProvider';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
+import useScrolledState from '../../hooks/useScrolledState';
 
 import Button from '../ui/Button';
 import ModalHeader from '../ui/ModalHeader';
@@ -44,6 +46,7 @@ function SettingsLanguage({
   const handleLanguageChange = useLastCallback((newLangCode: LangCode) => {
     void setLanguage(newLangCode, () => {
       changeLanguage({ langCode: newLangCode });
+      if (IS_CAPACITOR) void AirAppLauncher.setLanguage({ langCode: newLangCode });
     });
   });
 
@@ -64,6 +67,8 @@ function SettingsLanguage({
     ));
   }
 
+  const { isScrolled, handleScroll: handleContentScroll } = useScrolledState();
+
   return (
     <div className={styles.slide}>
       {isInsideModal ? (
@@ -73,7 +78,14 @@ function SettingsLanguage({
           className={buildClassName(styles.modalHeader, styles.languageHeader)}
         />
       ) : (
-        <div className={styles.header}>
+        <div className={
+          buildClassName(
+            styles.header,
+            'with-notch-on-scroll',
+            isScrolled && 'is-scrolled',
+          )
+        }
+        >
           <Button isSimple isText onClick={handleBackClick} className={styles.headerBack}>
             <i className={buildClassName(styles.iconChevron, 'icon-chevron-left')} aria-hidden />
             <span>{lang('Back')}</span>
@@ -81,7 +93,7 @@ function SettingsLanguage({
           <span className={styles.headerTitle}>{lang('Language')}</span>
         </div>
       )}
-      <div className={buildClassName(styles.content, 'custom-scroll')}>
+      <div className={buildClassName(styles.content, 'custom-scroll')} onScroll={handleContentScroll}>
         <div className={styles.block}>
           {renderLanguages()}
         </div>

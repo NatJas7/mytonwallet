@@ -1,17 +1,20 @@
 import React, { memo } from '../../lib/teact/teact';
 import { getActions } from '../../global';
 
+import { IS_PRODUCTION } from '../../config';
 import buildClassName from '../../util/buildClassName';
 
+import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
+import useScrolledState from '../../hooks/useScrolledState';
 
 import SecretWordsContent from '../common/backup/SecretWordsContent';
-import Button from '../ui/Button';
+import Header from './Header';
 
 import styles from './Auth.module.scss';
 
 interface OwnProps {
-  isActive?: boolean;
+  isActive: boolean;
   mnemonic?: string[];
 }
 
@@ -21,24 +24,36 @@ const AuthSecretWords = ({ isActive, mnemonic }: OwnProps) => {
   const lang = useLang();
 
   const wordsCount = mnemonic?.length || 0;
+  const canSkipMnemonicCheck = !IS_PRODUCTION;
+
+  useHistoryBack({ isActive, onBack: openAuthBackupWalletModal });
+  const { isScrolled, handleScroll } = useScrolledState();
 
   return (
     <div className={styles.wrapper}>
-      <div className={buildClassName(styles.container, 'custom-scroll')}>
+      <Header
+        isActive={isActive}
+        title={lang('%1$d Secret Words', wordsCount) as string}
+        withBorder={isScrolled}
+        onBackClick={openAuthBackupWalletModal}
+      />
 
-        <div className={styles.header}>
-          <Button isSimple isText onClick={openAuthBackupWalletModal} className={styles.headerBackBlock}>
-            <i className={buildClassName(styles.iconChevron, 'icon-chevron-left')} aria-hidden />
-            <span>{lang('Back')}</span>
-          </Button>
-          <span className={styles.headerTitle}>{lang('%1$d Secret Words', wordsCount) as string}</span>
-        </div>
-
+      <div
+        className={buildClassName(
+          styles.container,
+          styles.containerWithHeader,
+          styles.container_scrollable,
+          'custom-scroll')}
+        onScroll={handleScroll}
+      >
         <SecretWordsContent
           isActive={isActive}
           mnemonic={mnemonic}
-          onSubmit={openCheckWordsPage}
+          stickerClassName={styles.topSticker}
+          customButtonWrapperClassName={buildClassName(styles.buttons, styles.buttonsPush)}
+          canSkipMnemonicCheck={canSkipMnemonicCheck}
           buttonText={lang('Let\'s Check')}
+          onSubmit={openCheckWordsPage}
         />
       </div>
     </div>

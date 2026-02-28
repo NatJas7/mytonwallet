@@ -1,10 +1,10 @@
-import React, { memo, useState } from '../../lib/teact/teact';
-import { getActions } from '../../lib/teact/teactn';
-import { withGlobal } from '../../global';
+import React, { memo, useRef, useState } from '../../lib/teact/teact';
+import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState, Theme } from '../../global/types';
 import { AuthState } from '../../global/types';
 
+import { selectIsBiometricAuthEnabled } from '../../global/selectors';
 import { pick } from '../../util/iteratees';
 import { IS_ANDROID } from '../../util/windowEnvironment';
 
@@ -18,7 +18,7 @@ import AuthCheckPassword from './AuthCheckPassword';
 import AuthCheckWords from './AuthCheckWords';
 import AuthConfirmBiometrics from './AuthConfirmBiometrics';
 import AuthConfirmPin from './AuthConfirmPin';
-import AuthCreateBackup from './AuthCreateBackup';
+import AuthCongratulations from './AuthCongratulations';
 import AuthCreateBiometrics from './AuthCreateBiometrics';
 import AuthCreateNativeBiometrics from './AuthCreateNativeBiometrics';
 import AuthCreatePassword from './AuthCreatePassword';
@@ -26,7 +26,8 @@ import AuthCreatePin from './AuthCreatePin';
 import AuthCreatingWallet from './AuthCreatingWallet';
 import AuthDisclaimer from './AuthDisclaimer';
 import AuthImportMnemonic from './AuthImportMnemonic';
-import AuthSaferyRules from './AuthSaferyRules';
+import AuthImportViewAccount from './AuthImportViewAccount';
+import AuthSafetyRules from './AuthSafetyRules';
 import AuthSecretWords from './AuthSecretWords';
 import AuthStart from './AuthStart';
 
@@ -34,8 +35,8 @@ import styles from './Auth.module.scss';
 
 type StateProps = Pick<GlobalState['auth'], (
   'state' | 'biometricsStep' | 'error' | 'mnemonic' | 'mnemonicCheckIndexes' | 'isLoading' | 'method'
-  | 'isBackupModalOpen'
-)> & { theme: Theme };
+  | 'hardwareSelectedIndices'
+)> & { theme: Theme; isBiometricAuthEnabled?: boolean };
 
 const RENDER_COUNT = Object.keys(AuthState).length / 2;
 
@@ -46,13 +47,17 @@ const Auth = ({
   isLoading,
   mnemonic,
   mnemonicCheckIndexes,
+  hardwareSelectedIndices,
   method,
   theme,
+  isBiometricAuthEnabled,
 }: StateProps) => {
   const {
     closeAbout,
+    closeImportViewAccount,
   } = getActions();
 
+  const containerRef = useRef<HTMLDivElement>();
   const { isPortrait } = useDeviceScreen();
 
   // Transitioning to ready state is done in another component
@@ -61,18 +66,17 @@ const Auth = ({
     true,
   ) ?? -1;
 
-  const [prevKey, setPrevKey] = useState<number | undefined>(undefined);
+  const [prevKey, setPrevKey] = useState<AuthState | undefined>(undefined);
   const [nextKey, setNextKey] = useState(renderingAuthState + 1);
   const updateRenderingKeys = useLastCallback(() => {
     setNextKey(renderingAuthState + 1);
     setPrevKey(renderingAuthState === AuthState.confirmPin ? AuthState.createPin : undefined);
   });
 
-  // eslint-disable-next-line consistent-return
-  function renderAuthScreen(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderAuthScreen(isActive: boolean, isFrom: boolean, currentKey: AuthState) {
     switch (currentKey) {
       case AuthState.none:
-        return <AuthStart />;
+        return <AuthStart isActive={isActive} />;
       case AuthState.createWallet:
         return <AuthCreatingWallet isActive={isActive} />;
       case AuthState.checkPassword:
@@ -81,6 +85,7 @@ const Auth = ({
             isActive={isActive}
             isLoading={isLoading}
             method="createAccount"
+            isBiometricAuthEnabled={isBiometricAuthEnabled}
             error={error}
           />
         );
@@ -105,8 +110,6 @@ const Auth = ({
         );
       case AuthState.createPassword:
         return <AuthCreatePassword isActive={isActive} isLoading={isLoading} method="createAccount" />;
-      case AuthState.createBackup:
-        return <AuthCreateBackup isActive={isActive} />;
       case AuthState.disclaimerAndBackup:
         return (
           <AuthDisclaimer key="create" isActive={isActive} />
@@ -123,6 +126,7 @@ const Auth = ({
             isActive={isActive}
             isLoading={isLoading}
             method="importMnemonic"
+            isBiometricAuthEnabled={isBiometricAuthEnabled}
             error={error}
           />
         );
@@ -131,7 +135,6 @@ const Auth = ({
           <AuthDisclaimer
             key="import"
             isActive={isActive}
-            isImport
           />
         );
       case AuthState.importWalletCreateNativeBiometrics:
@@ -152,28 +155,54 @@ const Auth = ({
           />
         );
       case AuthState.about:
-        return <SettingsAbout handleBackClick={closeAbout} theme={theme} />;
-      case AuthState.saferyRules:
-        return <AuthSaferyRules isActive={isActive} />;
+        return (
+          <SettingsAbout
+            isActive={isActive}
+            theme={theme}
+            slideClassName={styles.aboutSlide}
+            handleBackClick={closeAbout}
+          />
+        );
+      case AuthState.safetyRules:
+        return <AuthSafetyRules isActive={isActive} />;
       case AuthState.mnemonicPage:
         return <AuthSecretWords isActive={isActive} mnemonic={mnemonic} />;
       case AuthState.checkWords:
         return <AuthCheckWords isActive={isActive} mnemonic={mnemonic} checkIndexes={mnemonicCheckIndexes} />;
+      case AuthState.importViewAccount:
+        return (
+          <AuthImportViewAccount
+            isActive={isActive}
+            isLoading={isLoading}
+            onCancel={closeImportViewAccount}
+          />
+        );
+      case AuthState.congratulations:
+        return (
+          <AuthCongratulations
+            isActive={isActive}
+            hardwareWalletsAmount={hardwareSelectedIndices?.length}
+            isImporting={Boolean(hardwareSelectedIndices?.length)}
+          />
+        );
+      case AuthState.importCongratulations:
+        return <AuthCongratulations isActive={isActive} isImporting />;
     }
   }
 
   return (
     <Transition
+      ref={containerRef}
       name={isPortrait ? (IS_ANDROID ? 'slideFade' : 'slideLayers') : 'semiFade'}
       activeKey={renderingAuthState}
       renderCount={RENDER_COUNT}
       shouldCleanup
+      shouldWrap
       className={styles.transitionContainer}
       slideClassName={styles.transitionSlide}
       prevKey={prevKey}
       nextKey={nextKey}
       onStop={updateRenderingKeys}
-      shouldWrap
     >
       {renderAuthScreen}
     </Transition>
@@ -183,10 +212,12 @@ const Auth = ({
 export default memo(withGlobal((global): StateProps => {
   const authProps = pick(global.auth, [
     'state', 'biometricsStep', 'error', 'mnemonic', 'mnemonicCheckIndexes', 'isLoading', 'method',
-    'isBackupModalOpen',
+    'hardwareSelectedIndices',
   ]);
+  const isBiometricAuthEnabled = selectIsBiometricAuthEnabled(global);
   return {
     ...authProps,
     theme: global.settings.theme,
+    isBiometricAuthEnabled,
   };
 })(Auth));

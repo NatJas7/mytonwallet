@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { ElementRef, TeactNode } from '../../lib/teact/teact';
 import React, { memo, useState } from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
@@ -9,9 +9,9 @@ import LoadingDots from './LoadingDots';
 
 import styles from './Button.module.scss';
 
-type OwnProps = {
-  ref?: RefObject<HTMLButtonElement>;
-  children: React.ReactNode;
+export type OwnProps = {
+  ref?: ElementRef<HTMLButtonElement>;
+  children: TeactNode;
   id?: string;
   className?: string;
   style?: string;
@@ -20,15 +20,18 @@ type OwnProps = {
   kind?: 'transparent';
   isSubmit?: boolean;
   isPrimary?: boolean;
+  isSecondary?: boolean;
+  isSmall?: boolean;
   isSimple?: boolean;
   isText?: boolean;
   isLoading?: boolean;
   isDisabled?: boolean;
   isRound?: boolean;
-  isSmall?: boolean;
   isDestructive?: boolean;
-  onClick?: NoneToVoidFunction;
   shouldStopPropagation?: boolean;
+  onClick?: NoneToVoidFunction;
+  onMouseDown?: (e: React.MouseEvent) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 };
 
 // Longest animation duration
@@ -44,16 +47,19 @@ function Button({
   forFormId,
   kind,
   isSubmit,
-  isLoading,
   isPrimary,
+  isSecondary,
+  isSmall,
   isSimple,
   isText,
+  isLoading,
   isDisabled,
   isRound,
-  isSmall,
   isDestructive,
-  onClick,
   shouldStopPropagation,
+  onClick,
+  onMouseDown,
+  onContextMenu,
 }: OwnProps) {
   const [isClicked, setIsClicked] = useState(false);
 
@@ -83,13 +89,14 @@ function Button({
       type={isSubmit || forFormId ? 'submit' : 'button'}
       className={buildClassName(
         styles.button,
-        isSimple && styles.isSimple,
-        isSmall && styles.sizeSmall,
         isPrimary && styles.primary,
+        isSecondary && styles.secondary,
+        isSmall && styles.sizeSmall,
+        isSimple && styles.isSimple,
+        isText && styles.isText,
         (isDisabled || isLoading) && styles.disabled,
         loadingClassName,
         isRound && styles.round,
-        isText && styles.isText,
         isDestructive && styles.destructive,
         isClicked && styles.clicked,
         className,
@@ -100,6 +107,8 @@ function Button({
       disabled={isDisabled || isLoading}
       form={forFormId}
       onClick={handleClick}
+      onMouseDown={onMouseDown}
+      onContextMenu={onContextMenu}
     >
       {children}
       <LoadingDots isActive={isLoading} className={styles.loadingDots} />

@@ -1,27 +1,35 @@
-import React, { memo, useMemo, useState } from '../../lib/teact/teact';
-import { withGlobal } from '../../global';
+import React, { memo, useMemo } from '../../lib/teact/teact';
+import { getActions, withGlobal } from '../../global';
 
 import type { ApiChain } from '../../api/types';
+import type { Account } from '../../global/types';
 import type { TabWithProperties } from '../ui/TabList';
 
-import { selectAccount } from '../../global/selectors';
+import { DEFAULT_CHAIN } from '../../config';
+import {
+  selectCurrentAccount,
+  selectCurrentAccountId,
+  selectCurrentAccountState,
+} from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
+import { getChainTitle, getSupportedChains } from '../../util/chain';
+import { swapKeysAndValues } from '../../util/iteratees';
 
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
 import useLang from '../../hooks/useLang';
+import useLastCallback from '../../hooks/useLastCallback';
 
 import TabList from '../ui/TabList';
 import Transition from '../ui/Transition';
-import TonActions from './content/TonActions';
-import TonContent from './content/TonContent';
-import TronActions from './content/TronActions';
-import TronContent from './content/TronContent';
+import Actions from './content/Actions';
+import Address from './content/Address';
 
 import styles from './ReceiveModal.module.scss';
 
 interface StateProps {
-  addressByChain?: Record<ApiChain, string>;
+  accountChains?: Account['byChain'];
   isLedger?: boolean;
+  chain: ApiChain;
 }
 
 type OwnProps = {
@@ -30,85 +38,62 @@ type OwnProps = {
   onClose?: NoneToVoidFunction;
 };
 
-const TON_TAB_ID = 0;
-const TRON_TAB_ID = 1;
+const tabIdByChain = Object.fromEntries(
+  getSupportedChains().map((chain, index) => [chain, index]),
+) as Record<ReturnType<typeof getSupportedChains>[number], number>;
+
+const chainByTabId = swapKeysAndValues(tabIdByChain);
 
 function Content({
-  isOpen, addressByChain, isStatic, isLedger, onClose,
+  isOpen, accountChains, chain, isStatic, isLedger, onClose,
 }: StateProps & OwnProps) {
+  const { setReceiveActiveTab } = getActions();
+
   // `lang.code` is used to force redrawing of the `Transition` content,
   // since the height of the content differs from translation to translation.
   const lang = useLang();
-
   const { isPortrait } = useDeviceScreen();
 
-  const tabs = useMemo(() => {
-    const result: TabWithProperties[] = [];
-    if (addressByChain?.ton) {
-      result.push({
-        id: TON_TAB_ID,
-        title: 'TON',
-        className: styles.tab,
-      });
+  const tabs = useMemo(() => getChainTabs(accountChains ?? {}), [accountChains]);
+  const activeTab = tabIdByChain[chain];
+
+  const handleSwitchTab = useLastCallback((tabId: number) => {
+    const newChain = chainByTabId[tabId];
+    if (newChain) {
+      setReceiveActiveTab({ chain: newChain });
     }
-    if (addressByChain?.tron) {
-      result.push({
-        id: TRON_TAB_ID,
-        title: 'TRON',
-        className: styles.tab,
-      });
-    }
+  });
 
-    return result;
-  }, [addressByChain?.ton, addressByChain?.tron]);
+  function renderAddress(isActive: boolean, isFrom: boolean, currentKey: number) {
+    const chain = chainByTabId[currentKey];
 
-  const [activeTab, setActiveTab] = useState<number>(tabs.length ? tabs[0].id : 0);
-
-  function renderActions() {
-    if (tabs[activeTab]?.id === TRON_TAB_ID) {
-      return <TronActions isStatic />;
-    }
-
-    return <TonActions isStatic isLedger={isLedger} />;
+    return (
+      <Address
+        chain={chain}
+        isActive={isOpen && isActive}
+        isStatic={isStatic}
+        isLedger={isLedger}
+        address={accountChains?.[chain]?.address ?? ''}
+        onClose={onClose}
+      />
+    );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
-    switch (currentKey) {
-      case TON_TAB_ID:
-        return (
-          <TonContent
-            isActive={isOpen && isActive}
-            isStatic={isStatic}
-            isLedger={isLedger}
-            address={addressByChain!.ton}
-            onClose={onClose}
-          />
-        );
-
-      case TRON_TAB_ID:
-        return (
-          <TronContent
-            isActive={isOpen && isActive}
-            isStatic={isStatic}
-            address={addressByChain!.tron}
-            onClose={onClose}
-          />
-        );
-    }
+  if (!tabs.length) {
+    return undefined;
   }
 
   return (
     <>
-      {isStatic && renderActions()}
+      {isStatic && <Actions chain={chain} isStatic isLedger={isLedger} />}
 
       {tabs.length > 1 && (
         <TabList
-          withBorder
           tabs={tabs}
           activeTab={activeTab}
           className={buildClassName(styles.tabs, !isStatic && styles.tabsInModal)}
-          onSwitchTab={setActiveTab}
+          overlayClassName={buildClassName(styles.tabsOverlay, chain && styles[chain])}
+          onSwitchTab={handleSwitchTab}
         />
       )}
       <Transition
@@ -119,7 +104,7 @@ function Content({
         slideClassName={buildClassName(styles.content, isStatic && styles.contentStatic, 'custom-scroll')}
         shouldRestoreHeight={isStatic}
       >
-        {renderContent}
+        {renderAddress}
       </Transition>
     </>
   );
@@ -127,12 +112,32 @@ function Content({
 
 export default memo(
   withGlobal<OwnProps>((global): StateProps => {
-    const account = selectAccount(global, global.currentAccountId!);
+    const account = selectCurrentAccount(global);
+    const { receiveModalChain } = selectCurrentAccountState(global) || {};
 
     return {
-      addressByChain: account?.addressByChain,
-      isLedger: Boolean(account?.ledger),
+      accountChains: account?.byChain,
+      isLedger: account?.type === 'hardware',
+      chain: receiveModalChain ?? DEFAULT_CHAIN,
     };
   },
-  (global, _, stickToFirst) => stickToFirst(global.currentAccountId))(Content),
+  (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)))(Content),
 );
+
+function getChainTabs(accountChains: Partial<Record<ApiChain, unknown>>) {
+  const result: TabWithProperties[] = [];
+
+  for (const chain of getSupportedChains()) {
+    if (!(chain in accountChains)) {
+      continue;
+    }
+
+    result.push({
+      id: tabIdByChain[chain],
+      title: getChainTitle(chain),
+      className: buildClassName(styles.tab, styles[chain]),
+    });
+  }
+
+  return result;
+}

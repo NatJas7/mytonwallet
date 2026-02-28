@@ -5,6 +5,7 @@ import type { UserSwapToken, UserToken } from '../../global/types';
 
 import buildClassName from '../../util/buildClassName';
 import getChainNetworkIcon from '../../util/swap/getChainNetworkIcon';
+import { getIsNativeToken } from '../../util/tokens';
 import { ASSET_LOGO_PATHS } from '../ui/helpers/assetLogos';
 
 import useFlag from '../../hooks/useFlag';
@@ -14,7 +15,7 @@ import styles from './TokenIcon.module.scss';
 interface OwnProps {
   token: UserToken | UserSwapToken | ApiSwapAsset | ApiToken;
   withChainIcon?: boolean;
-  size?: 'small' | 'middle';
+  size?: 'x-small' | 'small' | 'middle' | 'large' | 'x-large';
   className?: string;
   iconClassName?: string;
   children?: TeactNode;
@@ -26,10 +27,11 @@ function TokenIcon({
   const { symbol, image, chain } = token;
   const logoPath = ASSET_LOGO_PATHS[symbol.toLowerCase() as keyof typeof ASSET_LOGO_PATHS] || image;
   const [isLoadingError, markLoadingError] = useFlag(false);
+  const isNativeToken = getIsNativeToken(token.slug);
 
   function renderDefaultIcon() {
     return (
-      <div className={buildClassName(styles.icon, size && styles[size], styles.fallbackIcon)}>
+      <div className={buildClassName(styles.icon, size && styles[size], iconClassName, styles.fallbackIcon)}>
         {token.symbol.slice(0, 1)}
       </div>
     );
@@ -48,7 +50,7 @@ function TokenIcon({
           />
         ) : renderDefaultIcon()
       }
-      {withChainIcon && chain && (
+      {withChainIcon && !isNativeToken && chain && (
         <img
           src={getChainNetworkIcon(chain)}
           alt=""

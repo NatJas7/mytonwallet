@@ -1,0 +1,50 @@
+@use "../../../../styles/mixins";
+
+// Uses AccountRowContent for base row styles, this file only contains
+// AccountWalletItem-specific overrides (context menu, draggable, etc.)
+
+.contentVisible {
+  z-index: calc(var(--z-menu-backdrop) + 1) !important;
+  background-color: var(--color-background-first);
+}
+
+.draggable {
+  z-index: auto;
+
+  > :global(.draggable-knob) {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 0.75rem;
+    transform: translateY(-50%);
+  }
+
+  @include mixins.separatorList(4rem);
+}
+
+// Overrides for AccountRowContent.row when used in AccountWalletItem
+.item {
+  cursor: var(--custom-cursor, pointer);
+
+  &:global(.open-context-menu) {
+    background-color: var(--color-background-first) !important;
+  }
+
+  &.draggableItem {
+    padding-left: 3rem;
+  }
+
+  @include mixins.respond-below(xs) {
+    // The menu background is only displayed on devices with portrait orientation
+    border-radius: var(--border-radius-default);
+  }
+}
+
+.verticalMenu {
+  --offset-y-value: -0.125rem;
+  --offset-y-bottom-value: -0.125rem;
+}
+
+.menuIcon {
+  font-size: 1.5rem;
+}

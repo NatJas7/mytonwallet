@@ -1,5 +1,5 @@
 import type { AccountState, GlobalState } from '../types';
-import { TransferState } from '../types';
+import { SignDataState, TransferState } from '../types';
 
 import { selectCurrentAccountState } from '../selectors';
 import { updateCurrentAccountState } from './misc';
@@ -41,11 +41,30 @@ export function updateCurrentDappTransfer(global: GlobalState, update: Partial<G
   };
 }
 
-export function clearCurrentDappTransfer(global: GlobalState) {
+export function clearCurrentDappTransfer(global: GlobalState): GlobalState {
   return {
     ...global,
     currentDappTransfer: {
       state: TransferState.None,
+    },
+  };
+}
+
+export function updateCurrentDappSignData(global: GlobalState, update: Partial<GlobalState['currentDappSignData']>) {
+  return {
+    ...global,
+    currentDappSignData: {
+      ...global.currentDappSignData,
+      ...update,
+    },
+  };
+}
+
+export function clearCurrentDappSignData(global: GlobalState): GlobalState {
+  return {
+    ...global,
+    currentDappSignData: {
+      state: SignDataState.None,
     },
   };
 }
@@ -55,14 +74,14 @@ export function updateConnectedDapps(global: GlobalState, update: AccountState['
 }
 
 export function clearConnectedDapps(global: GlobalState) {
-  return updateCurrentAccountState(global, { dapps: undefined, dappLastOpenedDatesByOrigin: undefined });
+  return updateCurrentAccountState(global, { dapps: undefined, dappLastOpenedDatesByUrl: undefined });
 }
 
-export function removeConnectedDapp(global: GlobalState, origin: string) {
-  const { dapps: connectedDapps, dappLastOpenedDatesByOrigin } = selectCurrentAccountState(global) || {};
-  if (dappLastOpenedDatesByOrigin) delete dappLastOpenedDatesByOrigin[origin];
+export function removeConnectedDapp(global: GlobalState, url: string) {
+  const { dapps: connectedDapps, dappLastOpenedDatesByUrl } = selectCurrentAccountState(global) || {};
+  if (dappLastOpenedDatesByUrl) delete dappLastOpenedDatesByUrl[url];
   return updateCurrentAccountState(global, {
-    dapps: connectedDapps!.filter((d) => d.origin !== origin),
-    dappLastOpenedDatesByOrigin,
+    dapps: connectedDapps!.filter((d) => d.url !== url),
+    dappLastOpenedDatesByUrl,
   });
 }

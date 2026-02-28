@@ -2,14 +2,16 @@ import React, { memo, useState } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiStakingState, ApiTokenWithPrice } from '../../api/types';
-import type { GlobalState, HardwareConnectState } from '../../global/types';
+import type { GlobalState } from '../../global/types';
 import { StakingState } from '../../global/types';
 
 import { IS_CAPACITOR } from '../../config';
 import {
   selectAccountStakingState,
+  selectCurrentAccountId,
   selectIsMultichainAccount,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import { toDecimal } from '../../util/decimals';
 import { formatCurrency } from '../../util/formatNumber';
@@ -36,9 +38,6 @@ import styles from './Staking.module.scss';
 type StateProps = GlobalState['currentStaking'] & {
   stakingState?: ApiStakingState;
   tokenBySlug?: Record<string, ApiTokenWithPrice>;
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
   isMultichainAccount: boolean;
 };
 
@@ -57,9 +56,6 @@ function StakeModal({
   amount,
   error,
   tokenBySlug,
-  hardwareState,
-  isLedgerConnected,
-  isTonAppConnected,
   isMultichainAccount,
 }: StateProps) {
   const {
@@ -67,8 +63,7 @@ function StakeModal({
     setStakingScreen,
     cancelStaking,
     clearStakingError,
-    submitStakingPassword,
-    submitStakingHardware,
+    submitStaking,
     openStakingInfo,
   } = getActions();
 
@@ -91,12 +86,12 @@ function StakeModal({
 
   const handleLedgerConnect = useLastCallback(() => {
     setRenderedStakingAmount(amount);
-    submitStakingHardware();
+    submitStaking();
   });
 
   const handleTransferSubmit = useLastCallback((password: string) => {
     setRenderedStakingAmount(amount);
-    submitStakingPassword({ password });
+    submitStaking({ password });
   });
 
   const handleViewStakingInfoClick = useLastCallback(() => {
@@ -113,22 +108,28 @@ function StakeModal({
         withChainIcon={isMultichainAccount}
         color="purple"
         text={formatCurrency(toDecimal(amount, token.decimals), token.symbol)}
-        className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
+        className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
       />
     );
   }
 
   function renderPassword(isActive: boolean) {
+    const placeholder = getDoesUsePinPad()
+      ? 'Confirm action with your passcode'
+      : 'Confirm action with your password';
+
     return (
       <>
-        {!IS_CAPACITOR && <ModalHeader title={lang('Confirm Staking')} onClose={cancelStaking} />}
+        {!getDoesUsePinPad() && (
+          <ModalHeader title={lang('Confirm Staking')} onClose={cancelStaking} />
+        )}
         <PasswordForm
           isActive={isActive}
           isLoading={isLoading}
           error={error}
           withCloseButton={IS_CAPACITOR}
           operationType="staking"
-          placeholder="Confirm operation with your password"
+          placeholder={lang(placeholder)}
           submitLabel={lang('Confirm')}
           cancelLabel={lang('Back')}
           onSubmit={handleTransferSubmit}
@@ -151,6 +152,7 @@ function StakeModal({
             color="purple"
             playAnimation={isActive}
             amount={renderedStakingAmount}
+            decimals={token?.decimals}
             tokenSymbol={token?.symbol}
             noSign
             firstButtonText={lang('View')}
@@ -167,8 +169,7 @@ function StakeModal({
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: StakingState) {
     switch (currentKey) {
       case StakingState.StakeInitial:
         return (
@@ -185,9 +186,6 @@ function StakeModal({
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isLedgerConnected={isLedgerConnected}
-            isTonAppConnected={isTonAppConnected}
             onConnected={handleLedgerConnect}
             onClose={cancelStaking}
           />
@@ -196,7 +194,7 @@ function StakeModal({
       case StakingState.StakeConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm operation on your Ledger')}
+            text={lang('Please confirm action on your Ledger')}
             error={error}
             onClose={cancelStaking}
             onTryAgain={handleLedgerConnect}
@@ -214,8 +212,6 @@ function StakeModal({
       hasCloseButton
       noBackdropClose
       dialogClassName={styles.modalDialog}
-      nativeBottomSheetKey="stake"
-      forceFullNative={renderingKey === StakingState.StakePassword}
       onClose={cancelStaking}
       onCloseAnimationEnd={updateNextKey}
     >
@@ -234,24 +230,15 @@ function StakeModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const accountId = global.currentAccountId!;
+  const accountId = selectCurrentAccountId(global)!;
   const isMultichainAccount = selectIsMultichainAccount(global, accountId);
   const stakingState = selectAccountStakingState(global, accountId);
   const tokenBySlug = global.tokenInfo.bySlug;
-
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
 
   return {
     ...global.currentStaking,
     stakingState,
     tokenBySlug,
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
     isMultichainAccount,
   };
 })(StakeModal));

@@ -1,28 +1,39 @@
 import type { ApiBaseCurrency, ApiHistoryList, ApiPriceHistoryPeriod } from '../types';
 
-import { DEFAULT_PRICE_CURRENCY, TONCOIN } from '../../config';
+import { DEFAULT_PRICE_CURRENCY } from '../../config';
 import { callBackendGet } from '../common/backend';
-import { waitDataPreload } from './preload';
-import { getTokenBySlug } from './tokens';
-
-export { setBaseCurrency, getBaseCurrency } from '../common/prices';
+import { getTokenBySlug, tokensPreload } from '../common/tokens';
 
 export async function fetchPriceHistory(
   slug: string,
   period: ApiPriceHistoryPeriod,
   baseCurrency: ApiBaseCurrency = DEFAULT_PRICE_CURRENCY,
 ): Promise<ApiHistoryList | undefined> {
-  await waitDataPreload();
+  await tokensPreload.promise;
   const token = getTokenBySlug(slug);
 
   if (!token) {
     return [];
   }
 
-  const assetId = token.chain === TONCOIN.chain && token.tokenAddress ? token.tokenAddress : token.symbol;
+  const assetId = `${token.chain}:${token.tokenAddress ?? token.symbol}`;
 
-  return callBackendGet(`/prices/chart/${assetId}`, {
+  return callBackendGet<ApiHistoryList>(`/prices/chart/${assetId}`, {
     base: baseCurrency,
     period,
+  });
+}
+
+export async function fetchTokenNetWorthHistory(
+  accountAddress: string,
+  assetId: string,
+  period: ApiPriceHistoryPeriod,
+  baseCurrency: ApiBaseCurrency = DEFAULT_PRICE_CURRENCY,
+): Promise<ApiHistoryList | { error: string }> {
+  return callBackendGet('/portfolio/net-worth-by-asset', {
+    base: baseCurrency,
+    period,
+    walletAddress: accountAddress,
+    assetAddress: assetId,
   });
 }

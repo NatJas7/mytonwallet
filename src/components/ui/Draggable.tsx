@@ -1,13 +1,12 @@
-import type { RefObject } from 'react';
-import { BottomSheet } from 'native-bottom-sheet';
+import type { TeactNode } from '../../lib/teact/teact';
 import React, {
+  type ElementRef,
   memo, useEffect, useMemo, useRef, useState,
 } from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
 import buildStyle from '../../util/buildStyle';
 import { clamp } from '../../util/math';
-import { IS_DELEGATED_BOTTOM_SHEET } from '../../util/windowEnvironment';
 
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
@@ -36,7 +35,7 @@ type DraggableState = {
 };
 
 type OwnProps = {
-  children: React.ReactNode;
+  children: TeactNode;
   onDrag: (translation: TPoint, id: number | string) => void;
   onDragEnd: NoneToVoidFunction;
   id: number | string;
@@ -44,8 +43,8 @@ type OwnProps = {
   knobStyle?: string;
   isDisabled?: boolean;
   offset?: Offset;
-  parentRef?: RefObject<HTMLDivElement>;
-  scrollRef?: RefObject<HTMLDivElement>;
+  parentRef?: ElementRef<HTMLDivElement>;
+  scrollRef?: ElementRef<HTMLDivElement>;
   className?: string;
   onClick: (e: React.MouseEvent | React.TouchEvent) => void;
 };
@@ -76,11 +75,8 @@ function Draggable({
   onClick,
 }: OwnProps) {
   const lang = useLang();
-  // eslint-disable-next-line no-null/no-null
-  const ref = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const buttonRef = useRef<HTMLDivElement>(null);
-
+  const ref = useRef<HTMLDivElement>();
+  const buttonRef = useRef<HTMLDivElement>();
   const scrollIntervalId = useRef<number>();
 
   const [state, setState] = useState<DraggableState>({
@@ -152,10 +148,6 @@ function Draggable({
     e.stopPropagation();
     e.preventDefault();
     setInitialState(e);
-
-    if (IS_DELEGATED_BOTTOM_SHEET) {
-      void BottomSheet.clearScrollPatch();
-    }
   });
 
   const handleMouseMove = useLastCallback((e: MouseEvent | TouchEvent) => {
@@ -206,10 +198,6 @@ function Draggable({
       width: undefined,
       height: undefined,
     }));
-
-    if (IS_DELEGATED_BOTTOM_SHEET) {
-      void BottomSheet.applyScrollPatch();
-    }
 
     onDragEnd();
   });

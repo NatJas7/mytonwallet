@@ -22,13 +22,13 @@ interface OwnProps {
 function DeleteSavedAddressModal({
   isOpen, address, chain, onClose,
 }: OwnProps) {
-  const { removeFromSavedAddress, showNotification } = getActions();
+  const { removeFromSavedAddress, showToast } = getActions();
 
   const lang = useLang();
 
   const handleDeleteSavedAddress = useLastCallback(() => {
     removeFromSavedAddress({ address: address!, chain: chain! });
-    showNotification({ message: lang('Address removed from saved') as string, icon: 'icon-trash' });
+    showToast({ message: lang('Address removed from saved'), icon: 'icon-trash' });
     onClose();
   });
 
@@ -41,7 +41,7 @@ function DeleteSavedAddressModal({
     >
       <p className={styles.text}>{lang('Are you sure you want to remove this address from your saved ones?')}</p>
 
-      <p className={styles.text}>{lang('You will be able to save it again via Transaction Info with this address.')}</p>
+      <p className={styles.text}>{lang('You will be able to save it again via Transfer Info with this address.')}</p>
 
       <div className={modalStyles.buttons}>
         <Button onClick={onClose} className={modalStyles.button}>{lang('Cancel')}</Button>

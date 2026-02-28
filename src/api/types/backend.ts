@@ -1,6 +1,9 @@
 import type { DieselStatus } from '../../global/types';
+import type { StakingPoolConfig } from '../chains/ton/contracts/JettonStaking/StakingPool';
 import type { ApiTonWalletVersion } from '../chains/ton/types';
-import type { ApiLoyaltyType } from './misc';
+import type { ApiCountryCode, ApiLoyaltyType, ApiMtwCardType, ApiTokenWithPrice } from './misc';
+
+export type ApiTokenDetails = Pick<ApiTokenWithPrice, 'slug' | 'type' | 'priceUsd' | 'percentChange24h'>;
 
 export type ApiSwapDexLabel = 'dedust' | 'ston';
 
@@ -18,12 +21,36 @@ export type ApiSwapEstimateRequest = {
   isFromAmountMax?: boolean;
 };
 
+export type ApiSwapMinter = 'native' | `jetton:${string}`; // jetton:<raw_address>
+
+export type ApiSwapProtocol = ([
+  'dedust',
+  'stonfi_v1',
+  'stonfi_v2',
+  'tonco',
+  'memeslab',
+  'tonfun',
+])[number];
+
+export type ApiSwapRoute = {
+  pool_address: string;
+  is_stable: boolean;
+  in_minter: ApiSwapMinter;
+  out_minter: ApiSwapMinter;
+  in_amount: string;
+  out_amount: string;
+  network_fee: string;
+  protocol_slug: ApiSwapProtocol;
+};
+
 export type ApiSwapEstimateVariant = {
   fromAmount: string;
   toAmount: string;
   toMinAmount: string;
   impact: number;
   dexLabel: ApiSwapDexLabel;
+  other?: ApiSwapEstimateVariant[];
+  routes?: ApiSwapRoute[][];
   // Fees
   networkFee: string;
   realNetworkFee: string;
@@ -40,7 +67,8 @@ export type ApiSwapEstimateResponse = ApiSwapEstimateRequest & {
   impact: number;
   dexLabel: ApiSwapDexLabel;
   dieselStatus: DieselStatus;
-  other?: ApiSwapEstimateVariant[];
+  other?: ApiSwapEstimateVariant[]; // Only in V2
+  routes?: ApiSwapRoute[][]; // Only in V3
   // Fees
   networkFee: string;
   realNetworkFee: string;
@@ -52,20 +80,21 @@ export type ApiSwapEstimateResponse = ApiSwapEstimateRequest & {
 };
 
 export type ApiSwapBuildRequest = Pick<ApiSwapEstimateResponse,
-'from'
-| 'to'
-| 'fromAddress'
-| 'dexLabel'
-| 'fromAmount'
-| 'toAmount'
-| 'toMinAmount'
-| 'slippage'
-| 'shouldTryDiesel'
-| 'swapVersion'
-| 'networkFee'
-| 'swapFee'
-| 'ourFee'
-| 'dieselFee'
+  'from'
+  | 'to'
+  | 'fromAddress'
+  | 'dexLabel'
+  | 'fromAmount'
+  | 'toAmount'
+  | 'toMinAmount'
+  | 'slippage'
+  | 'shouldTryDiesel'
+  | 'swapVersion'
+  | 'networkFee'
+  | 'swapFee'
+  | 'ourFee'
+  | 'dieselFee'
+  | 'routes'
 > & {
   walletVersion?: ApiTonWalletVersion;
 };
@@ -89,16 +118,13 @@ export type ApiSwapAsset = {
   slug: string;
   decimals: number;
   isPopular: boolean;
-  price: number;
   priceUsd: number;
   image?: string;
   tokenAddress?: string;
   keywords?: string[];
   color?: string;
-};
-
-export type ApiSwapTonAsset = ApiSwapAsset & {
-  chain: 'ton';
+  /** A small dim label to show in the UI right after the token name */
+  label?: string;
 };
 
 export type ApiSwapPairAsset = {
@@ -108,32 +134,54 @@ export type ApiSwapPairAsset = {
   isReverseProhibited?: boolean;
 };
 
-export type ApiSwapHistoryItem = {
+export type ApiSwapHistoryItem = BaseApiSwapHistoryItem & {
   id: string;
   timestamp: number;
   lt?: number;
-  from: string;
-  fromAmount: string;
-  to: string;
-  toAmount: string;
-  networkFee: string;
-  swapFee: string;
   ourFee?: string;
-  status: 'pending' | 'completed' | 'failed' | 'expired';
-  txIds: string[];
+  /**
+   * Swap confirmation status
+   * Both 'pendingTrusted' and 'pending' mean the swap is awaiting confirmation by the blockchain.
+   * - 'pendingTrusted' — awaiting confirmation and trusted (initiated by our app).
+   * - 'pending' — awaiting confirmation from an external/unauthenticated source.
+   * - 'confirmed' — included in a shardblock but not yet finalized in the masterchain.
+   *
+   * There are two backends: ToncenterApi and our backend.
+   * Swaps returned by ToncenterApi have the status 'pending'.
+   * Swaps returned by our backend also have the status 'pending', but they are meant to be 'pendingTrusted'.
+   * When an activity reaches the `GlobalState`, it already has the correct status set.
+   *
+   * TODO: Replace the status 'pending' with 'pendingTrusted' on our backend once all clients are updated.
+   */
+  status: 'pending' | 'pendingTrusted' | 'confirmed' | 'completed' | 'failed' | 'expired';
+  hashes: string[];
   isCanceled?: boolean;
   cex?: {
+    /** The address to send the "from" token to */
     payinAddress: string;
+    /** The address where the "to" token will be sent to */
     payoutAddress: string;
+    /** The memo to use with the "from" token sending transaction */
     payinExtraId?: string;
     status: ApiSwapCexTransactionStatus;
     transactionId: string;
   };
 };
 
+export type BaseApiSwapHistoryItem = {
+  from: string;
+  fromAmount: string;
+  fromAddress: string;
+  to: string;
+  toAmount: string;
+  /** The real fee in the chain's native token */
+  networkFee: string;
+  swapFee: string;
+};
+
 // Cross-chain centralized swap
 type ApiSwapCexTransactionStatus = 'new' | 'waiting' | 'confirming' | 'exchanging' | 'sending' | 'finished'
-| 'failed' | 'refunded' | 'hold' | 'overdue' | 'expired';
+  | 'failed' | 'refunded' | 'hold' | 'overdue' | 'expired';
 
 export type ApiSwapCexEstimateRequest = {
   from: string;
@@ -155,12 +203,16 @@ export type ApiSwapCexEstimateResponse = {
 export type ApiSwapCexCreateTransactionRequest = {
   from: string;
   fromAmount: string;
-  fromAddress: string; // Always TON address
+  /** Always TON address */
+  fromAddress: string;
   to: string;
-  toAddress: string; // TON or other crypto address
+  /** Any chain address */
+  toAddress: string;
   payoutExtraId?: string;
-  swapFee: string; // from estimate request
-  networkFee?: string; // only for sent TON
+  /** From the estimate request */
+  swapFee: string;
+  /** Measured in the "from" chain's native token */
+  networkFee?: string;
 };
 
 export type ApiSwapCexCreateTransactionResponse = {
@@ -171,6 +223,7 @@ export type ApiSwapCexCreateTransactionResponse = {
 // Staking
 export type ApiStakingJettonPool = {
   pool: string;
+  poolConfig: StakingPoolConfig;
   token: string;
   periods: {
     period: number;
@@ -179,16 +232,16 @@ export type ApiStakingJettonPool = {
   }[];
 };
 
-export type ApiStakingCommonData = {
+/** Note: all the timestamps are in Unix seconds */
+export type ApiStakingCommonResponse = {
   liquid: {
     currentRate: number;
     nextRoundRate: number;
     collection?: string;
     apy: number;
-    available: bigint;
-    loyaltyApy: {
-      [key in ApiLoyaltyType]: number;
-    };
+    /** The string is a floating point number */
+    available: string;
+    loyaltyApy: Record<ApiLoyaltyType, number>;
   };
   round: {
     start: number;
@@ -200,8 +253,22 @@ export type ApiStakingCommonData = {
     end: number;
     unlock: number;
   };
-  jettonPools: ApiStakingJettonPool[];
+  jettonPools: Omit<ApiStakingJettonPool, 'poolConfig'>[];
+  ethena: {
+    apy: number;
+    apyVerified: number;
+    rate: number;
+    isDisabled?: boolean;
+  };
 };
+
+/** Note: all timestamps are in Unix milliseconds */
+export type ApiStakingCommonData = Override<ApiStakingCommonResponse, {
+  liquid: Override<ApiStakingCommonResponse['liquid'], {
+    available: bigint;
+  }>;
+  jettonPools: ApiStakingJettonPool[];
+}>;
 
 export type ApiSite = {
   url: string;
@@ -212,11 +279,13 @@ export type ApiSite = {
   canBeRestricted: boolean;
   isExternal: boolean;
   isFeatured?: boolean;
+  isVerified?: boolean;
   categoryId?: number;
 
   extendedIcon?: string;
   badgeText?: string;
   withBorder?: boolean;
+  borderColor?: [string, string?];
 };
 
 export type ApiSiteCategory = {
@@ -242,4 +311,62 @@ export type ApiVestingInfo = {
     amount: number;
     status: ApiVestingPartStatus;
   }[];
+};
+
+export type ApiCardInfo = {
+  all: number;
+  notMinted: number;
+  price: number;
+};
+
+export type ApiCardsInfo = Record<ApiMtwCardType, ApiCardInfo>;
+
+export type ApiAccountConfig = {
+  cardsInfo?: ApiCardsInfo;
+  activePromotion?: ApiPromotion;
+};
+
+export type ApiSwapVersion = 2 | 3;
+
+export type ApiPromotion = {
+  id: string;
+  kind: 'cardOverlay';
+  cardOverlay: {
+    mascotIcon?: {
+      url: string;
+      top: number;
+      right: number;
+      height: number;
+      width: number;
+      rotation: number;
+    };
+    onClickAction: 'openPromotionModal' | 'openMintCardModal';
+  };
+  modal?: {
+    backgroundImageUrl: string;
+    backgroundFallback: string;
+    heroImageUrl?: string;
+    title: string;
+    titleColor?: string;
+    description: string;
+    descriptionColor?: string;
+    availabilityIndicator?: string;
+    actionButton?: {
+      title: string;
+      url: string;
+    };
+  };
+};
+
+export type ApiBackendConfig = {
+  isLimited: boolean;
+  isCopyStorageEnabled?: boolean;
+  supportAccountsCount?: number;
+  now: number;
+  country: ApiCountryCode;
+  isUpdateRequired: boolean;
+  isVestingEnabled?: boolean;
+  isWebSocketEnabled?: boolean;
+  swapVersion?: ApiSwapVersion;
+  seasonalTheme?: 'newYear' | 'valentine';
 };

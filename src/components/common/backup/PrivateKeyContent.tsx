@@ -42,20 +42,20 @@ function SecretWordsContent({
       <p className={buildClassName(styles.info, styles.small)}>
         {renderText(lang('$private_key_description'))}
       </p>
-      <p className={buildClassName(styles.warning)}>
+      <p className={styles.warning}>
         {renderText(lang('$mnemonic_warning'))}
       </p>
       <InteractiveTextField
         noExplorer
         text={privateKey}
-        copyNotification={lang('Your private key was copied!')}
+        copyNotification={lang('Private Key Copied')}
       />
 
       <div className={styles.buttonWrapper}>
         <Button
           isPrimary
-          onClick={onSubmit}
           className={styles.footerButton}
+          onClick={onSubmit}
         >
           {buttonText}
         </Button>

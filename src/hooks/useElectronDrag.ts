@@ -1,11 +1,10 @@
-import type { RefObject } from 'react';
-import { useEffect, useRef } from '../lib/teact/teact';
+import { type ElementRef, useEffect, useRef } from '../lib/teact/teact';
 
 import { IS_ELECTRON, IS_MAC_OS } from '../util/windowEnvironment';
 
 const DRAG_DISTANCE_THRESHOLD = 5;
 
-const useElectronDrag = (ref: RefObject<HTMLDivElement>) => {
+const useElectronDrag = (ref: ElementRef<HTMLDivElement>) => {
   const isDragging = useRef(false);
 
   const x = useRef(window.screenX);
@@ -13,7 +12,7 @@ const useElectronDrag = (ref: RefObject<HTMLDivElement>) => {
   const distance = useRef(0);
 
   useEffect(() => {
-    const element: HTMLDivElement | null = ref.current;
+    const element = ref.current;
     if (!element || !(IS_ELECTRON && IS_MAC_OS)) return undefined;
 
     const handleClick = (event: MouseEvent) => {
@@ -48,7 +47,7 @@ const useElectronDrag = (ref: RefObject<HTMLDivElement>) => {
 
     const handleDoubleClick = (event: MouseEvent) => {
       if (event.currentTarget === event.target) {
-        window.electron?.handleDoubleClick();
+        void window.electron?.handleDoubleClick();
       }
     };
 
@@ -59,7 +58,7 @@ const useElectronDrag = (ref: RefObject<HTMLDivElement>) => {
 
     return () => {
       element.removeEventListener('click', handleClick);
-      element.removeEventListener('mouseup', handleMousedown);
+      element.removeEventListener('mousedown', handleMousedown);
       element.removeEventListener('mousemove', handleDrag);
       element.removeEventListener('dblclick', handleDoubleClick);
     };

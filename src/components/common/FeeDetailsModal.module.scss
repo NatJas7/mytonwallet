@@ -1,9 +1,8 @@
 $chartPadding: 0.75rem;
 $chartLineInnerPadding: 0.375rem;
-$chartLineInnerRadius: 0.1875rem;
 
-.chart {
-  margin-bottom: 1.875rem;
+.content {
+  gap: 2rem;
 }
 
 .chartLabels {
@@ -32,37 +31,35 @@ $chartLineInnerRadius: 0.1875rem;
 .chartLines {
   display: flex;
   gap: 0.1875rem;
-
   font-weight: 600;
 }
 
 .chartLine {
   padding: 0.6875rem $chartPadding 0.625rem;
-
-  border-radius: 0.5rem;
+  border-radius: var(--border-radius-tiny);
 
   &.realFee {
     flex: 1 1 auto;
 
     padding-inline-end: $chartLineInnerPadding;
+    border-start-end-radius: var(--border-radius-micro);
+    border-end-end-radius: var(--border-radius-micro);
 
     color: var(--color-accent-button-text);
 
     background: var(--color-accent-button-background);
-    border-start-end-radius: $chartLineInnerRadius;
-    border-end-end-radius: $chartLineInnerRadius;
   }
 
   &.excessFee {
-    flex: 10 1 auto;
+    flex: 2 1 auto;
 
     padding-inline-start: $chartLineInnerPadding;
+    border-start-start-radius: var(--border-radius-micro);
+    border-end-start-radius: var(--border-radius-micro);
 
     color: var(--color-white);
 
     background: var(--color-activity-green-text);
-    border-start-start-radius: $chartLineInnerRadius;
-    border-end-start-radius: $chartLineInnerRadius;
   }
 }
 
@@ -77,11 +74,6 @@ $chartLineInnerRadius: 0.1875rem;
 .explanation {
   display: flex;
   flex-direction: column;
-  gap: 1.267em;
-
-  margin: 0 0.5rem 1.875rem;
-}
-
-.explanationBlock {
-  margin: 0;
+  gap: 1.1875rem;
+  margin: 0 0.5rem;
 }

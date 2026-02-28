@@ -1,12 +1,12 @@
 import type { ApiStakingState } from '../../api/types';
-import type { GlobalState } from '../types';
+import type { Account, GlobalState } from '../types';
 
-import { TONCOIN } from '../../config';
+import { DEFAULT_NOMINATORS_STAKING_STATE, IS_STAKING_DISABLED, TONCOIN } from '../../config';
+import { buildCollectionByKey } from '../../util/iteratees';
 import memoize from '../../util/memoize';
 import withCache from '../../util/withCache';
 import { selectAccountState } from './accounts';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const selectAccountStakingStatesMemoizedFor = withCache((accountId: string) => memoize((
   stateDefault: ApiStakingState,
   stateById?: Record<string, ApiStakingState>,
@@ -20,10 +20,19 @@ export function selectAccountStakingStates(global: GlobalState, accountId: strin
   return selectAccountStakingStatesMemoizedFor(accountId)(global.stakingDefault, stateById);
 }
 
+const selectAccountStakingStatesBySlugMemoizedFor = withCache((accountId: string) => memoize(
+  (stakingStates: ApiStakingState[]) => buildCollectionByKey(stakingStates, 'tokenSlug'),
+));
+
+export function selectAccountStakingStatesBySlug(global: GlobalState, accountId: string) {
+  return selectAccountStakingStatesBySlugMemoizedFor(accountId)(selectAccountStakingStates(global, accountId));
+}
+
 export function selectAccountStakingState(global: GlobalState, accountId: string): ApiStakingState {
-  const { stateById, stakingId } = selectAccountState(global, accountId)?.staking ?? {};
+  const { stateById, stakingId, shouldUseNominators } = selectAccountState(global, accountId)?.staking ?? {};
+
   if (!stateById || !stakingId || !(stakingId in stateById)) {
-    return global.stakingDefault;
+    return shouldUseNominators ? DEFAULT_NOMINATORS_STAKING_STATE : global.stakingDefault;
   }
 
   return stateById[stakingId];
@@ -39,4 +48,24 @@ export function selectAccountStakingTotalProfit(global: GlobalState, accountId: 
   const accountState = selectAccountState(global, accountId);
   const stakingState = selectAccountStakingState(global, accountId);
   return (stakingState.tokenSlug === TONCOIN.slug ? accountState?.staking?.totalProfit : undefined) ?? 0n;
+}
+
+export function selectIsStakingDisabled(global: GlobalState) {
+  return Boolean(IS_STAKING_DISABLED || global.settings.isTestnet);
+}
+
+export function selectMultipleAccountsStakingStatesSlow(
+  networkAccounts: Record<string, Account> | undefined,
+  byAccountId: GlobalState['byAccountId'],
+  stakingDefault: ApiStakingState,
+) {
+  const result: Record<string, ApiStakingState[] | undefined> = {};
+  if (networkAccounts === undefined) return result;
+
+  for (const accountId in networkAccounts) {
+    const { stateById } = byAccountId[accountId]?.staking ?? {};
+    result[accountId] = selectAccountStakingStatesMemoizedFor(accountId)(stakingDefault, stateById);
+  }
+
+  return result;
 }

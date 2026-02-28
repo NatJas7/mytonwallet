@@ -1,139 +1,175 @@
 import React, { memo, useMemo, useState } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { UserToken } from '../../global/types';
-import type { DropdownItem } from '../ui/Dropdown';
+import type { ApiTokenWithPrice } from '../../api/types';
+import type { Account, UserSwapToken, UserToken } from '../../global/types';
 
-import { TONCOIN } from '../../config';
+import { DEFAULT_CHAIN, IS_CAPACITOR } from '../../config';
 import renderText from '../../global/helpers/renderText';
-import { selectAccount, selectCurrentAccountTokens } from '../../global/selectors';
-import { fromDecimal, toDecimal } from '../../util/decimals';
-import formatTransferUrl from '../../util/ton/formatTransferUrl';
-import { ASSET_LOGO_PATHS } from '../ui/helpers/assetLogos';
+import { selectCurrentAccount, selectCurrentAccountState } from '../../global/selectors';
+import buildClassName from '../../util/buildClassName';
+import { getChainConfig } from '../../util/chain';
+import { fromDecimal } from '../../util/decimals';
+import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
+import { getChainBySlug } from '../../util/tokens';
 
+import useFlag from '../../hooks/useFlag';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 
-import Dropdown from '../ui/Dropdown';
+import SelectTokenButton from '../common/SelectTokenButton';
+import TokenSelector from '../common/TokenSelector';
 import Input from '../ui/Input';
 import InteractiveTextField from '../ui/InteractiveTextField';
 import Modal from '../ui/Modal';
+import ModalHeader from '../ui/ModalHeader';
 import RichNumberInput from '../ui/RichNumberInput';
+import Transition from '../ui/Transition';
 
+import modalStyles from '../ui/Modal.module.scss';
 import styles from './ReceiveModal.module.scss';
 
 interface StateProps {
   isOpen?: boolean;
-  address?: string;
-  tokens?: UserToken[];
+  tokenSlug?: string;
+  tokensBySlug?: Record<string, ApiTokenWithPrice>;
+  byChain?: Account['byChain'];
+}
+
+const enum SLIDES {
+  Initial,
+  Selector,
 }
 
 function InvoiceModal({
-  address,
+  byChain,
+  tokenSlug,
+  tokensBySlug,
   isOpen,
-  tokens,
 }: StateProps) {
-  const { closeInvoiceModal } = getActions();
+  const { changeInvoiceToken, closeInvoiceModal } = getActions();
+
+  const selectedChain = tokenSlug ? getChainBySlug(tokenSlug) : DEFAULT_CHAIN;
+  const { isTransferPayloadSupported, nativeToken, formatTransferUrl } = getChainConfig(selectedChain);
+  const selectedToken = (tokenSlug && tokensBySlug?.[tokenSlug]) || nativeToken;
+  const address = byChain?.[selectedChain]?.address;
 
   const lang = useLang();
-
-  const [amount, setAmount] = useState<bigint | undefined>(undefined);
+  const [isTokenSelectorOpen, openTokenSelector, closeTokenSelector] = useFlag(false);
+  const [amountValue, setAmountValue] = useState<string | undefined>(undefined);
   const [comment, setComment] = useState<string>('');
-  const [hasAmountError, setHasAmountError] = useState<boolean>(false);
 
-  const invoiceUrl = address ? formatTransferUrl(address, amount, comment) : '';
-  const decimals = TONCOIN.decimals; // TODO Change it after token selection is supported
+  const avalableChains = useMemo(
+    () => byChain
+      ? (Object.keys(byChain) as (keyof typeof byChain)[]).filter((chain) => getChainConfig(chain).formatTransferUrl)
+      : [],
+    [byChain],
+  );
 
-  const dropdownItems = useMemo(() => {
-    if (!tokens) {
-      return [];
-    }
+  const amount = amountValue ? fromDecimal(amountValue, selectedToken.decimals) : 0n;
+  const tokenAddress = 'tokenAddress' in selectedToken ? selectedToken?.tokenAddress : undefined;
+  const invoiceUrl = address && formatTransferUrl ? formatTransferUrl(address, amount, comment, tokenAddress) : '';
 
-    return tokens.reduce<DropdownItem[]>((acc, token) => {
-      if (token.slug === TONCOIN.slug) {
-        acc.push({
-          value: token.slug,
-          icon: token.image || ASSET_LOGO_PATHS[token.symbol.toLowerCase() as keyof typeof ASSET_LOGO_PATHS],
-          name: token.symbol,
-        });
-      }
-
-      return acc;
-    }, []);
-  }, [tokens]);
-
-  const handleAmountInput = useLastCallback((stringValue?: string) => {
-    setHasAmountError(false);
-
-    if (!stringValue) {
-      setAmount(undefined);
-      return;
-    }
-
-    const value = fromDecimal(stringValue, decimals);
-
-    if (value < 0) {
-      setHasAmountError(true);
-      return;
-    }
-
-    setAmount(value);
+  const handleTokenSelect = useLastCallback((token: UserToken | UserSwapToken) => {
+    changeInvoiceToken({ tokenSlug: token.slug });
   });
 
-  function renderTokens() {
-    return <Dropdown items={dropdownItems} selectedValue={TONCOIN.slug} className={styles.tokenDropdown} />;
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: SLIDES) {
+    switch (currentKey) {
+      case SLIDES.Initial:
+        return (
+          <>
+            <ModalHeader
+              title={lang('Deposit Link')}
+              onClose={closeInvoiceModal}
+            />
+            <div className={styles.content}>
+              <div className={styles.contentTitle}>
+                {renderText(lang('$receive_invoice_description'))}
+              </div>
+              <RichNumberInput
+                key="amount"
+                id="amount"
+                value={amountValue}
+                labelText={lang('Amount')}
+                onChange={setAmountValue}
+              >
+                <SelectTokenButton
+                  noChainIcon={avalableChains.length <= 1}
+                  token={selectedToken}
+                  className={styles.tokenButton}
+                  onClick={openTokenSelector}
+                />
+              </RichNumberInput>
+              {isTransferPayloadSupported && (
+                <Input
+                  value={comment}
+                  label={lang('Comment')}
+                  placeholder={lang('Optional')}
+                  wrapperClassName={styles.invoiceComment}
+                  onInput={setComment}
+                />
+              )}
+
+              <p className={styles.labelForInvoice}>
+                {lang('Share this URL to receive %token%', { token: selectedToken?.symbol })}
+              </p>
+              <InteractiveTextField
+                text={invoiceUrl}
+                addressUrl={IS_CAPACITOR ? invoiceUrl : undefined}
+                noExplorer
+                withShareInMenu={IS_CAPACITOR}
+                copyNotification={lang('Invoice Link Copied')}
+                className={styles.invoiceLinkField}
+              />
+            </div>
+          </>
+        );
+
+      case SLIDES.Selector:
+        return (
+          <TokenSelector
+            isActive={isActive}
+            shouldHideNotSupportedTokens
+            selectedChain={avalableChains}
+            onTokenSelect={handleTokenSelect}
+            onBack={closeTokenSelector}
+            onClose={closeInvoiceModal}
+          />
+        );
+    }
   }
 
   return (
     <Modal
       isOpen={isOpen}
-      hasCloseButton
-      title={lang('Deposit Link')}
-      contentClassName={styles.content}
-      nativeBottomSheetKey="invoice"
+      dialogClassName={styles.modalDialog}
       onClose={closeInvoiceModal}
+      onCloseAnimationEnd={closeTokenSelector}
     >
-      <div className={styles.contentTitle}>
-        {renderText(lang('$receive_invoice_description'))}
-      </div>
-      <RichNumberInput
-        key="amount"
-        id="amount"
-        hasError={hasAmountError}
-        value={amount === undefined ? undefined : toDecimal(amount)}
-        labelText={lang('Amount')}
-        onChange={handleAmountInput}
+      <Transition
+        name={resolveSlideTransitionName()}
+        className={buildClassName(modalStyles.transition, 'custom-scroll')}
+        slideClassName={modalStyles.transitionSlide}
+        activeKey={isTokenSelectorOpen ? SLIDES.Selector : SLIDES.Initial}
+        nextKey={isTokenSelectorOpen ? SLIDES.Initial : SLIDES.Selector}
       >
-        {renderTokens()}
-      </RichNumberInput>
-      <Input
-        value={comment}
-        label={lang('Comment')}
-        placeholder={lang('Optional')}
-        wrapperClassName={styles.invoiceComment}
-        onInput={setComment}
-      />
-
-      <p className={styles.labelForInvoice}>
-        {lang('Share this URL to receive TON')}
-      </p>
-      <InteractiveTextField
-        text={invoiceUrl}
-        copyNotification={lang('Invoice link was copied!')}
-        className={styles.invoiceLinkField}
-      />
+        {renderContent}
+      </Transition>
     </Modal>
   );
 }
 
 export default memo(
   withGlobal((global): StateProps => {
-    const address = selectAccount(global, global.currentAccountId!)?.addressByChain?.ton;
+    const account = selectCurrentAccount(global);
+    const { invoiceTokenSlug } = selectCurrentAccountState(global) || {};
 
     return {
       isOpen: global.isInvoiceModalOpen,
-      address,
-      tokens: selectCurrentAccountTokens(global),
+      tokenSlug: invoiceTokenSlug,
+      tokensBySlug: global.tokenInfo?.bySlug,
+      byChain: account?.byChain,
     };
   })(InvoiceModal),
 );

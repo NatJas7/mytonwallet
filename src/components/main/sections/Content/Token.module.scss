@@ -1,8 +1,14 @@
 @use "sass:color";
 
-@import "../../../../styles/mixins";
+@use "../../../../styles/mixins";
 
 .container {
+  position: relative;
+  width: 100%;
+}
+
+.button {
+  --border-radius-value: 0.25rem;
   --color-dot: var(--color-gray-2);
 
   position: relative;
@@ -12,29 +18,11 @@
   justify-content: center;
 
   width: 100%;
-  padding: 0.875rem 0.875rem 0.875rem 0.75rem;
+  padding: 0.75rem 0.875rem 0.75rem 0.75rem;
 
   color: var(--color-black);
 
-  &:not(:last-of-type) {
-    &::after {
-      content: '';
-
-      position: absolute;
-      right: 0;
-      bottom: 0;
-      left: 3.625rem;
-
-      height: 0.0625rem;
-      /* stylelint-disable-next-line plugin/whole-pixel */
-      box-shadow: inset 0 -0.025rem 0 0 var(--color-separator);
-
-      :global(html.is-android) &,
-      :global(html.is-ios) & {
-        left: 4rem;
-      }
-    }
-  }
+  background: var(--color-background-first);
 
   @media (hover: hover) {
     &:focus-visible,
@@ -45,6 +33,10 @@
       .percent {
         background-color: var(--color-interactive-item-hover);
       }
+
+      .readyToClaim {
+        color: var(--color-interactive-item-hover);
+      }
     }
   }
 
@@ -54,6 +46,10 @@
     .vestingIcon,
     .percent {
       background-color: var(--color-interactive-item-hover);
+    }
+
+    .readyToClaim {
+      color: var(--color-interactive-item-hover);
     }
   }
 
@@ -70,8 +66,9 @@
 
 .iconArrow {
   margin: 0 0.125rem 0 -0.0625rem;
-
-  vertical-align: bottom;
+  font-size: 1rem;
+  line-height: 1rem;
+  vertical-align: -0.25rem;
 }
 
 .iconChevron {
@@ -85,27 +82,51 @@
 
 .primaryCell {
   flex: 1;
-
   min-width: 0;
   margin-right: 1rem;
-
   text-align: left;
 }
 
 .secondaryCell {
   overflow: hidden;
-
-  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: end;
 }
 
 .subtitle {
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--color-gray-2) !important;
+
+  @include mixins.is-mobile() {
+    font-size: 0.8125rem;
+  }
 }
 
 .amountChange {
   font-weight: 600;
+}
+
+.pinIcon {
+  overflow: hidden;
+
+  width: 1rem;
+  max-width: 1.25rem;
+
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--color-gray-2);
+
+  &_withTransition {
+    @include mixins.transition('transform 150ms, max-width 150ms, opacity 150ms', !important);
+  }
+
+  &:global(.not-open) {
+    transform: scale(0.5);
+    max-width: 0;
+    opacity: 0;
+  }
 }
 
 .name {
@@ -115,16 +136,19 @@
 
   &_text {
     overflow: hidden;
-
     text-overflow: ellipsis;
   }
 }
 
-.name, .secondaryValue {
+.name,
+.secondaryValue {
   padding-bottom: 0.125rem;
-
   font-size: 0.9375rem;
   font-weight: 600;
+
+  @include mixins.is-mobile {
+    font-size: 1rem;
+  }
 }
 
 .secondaryValue_staked {
@@ -160,13 +184,13 @@
 
   width: 0.125rem;
   height: 0.125rem;
-  margin: 0 0.25rem;
+  margin: 0 0.3125rem 0 0.25rem;
+  border-radius: 50%;
 
   font-style: normal;
   line-height: 1rem;
 
   background-color: var(--color-dot);
-  border-radius: 50%;
 }
 
 .label {
@@ -175,44 +199,41 @@
   height: 0.9375rem;
   margin-inline-start: 0.25rem;
   padding: 0.1875rem;
+  border-radius: 0.25rem;
 
   font-size: 0.625rem;
   font-weight: 700;
   line-height: 0.625rem;
-
-  border-radius: 0.25rem;
 }
 
 .apyLabel {
   color: var(--color-apy-text);
-
   background-color: var(--color-apy-background);
 
   &_staked {
     color: var(--color-apy-active-text);
-
     background-color: var(--color-apy-active-background);
   }
 }
 
 .chainLabel {
   color: var(--color-gray-2);
-
   background-color: var(--color-activity-gray-background);
 }
 
 .tokenIcon {
   margin: 0 0.625rem 0 0;
-  .container:hover > & {
+  .button:hover > & {
     --color-background-first: var(--color-interactive-item-hover);
   }
 }
 
 .vestingIcon,
+.readyToClaim,
 .percent {
   position: absolute;
-  top: 1.375rem;
-  left: 1.375rem;
+  top: 1.625rem;
+  left: 1.5rem;
 
   display: flex;
   align-items: center;
@@ -220,16 +241,15 @@
 
   width: 1rem;
   height: 1rem;
+  border-radius: 50%;
 
   font-size: 1rem;
   line-height: 1rem;
   color: var(--color-purple-2);
 
   background-color: var(--color-background-first);
-  border-radius: 50%;
 
-  :global(html.is-android) &,
-  :global(html.is-ios) & {
+  @include mixins.is-mobile() {
     top: 1.6875rem;
     left: 1.75rem;
   }
@@ -244,6 +264,12 @@
   color: var(--color-purple-2);
 }
 
+.readyToClaim {
+  color: var(--color-background-first);
+  background-color: var(--color-activity-green-text);
+  box-shadow: 0 0 0 0.1rem currentColor;
+}
+
 .secondaryValue_vesting,
 .vestingIcon {
   color: var(--color-vesting-blue);
@@ -255,4 +281,15 @@
   background-clip: text;
 
   -webkit-text-fill-color: transparent;
+}
+
+.wrapperVisible {
+  border-radius: var(--border-radius-with-menu, 0rem);
+}
+
+.menu {
+  --offset-y-value: 0;
+  --offset-y-bottom-value: 0;
+
+  max-height: max(70vh, 20rem);
 }

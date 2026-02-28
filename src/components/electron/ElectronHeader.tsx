@@ -1,6 +1,8 @@
+import type { TeactNode } from '../../lib/teact/teact';
 import React, { memo, useRef } from '../../lib/teact/teact';
 
-import { IS_WINDOWS } from '../../util/windowEnvironment';
+import { APP_NAME } from '../../config';
+import { IS_LINUX, IS_WINDOWS } from '../../util/windowEnvironment';
 
 import useElectronDrag from '../../hooks/useElectronDrag';
 import useLastCallback from '../../hooks/useLastCallback';
@@ -10,13 +12,14 @@ import UpdateApp from './UpdateApp';
 import styles from './ElectronHeader.module.scss';
 
 type Props = {
-  children?: React.ReactNode;
+  children?: TeactNode;
   withTitle?: boolean;
 };
 
+export const ELECTRON_HEADER_HEIGHT_REM = 3;
+
 function ElectronHeader({ children, withTitle }: Props) {
-  // eslint-disable-next-line no-null/no-null
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>();
   useElectronDrag(containerRef);
 
   const handleMinimize = useLastCallback(() => {
@@ -36,21 +39,24 @@ function ElectronHeader({ children, withTitle }: Props) {
   });
 
   const handleDoubleClick = useLastCallback(() => {
-    window.electron?.handleDoubleClick();
+    void window.electron?.handleDoubleClick();
   });
 
-  if (IS_WINDOWS) {
-    return (
-      <div ref={containerRef} className={styles.container} onDoubleClick={handleDoubleClick}>
-        <div className={styles.wrapper}>
-          {Boolean(children) && <div className={styles.buttons}>{children}</div>}
+  const showWindowButtons = IS_WINDOWS || IS_LINUX;
 
-          {withTitle && <div className={styles.applicationName}>MyTonWallet</div>}
-        </div>
+  return (
+    <div ref={containerRef} className={styles.container} onDoubleClick={handleDoubleClick}>
+      <div className={styles.wrapper}>
+        {withTitle && <div className={styles.applicationName}>{APP_NAME}</div>}
 
-        <div className={styles.windowsButtons}>
+        <div className={styles.buttons}>
           <UpdateApp />
+          {children}
+        </div>
+      </div>
 
+      {showWindowButtons && (
+        <div className={styles.windowsButtons}>
           <div className={styles.windowsButton} onClick={handleMinimize}>
             <i className="icon-windows-minimize" />
           </div>
@@ -63,21 +69,7 @@ function ElectronHeader({ children, withTitle }: Props) {
             <i className="icon-windows-close" />
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <div ref={containerRef} className={styles.container} onDoubleClick={handleDoubleClick}>
-      <div className={styles.wrapper}>
-        {withTitle && <div className={styles.applicationName}>MyTonWallet</div>}
-
-        <div className={styles.buttons}>
-          <UpdateApp />
-
-          {children}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

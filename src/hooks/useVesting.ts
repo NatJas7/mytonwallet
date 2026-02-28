@@ -8,10 +8,16 @@ import { calcVestingAmountByStatus } from '../components/main/helpers/calcVestin
 import useLastCallback from './useLastCallback';
 import useShowTransition from './useShowTransition';
 
-export default function useVesting({ vesting, userMycoin }: { vesting?: ApiVestingInfo[]; userMycoin?: UserToken }) {
+export default function useVesting(
+  { vesting, userMycoin, isDisabled }: {
+    vesting?: ApiVestingInfo[];
+    userMycoin?: UserToken;
+    isDisabled?: boolean;
+  },
+) {
   const { loadMycoin, openVestingModal } = getActions();
 
-  const hasVesting = Boolean(vesting?.length);
+  const hasVesting = !isDisabled && Boolean(vesting?.length);
   const isMycoinLoaded = Boolean(userMycoin);
 
   useEffect(() => {
@@ -23,13 +29,13 @@ export default function useVesting({ vesting, userMycoin }: { vesting?: ApiVesti
   const amount = useMemo(() => {
     if (!hasVesting) return undefined;
 
-    return calcVestingAmountByStatus(vesting!, ['frozen', 'ready']);
+    return calcVestingAmountByStatus(vesting, ['frozen', 'ready']);
   }, [hasVesting, vesting]);
 
   const unfreezeEndDate = useMemo(() => {
     if (!hasVesting) return undefined;
 
-    for (const { parts } of vesting!) {
+    for (const { parts } of vesting) {
       for (const part of parts) {
         if (part.status === 'ready') {
           return new Date(part.timeEnd).getTime();
@@ -42,8 +48,11 @@ export default function useVesting({ vesting, userMycoin }: { vesting?: ApiVesti
 
   const {
     shouldRender,
-    transitionClassNames,
-  } = useShowTransition(Boolean(hasVesting && isMycoinLoaded && userMycoin && amount !== '0'));
+    ref,
+  } = useShowTransition<HTMLButtonElement>({
+    isOpen: Boolean(hasVesting && isMycoinLoaded && userMycoin && amount !== '0'),
+    withShouldRender: true,
+  });
 
   const onVestingTokenClick = useLastCallback(() => {
     openVestingModal();
@@ -51,7 +60,7 @@ export default function useVesting({ vesting, userMycoin }: { vesting?: ApiVesti
 
   return {
     shouldRender,
-    transitionClassNames,
+    ref,
     amount,
     vestingStatus: unfreezeEndDate ? 'readyToUnfreeze' as const : 'frozen' as const,
     unfreezeEndDate,

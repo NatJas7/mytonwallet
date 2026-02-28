@@ -1,16 +1,14 @@
 import type { BrowserWindow } from 'electron';
 import { app } from 'electron';
-import Store from 'electron-store';
+import { Conf } from 'electron-conf/main';
 import fs from 'fs';
 
-import {
-  BASE_URL, BETA_URL, PRODUCTION_URL,
-} from '../config';
+import { BASE_URL, BETA_URL, PRODUCTION_URL } from '../config';
 
-const ALLOWED_URL_ORIGINS = [BASE_URL!, BETA_URL, PRODUCTION_URL].map((url) => (new URL(url).origin));
+const ALLOWED_URL_ORIGINS = [BASE_URL, BETA_URL, PRODUCTION_URL].map((url) => new URL(url).origin);
 
-export let mainWindow: BrowserWindow; // eslint-disable-line import/no-mutable-exports
-export const store: Store = new Store();
+export let mainWindow: BrowserWindow;
+export const store = new Conf();
 
 export const WINDOW_STATE_FILE = 'window-state.json';
 
@@ -19,6 +17,7 @@ export const IS_WINDOWS = process.platform === 'win32';
 export const IS_LINUX = process.platform === 'linux';
 export const IS_PREVIEW = process.env.IS_PREVIEW === 'true';
 export const IS_FIRST_RUN = !fs.existsSync(`${app.getPath('userData')}/${WINDOW_STATE_FILE}`);
+export const MTW_GTK_VERSION = process.env.MTW_GTK_VERSION ?? '3'; // GTK version (3) to use on Linux
 
 export function checkIsWebContentsUrlAllowed(url: string): boolean {
   if (!app.isPackaged) {

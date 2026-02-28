@@ -3,7 +3,7 @@ import React, { memo } from '../../../../lib/teact/teact';
 import type { ApiNft } from '../../../../api/types';
 
 import buildClassName from '../../../../util/buildClassName';
-import { getCardNftImageUrl } from './helpers/getCardNftImageUrl';
+import { getCardNftImageUrl } from '../../../../util/url';
 
 import { useCachedImage } from '../../../../hooks/useCachedImage';
 import useCardCustomization from '../../../../hooks/useCardCustomization';
@@ -17,6 +17,8 @@ interface OwnProps {
   nft: ApiNft;
   noShowAnimation?: boolean;
   shouldHide?: boolean;
+  className?: string;
+  shadowClassName?: string;
   onLoad?: (hasGradient: boolean, className?: string) => void;
   onTransitionEnd: NoneToVoidFunction;
 }
@@ -26,12 +28,14 @@ function CustomCardBackground({
   nft,
   noShowAnimation,
   shouldHide,
+  className,
+  shadowClassName,
   onLoad,
   onTransitionEnd,
 }: OwnProps) {
   const { imageUrl } = useCachedImage(nft ? getCardNftImageUrl(nft) : undefined);
   const [isLoaded, markLoaded] = useFlag();
-  const transitionClassNames = useMediaTransition(noShowAnimation || (isLoaded && !shouldHide));
+  const ref = useMediaTransition(noShowAnimation || (isLoaded && !shouldHide));
 
   const {
     borderShineType,
@@ -54,10 +58,8 @@ function CustomCardBackground({
     shouldHide && styles.hide,
   );
 
-  const withShadow = nft.metadata?.mtwCardType === 'standard';
-
   return (
-    <div className={buildClassName(rootClassName, transitionClassNames)} onTransitionEnd={onTransitionEnd}>
+    <div ref={ref} className={buildClassName(rootClassName, className)} onTransitionEnd={onTransitionEnd}>
       {imageUrl && (
         <img
           src={imageUrl}
@@ -66,7 +68,6 @@ function CustomCardBackground({
           onLoad={handleLoad}
         />
       )}
-      {withShadow && <div className={styles.shadow} />}
     </div>
   );
 }

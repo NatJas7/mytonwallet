@@ -1,10 +1,11 @@
-import React, { memo } from '../../../../lib/teact/teact';
+import React, { type ElementRef, memo, useRef } from '../../../../lib/teact/teact';
 
-import type { ApiBaseCurrency, ApiYieldType } from '../../../../api/types';
-import type { StakingStateStatus } from '../../../../global/helpers/staking';
+import type { ApiBaseCurrency, ApiStakingState, ApiYieldType } from '../../../../api/types';
 import type { AppTheme, UserToken } from '../../../../global/types';
+import type { Layout } from '../../../../hooks/useMenuPosition';
+import type { StakingStateStatus } from '../../../../util/staking';
 
-import { ANIMATED_STICKER_TINY_ICON_PX, TOKEN_WITH_LABEL } from '../../../../config';
+import { ANIMATED_STICKER_TINY_ICON_PX, IS_CORE_WALLET } from '../../../../config';
 import { Big } from '../../../../lib/big.js';
 import buildClassName from '../../../../util/buildClassName';
 import { calcChangeValue } from '../../../../util/calcChangeValue';
@@ -13,23 +14,30 @@ import { toDecimal } from '../../../../util/decimals';
 import { formatCurrency, getShortCurrencySymbol } from '../../../../util/formatNumber';
 import { round } from '../../../../util/round';
 import { ANIMATED_STICKERS_PATHS } from '../../../ui/helpers/animatedAssets';
+import getTokenName from '../../helpers/getTokenName';
 
+import { useDeviceScreen } from '../../../../hooks/useDeviceScreen';
 import useLang from '../../../../hooks/useLang';
 import useLastCallback from '../../../../hooks/useLastCallback';
 import useShowTransition from '../../../../hooks/useShowTransition';
+import useTokenContextMenu from './hooks/useTokenContextMenu';
 
 import TokenIcon from '../../../common/TokenIcon';
 import AnimatedCounter from '../../../ui/AnimatedCounter';
 import AnimatedIconWithPreview from '../../../ui/AnimatedIconWithPreview';
 import Button from '../../../ui/Button';
+import DropdownMenu from '../../../ui/DropdownMenu';
+import MenuBackdrop from '../../../ui/MenuBackdrop';
+import SensitiveData from '../../../ui/SensitiveData';
 
 import styles from './Token.module.scss';
 
 interface OwnProps {
+  ref?: ElementRef<HTMLButtonElement>;
   token: UserToken;
-  stakingId?: string;
   // Undefined means that it's not a staked token
   stakingStatus?: StakingStateStatus;
+  stakingState?: ApiStakingState;
   vestingStatus?: 'frozen' | 'readyToUnfreeze';
   unfreezeEndDate?: number;
   amount?: string;
@@ -39,19 +47,29 @@ interface OwnProps {
   annualYield?: number;
   yieldType?: ApiYieldType;
   isActive?: boolean;
-  baseCurrency?: ApiBaseCurrency;
+  baseCurrency: ApiBaseCurrency;
   appTheme: AppTheme;
   withChainIcon?: boolean;
+  withContextMenu?: boolean;
+  isSensitiveDataHidden?: true;
+  isSwapDisabled?: boolean;
+  isStakingAvailable?: boolean;
+  isViewMode?: boolean;
+  isPinned?: boolean;
+  withPinTransition?: boolean;
   onClick: (slug: string) => void;
 }
 
 const UNFREEZE_DANGER_DURATION = 7 * DAY;
+const CONTEXT_MENU_VERTICAL_SHIFT_PX = 4;
+export const OPEN_CONTEXT_MENU_CLASS_NAME = 'open-context-menu';
 
 function Token({
+  ref,
   token,
   amount,
-  stakingId,
   stakingStatus,
+  stakingState,
   vestingStatus,
   unfreezeEndDate,
   annualYield,
@@ -62,39 +80,98 @@ function Token({
   isActive,
   baseCurrency,
   withChainIcon,
-  onClick,
+  withContextMenu,
+  isSensitiveDataHidden,
+  isStakingAvailable,
+  isSwapDisabled,
+  isViewMode,
+  isPinned,
+  withPinTransition,
   yieldType,
+  onClick,
 }: OwnProps) {
   const {
-    name,
     symbol,
     slug,
     amount: tokenAmount,
     price,
     change24h: change,
     decimals,
+    label,
   } = token;
 
   const lang = useLang();
+  const { isPortrait } = useDeviceScreen();
 
+  let buttonRef = useRef<HTMLButtonElement>();
+  const menuRef = useRef<HTMLDivElement>();
   const isVesting = Boolean(vestingStatus?.length);
   const renderedAmount = amount ?? toDecimal(tokenAmount, decimals, true);
   const value = Big(renderedAmount).mul(price).toString();
   const changeClassName = change > 0 ? styles.change_up : change < 0 ? styles.change_down : undefined;
   const changeValue = Math.abs(round(calcChangeValue(Number(value), change), 4));
   const changePercent = Math.abs(round(change * 100, 2));
-  const withYield = annualYield !== undefined;
-  const fullClassName = buildClassName(styles.container, isActive && styles.active, classNames);
+  const withYield = !IS_CORE_WALLET && annualYield !== undefined;
   const shortBaseSymbol = getShortCurrencySymbol(baseCurrency);
-  const withLabel = Boolean(!isVesting && TOKEN_WITH_LABEL[slug]);
+  const withLabel = Boolean(!isVesting && label);
+  const stakingId = stakingState?.id;
+  const name = getTokenName(lang, token);
+  const withChainIconRendered = withChainIcon && !stakingId;
+  if (ref) {
+    buttonRef = ref;
+  }
 
   const {
     shouldRender: shouldRenderYield,
-    transitionClassNames: renderYieldClassNames,
-  } = useShowTransition(withYield);
+    ref: yieldRef,
+  } = useShowTransition<HTMLSpanElement>({
+    isOpen: withYield,
+    withShouldRender: true,
+  });
+
+  const {
+    shouldRender: shouldRenderPin,
+    ref: pinRef,
+  } = useShowTransition<HTMLElement>({
+    isOpen: isPinned,
+    withShouldRender: true,
+  });
 
   const handleClick = useLastCallback(() => {
-    onClick(stakingId ?? slug);
+    onClick(slug);
+  });
+
+  const getTriggerElement = useLastCallback(() => buttonRef.current);
+  const getRootElement = useLastCallback(() => document.body);
+  const getMenuElement = useLastCallback(() => menuRef.current);
+  const getLayout = useLastCallback((): Layout => ({
+    withPortal: true,
+    doNotCoverTrigger: isPortrait,
+    // The shift is needed to prevent the mouse cursor from highlighting the first menu item
+    topShiftY: !isPortrait ? CONTEXT_MENU_VERTICAL_SHIFT_PX : undefined,
+    preferredPositionX: 'left',
+  }));
+
+  const {
+    isContextMenuOpen,
+    isContextMenuShown,
+    contextMenuAnchor,
+    items,
+    isBackdropRendered,
+    handleBeforeContextMenu,
+    handleContextMenu,
+    handleContextMenuClose,
+    handleContextMenuHide,
+    handleMenuItemSelect,
+  } = useTokenContextMenu(buttonRef, {
+    token,
+    isPortrait,
+    withContextMenu,
+    isStakingAvailable,
+    isSwapDisabled,
+    isViewMode,
+    stakingState,
+    isPinned,
   });
 
   function renderYield() {
@@ -102,12 +179,11 @@ function Token({
       styles.label,
       styles.apyLabel,
       stakingStatus && styles.apyLabel_staked,
-      renderYieldClassNames,
     );
 
     return (
-      <span className={labelClassName}>
-        {yieldType} {annualYield}%
+      <span ref={yieldRef} className={labelClassName}>
+        {stakingStatus ? '' : `${yieldType} `}{round(annualYield ?? 0, 2)}%
       </span>
     );
   }
@@ -135,6 +211,15 @@ function Token({
       );
     }
 
+    if (stakingStatus === 'readyToClaim') {
+      return (
+        <i
+          className={buildClassName('icon-check-alt', styles.readyToClaim)}
+          aria-hidden
+        />
+      );
+    }
+
     return (
       <AnimatedIconWithPreview
         play
@@ -148,10 +233,28 @@ function Token({
     );
   }
 
+  const fullClassName = buildClassName(
+    styles.button,
+    isActive && styles.active,
+    isContextMenuOpen && OPEN_CONTEXT_MENU_CLASS_NAME,
+  );
+
   function renderInvestorView() {
     return (
-      <Button className={fullClassName} isSimple style={style} onClick={handleClick}>
-        <TokenIcon token={token} withChainIcon={withChainIcon} className={styles.tokenIcon}>
+      <Button
+        ref={buttonRef}
+        isSimple
+        className={fullClassName}
+        onMouseDown={handleBeforeContextMenu}
+        onContextMenu={handleContextMenu}
+        onClick={handleClick}
+      >
+        <TokenIcon
+          size="large"
+          token={token}
+          withChainIcon={withChainIconRendered}
+          className={styles.tokenIcon}
+        >
           <>
             {stakingStatus && renderStakingIcon()}
             {vestingStatus && (
@@ -167,25 +270,42 @@ function Token({
             <span className={styles.nameText}>{name}</span>
             {shouldRenderYield && renderYield()}
             {withLabel && (
-              <span className={buildClassName(styles.label, styles.chainLabel)}>{TOKEN_WITH_LABEL[slug]}</span>
+              <span className={buildClassName(styles.label, styles.chainLabel)}>{label}</span>
             )}
           </div>
           <div className={styles.subtitle}>
-            <AnimatedCounter text={formatCurrency(renderedAmount, symbol)} />
+            <SensitiveData
+              isActive={isSensitiveDataHidden}
+              min={5}
+              max={10}
+              seed={name}
+              rows={2}
+              cellSize={8}
+            >
+              <AnimatedCounter text={formatCurrency(renderedAmount, symbol)} />
+            </SensitiveData>
             <i className={styles.dot} aria-hidden />
             <AnimatedCounter text={formatCurrency(price, shortBaseSymbol, undefined, true)} />
           </div>
         </div>
         <div className={styles.secondaryCell}>
-          <div className={buildClassName(
-            styles.secondaryValue,
-            stakingStatus && styles.secondaryValue_staked,
-            isVesting && styles.secondaryValue_vesting,
-            isVesting && vestingStatus === 'readyToUnfreeze' && styles.secondaryValue_vestingUnfreeze,
-          )}
+          <SensitiveData
+            isActive={isSensitiveDataHidden}
+            min={4}
+            max={12}
+            seed={name}
+            rows={2}
+            cellSize={8}
+            align="right"
+            className={buildClassName(
+              styles.secondaryValue,
+              stakingStatus && styles.secondaryValue_staked,
+              isVesting && styles.secondaryValue_vesting,
+              isVesting && vestingStatus === 'readyToUnfreeze' && styles.secondaryValue_vestingUnfreeze,
+            )}
           >
             <AnimatedCounter text={formatCurrency(value, shortBaseSymbol)} />
-          </div>
+          </SensitiveData>
           {unfreezeEndDate ? (
             <div
               className={buildClassName(
@@ -198,11 +318,20 @@ function Token({
               {lang('until %date%', { date: `${formatFullDay(lang.code!, unfreezeEndDate)}` })}
             </div>
           ) : (
-            <div className={buildClassName(styles.change, changeClassName)}>
+            <SensitiveData
+              isActive={isSensitiveDataHidden}
+              min={5}
+              max={10}
+              seed={name}
+              rows={2}
+              cellSize={8}
+              align="right"
+              className={buildClassName(styles.change, changeClassName)}
+            >
               {renderChangeIcon()}<AnimatedCounter text={String(changePercent)} />%
               <i className={styles.dot} aria-hidden />
               <AnimatedCounter text={formatCurrency(changeValue, shortBaseSymbol, undefined, true)} />
-            </div>
+            </SensitiveData>
           )}
         </div>
       </Button>
@@ -214,8 +343,20 @@ function Token({
     const canRenderYield = annualYield !== undefined;
 
     return (
-      <Button className={fullClassName} style={style} onClick={handleClick} isSimple>
-        <TokenIcon token={token} withChainIcon={withChainIcon} className={styles.tokenIcon}>
+      <Button
+        ref={buttonRef}
+        isSimple
+        className={fullClassName}
+        onMouseDown={handleBeforeContextMenu}
+        onContextMenu={handleContextMenu}
+        onClick={handleClick}
+      >
+        <TokenIcon
+          token={token}
+          size="large"
+          withChainIcon={withChainIconRendered}
+          className={styles.tokenIcon}
+        >
           <>
             {stakingStatus && renderStakingIcon()}
             {vestingStatus && (
@@ -228,10 +369,21 @@ function Token({
         </TokenIcon>
         <div className={styles.primaryCell}>
           <div className={styles.name}>
+            {shouldRenderPin && (
+              <i
+                ref={pinRef}
+                className={buildClassName(
+                  styles.pinIcon,
+                  'icon-pin',
+                  withPinTransition && styles.pinIcon_withTransition,
+                )}
+                aria-hidden
+              />
+            )}
             <span className={styles.nameText}>{name}</span>
             {canRenderYield && renderYield()}
             {withLabel && (
-              <span className={buildClassName(styles.label, styles.chainLabel)}>{TOKEN_WITH_LABEL[slug]}</span>
+              <span className={buildClassName(styles.label, styles.chainLabel)}>{label}</span>
             )}
           </div>
           <div className={styles.subtitle}>
@@ -255,25 +407,70 @@ function Token({
           </div>
         </div>
         <div className={styles.secondaryCell}>
-          <div className={buildClassName(
-            styles.secondaryValue,
-            stakingStatus && styles.secondaryValue_staked,
-            isVesting && styles.secondaryValue_vesting,
-            isVesting && vestingStatus === 'readyToUnfreeze' && styles.secondaryValue_vestingUnfreeze,
-          )}
+          <SensitiveData
+            isActive={isSensitiveDataHidden}
+            min={4}
+            max={12}
+            seed={name}
+            rows={2}
+            cellSize={8}
+            align="right"
+            className={buildClassName(
+              styles.secondaryValue,
+              stakingStatus && styles.secondaryValue_staked,
+              isVesting && styles.secondaryValue_vesting,
+              isVesting && vestingStatus === 'readyToUnfreeze' && styles.secondaryValue_vestingUnfreeze,
+            )}
           >
             <AnimatedCounter text={formatCurrency(renderedAmount, symbol)} />
-          </div>
-          <div className={styles.subtitle}>
+          </SensitiveData>
+          <SensitiveData
+            isActive={isSensitiveDataHidden}
+            min={5}
+            max={10}
+            seed={name}
+            rows={2}
+            cellSize={8}
+            align="right"
+            className={styles.subtitle}
+          >
             {totalAmount.gt(0) ? '≈' : ''}&thinsp;
             <AnimatedCounter text={formatCurrency(totalAmount, shortBaseSymbol, undefined, true)} />
-          </div>
+          </SensitiveData>
         </div>
       </Button>
     );
   }
 
-  return isInvestorView ? renderInvestorView() : renderDefaultView();
+  return (
+    <div className={buildClassName(styles.container, classNames)} style={style}>
+      <MenuBackdrop
+        isMenuOpen={isBackdropRendered}
+        contentRef={buttonRef}
+        contentClassName={styles.wrapperVisible}
+      />
+      {isInvestorView ? renderInvestorView() : renderDefaultView()}
+      {withContextMenu && isContextMenuShown && (
+        <DropdownMenu
+          ref={menuRef}
+          withPortal
+          shouldTranslateOptions
+          isOpen={isContextMenuOpen}
+          items={items}
+          menuAnchor={contextMenuAnchor}
+          bubbleClassName={styles.menu}
+          fontIconClassName={styles.menuIcon}
+          getTriggerElement={getTriggerElement}
+          getRootElement={getRootElement}
+          getMenuElement={getMenuElement}
+          getLayout={getLayout}
+          onSelect={handleMenuItemSelect}
+          onClose={handleContextMenuClose}
+          onCloseAnimationEnd={handleContextMenuHide}
+        />
+      )}
+    </div>
+  );
 }
 
 export default memo(Token);

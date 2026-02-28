@@ -1,21 +1,32 @@
+import type { SignDataPayload } from '@tonconnect/protocol';
+
+import type { GlobalState } from '../../global/types';
 import type { ApiTonWalletVersion } from '../chains/ton/types';
-import type { ApiTonConnectProof } from '../tonConnect/types';
-import type { ApiActivity, ApiTransactionActivity } from './activity';
-import type { ApiStakingCommonData, ApiSwapAsset, ApiVestingInfo } from './backend';
+import type { TonConnectProof } from '../dappProtocols/adapters';
+import type { StoredDappConnection } from '../dappProtocols/storage';
+import type { ApiActivity } from './activities';
+import type {
+  ApiAccountConfig,
+  ApiBackendConfig,
+  ApiSwapAsset,
+  ApiSwapVersion,
+  ApiVestingInfo,
+} from './backend';
+import type { ApiEmulationResult } from './emulation';
 import type { ApiAnyDisplayError } from './errors';
 import type {
   ApiBalanceBySlug,
-  ApiBaseCurrency,
   ApiChain,
   ApiCountryCode,
+  ApiCurrencyRates,
+  ApiDappConnectionType,
   ApiDappTransfer,
   ApiNft,
   ApiStakingState,
   ApiTokenWithPrice,
-  ApiWalletInfo,
+  ApiWalletWithVersionInfo,
 } from './misc';
-import type { ApiParsedPayload } from './payload';
-import type { ApiDapp, ApiTonWallet } from './storage';
+import type { ApiCheckTransactionDraftResult } from './transfer';
 
 export type ApiUpdateBalances = {
   type: 'updateBalances';
@@ -24,24 +35,43 @@ export type ApiUpdateBalances = {
   balances: ApiBalanceBySlug;
 };
 
+export type ApiUpdateInitialActivities = {
+  type: 'initialActivities';
+  accountId: string;
+  chain: ApiChain;
+  mainActivities: ApiActivity[];
+  /** The dictionary may contain not all tokens of the given chain */
+  bySlug: Record<string, ApiActivity[]>;
+};
+
 export type ApiUpdateNewActivities = {
   type: 'newActivities';
   accountId: string;
   chain?: ApiChain;
   activities: ApiActivity[];
-  noForward?: boolean; // Forbid cyclic update redirection to/from NBS
+  /**
+   * The UI must replace all the pending activities in the given chain with the given activities. This is except to
+   * local activities, but if a pending activity matchers a local activity, it replaces that local activity.
+   *
+   * Omitted if the update does not change the list of pending actions (the UI should keep the old list).
+   *
+   * Doesn't contain activities with the hashes of the current or past confirmed activities.
+   *
+   * There is no separate update for pending activities, because confirmed activities replace pending activities, so the
+   * UI should handle both changes in one update.
+   */
+  pendingActivities?: readonly ApiActivity[];
 };
 
-export type ApiUpdateNewLocalTransaction = {
-  type: 'newLocalTransaction';
+export type ApiUpdateNewLocalActivities = {
+  type: 'newLocalActivities';
   accountId: string;
-  transaction: ApiTransactionActivity;
+  activities: ApiActivity[];
 };
 
 export type ApiUpdateTokens = {
   type: 'updateTokens';
   tokens: Record<string, ApiTokenWithPrice>;
-  baseCurrency: ApiBaseCurrency;
 };
 
 export type ApiUpdateSwapTokens = {
@@ -49,17 +79,25 @@ export type ApiUpdateSwapTokens = {
   tokens: Record<string, ApiSwapAsset>;
 };
 
+export type ApiUpdateCurrencyRates = {
+  type: 'updateCurrencyRates';
+  rates: ApiCurrencyRates;
+};
+
 export type ApiUpdateCreateTransaction = {
   type: 'createTransaction';
   promiseId: string;
   toAddress: string;
   amount: bigint;
-  fee?: bigint;
-  realFee?: bigint;
   comment?: string;
   rawPayload?: string;
-  parsedPayload?: ApiParsedPayload;
   stateInit?: string;
+  checkResult: ApiCheckTransactionDraftResult;
+};
+
+export type ApiUpdateCompleteTransaction = {
+  type: 'completeTransaction';
+  activityId: string;
 };
 
 export type ApiUpdateCreateSignature = {
@@ -77,25 +115,39 @@ export type ApiUpdateStaking = {
   type: 'updateStaking';
   accountId: string;
   states: ApiStakingState[];
-  common: ApiStakingCommonData;
   totalProfit: bigint;
   shouldUseNominators?: boolean;
 };
 
-export type ApiUpdateActiveDapp = {
-  type: 'updateActiveDapp';
+export type ApiUpdateDappSignData = {
+  type: 'dappSignData';
+  promiseId: string;
   accountId: string;
-  origin?: string;
+  dapp: StoredDappConnection;
+  operationChain: ApiChain;
+  payloadToSign: SignDataPayload;
 };
 
 export type ApiUpdateDappSendTransactions = {
   type: 'dappSendTransactions';
   promiseId: string;
   accountId: string;
-  dapp: ApiDapp;
+  dapp: StoredDappConnection;
+  // Dapp may have many chains, so need to specify current operation chain
+  operationChain: ApiChain;
   transactions: ApiDappTransfer[];
-  fee: bigint;
+  emulation?: Pick<ApiEmulationResult, 'activities' | 'realFee'>;
+  /** Unix seconds */
+  validUntil?: number;
   vestingAddress?: string;
+  // No useful transfers in solana
+  shouldHideTransfers?: boolean;
+  // Deal with solana b58/b64 issues based on requested method
+  isLegacyOutput?: boolean;
+};
+
+export type ApiUpdateTonConnectOnline = {
+  type: 'tonConnectOnline';
 };
 
 export type ApiUpdateDappConnect = {
@@ -103,12 +155,12 @@ export type ApiUpdateDappConnect = {
   identifier?: string;
   promiseId: string;
   accountId: string;
-  dapp: ApiDapp;
+  dapp: StoredDappConnection;
   permissions: {
     address: boolean;
     proof: boolean;
   };
-  proof?: ApiTonConnectProof;
+  proof?: TonConnectProof;
 };
 
 export type ApiUpdateDappConnectComplete = {
@@ -118,22 +170,33 @@ export type ApiUpdateDappConnectComplete = {
 export type ApiUpdateDappDisconnect = {
   type: 'dappDisconnect';
   accountId: string;
-  origin: string;
+  url: string;
 };
 
 export type ApiUpdateDappLoading = {
   type: 'dappLoading';
-  connectionType: 'connect' | 'sendTransaction';
+  connectionType: ApiDappConnectionType;
   isSse?: boolean;
   accountId?: string;
 };
 
 export type ApiUpdateDappCloseLoading = {
   type: 'dappCloseLoading';
+  connectionType: ApiDappConnectionType;
 };
 
 export type ApiUpdateDapps = {
   type: 'updateDapps';
+};
+
+export type ApiUpdateDappTransferComplete = {
+  type: 'dappTransferComplete';
+  accountId: string;
+};
+
+export type ApiUpdateDappSignDataComplete = {
+  type: 'dappSignDataComplete';
+  accountId: string;
 };
 
 export type ApiUpdatePrepareTransaction = {
@@ -154,6 +217,11 @@ export type ApiUpdateNfts = {
   type: 'updateNfts';
   accountId: string;
   nfts: ApiNft[];
+  chain: ApiChain;
+  collectionAddress?: string;
+  isFullLoading?: boolean;
+  /** Complete set of addresses seen during a streaming session. Sent with the final `isFullLoading: false` update. */
+  streamedAddresses?: string[];
 };
 
 export type ApiUpdateNftReceived = {
@@ -181,7 +249,11 @@ export type ApiNftUpdate = ApiUpdateNftReceived | ApiUpdateNftSent | ApiUpdateNf
 export type ApiUpdateAccount = {
   type: 'updateAccount';
   accountId: string;
-  partial: Partial<ApiTonWallet>;
+  chain: ApiChain;
+  address?: string;
+  /** `false` means that the account has no domain; `undefined` means that the domain has not changed */
+  domain?: string | false;
+  isMultisig?: boolean;
 };
 
 export type ApiUpdateConfig = {
@@ -191,13 +263,15 @@ export type ApiUpdateConfig = {
   supportAccountsCount?: number;
   countryCode?: ApiCountryCode;
   isAppUpdateRequired: boolean;
+  swapVersion?: ApiSwapVersion;
+  seasonalTheme: ApiBackendConfig['seasonalTheme'];
 };
 
 export type ApiUpdateWalletVersions = {
   type: 'updateWalletVersions';
   accountId: string;
   currentVersion: ApiTonWalletVersion;
-  versions: ApiWalletInfo[];
+  versions: ApiWalletWithVersionInfo[];
 };
 
 export type ApiOpenUrl = {
@@ -225,26 +299,62 @@ export type ApiUpdateVesting = {
 export type ApiUpdatingStatus = {
   type: 'updatingStatus';
   kind: 'balance' | 'activities';
+  accountId: string;
   isUpdating?: boolean;
+};
+
+export type ApiUpdateSettings = {
+  type: 'updateSettings';
+  settings: Partial<GlobalState['settings']>;
+};
+
+export type ApiMigrateCoreApplication = {
+  type: 'migrateCoreApplication';
+  isTestnet?: boolean;
+  accountId: string;
+  address: string;
+  secondAccountId: string;
+  secondAddress: string;
+  isTonProxyEnabled?: boolean;
+};
+
+export type ApiUpdateAccountConfig = {
+  type: 'updateAccountConfig';
+  accountId: string;
+  accountConfig: ApiAccountConfig;
+};
+
+export type ApiUpdateAccountDomainData = {
+  type: 'updateAccountDomainData';
+  accountId: string;
+  expirationByAddress: Record<string, number>;
+  linkedAddressByAddress: Record<string, string>;
+  nfts: Record<string, ApiNft>;
 };
 
 export type ApiUpdate =
   | ApiUpdateBalances
+  | ApiUpdateInitialActivities
   | ApiUpdateNewActivities
-  | ApiUpdateNewLocalTransaction
+  | ApiUpdateNewLocalActivities
   | ApiUpdateTokens
   | ApiUpdateSwapTokens
+  | ApiUpdateCurrencyRates
   | ApiUpdateCreateTransaction
+  | ApiUpdateCompleteTransaction
   | ApiUpdateCreateSignature
   | ApiUpdateStaking
-  | ApiUpdateActiveDapp
   | ApiUpdateDappSendTransactions
+  | ApiUpdateTonConnectOnline
   | ApiUpdateDappConnect
   | ApiUpdateDappConnectComplete
   | ApiUpdateDappDisconnect
   | ApiUpdateDappLoading
   | ApiUpdateDappCloseLoading
+  | ApiUpdateDappSignData
   | ApiUpdateDapps
+  | ApiUpdateDappTransferComplete
+  | ApiUpdateDappSignDataComplete
   | ApiUpdatePrepareTransaction
   | ApiUpdateProcessDeeplink
   | ApiUpdateShowError
@@ -257,6 +367,10 @@ export type ApiUpdate =
   | ApiRequestReconnect
   | ApiUpdateIncorrectTime
   | ApiUpdateVesting
-  | ApiUpdatingStatus;
+  | ApiUpdatingStatus
+  | ApiUpdateSettings
+  | ApiMigrateCoreApplication
+  | ApiUpdateAccountConfig
+  | ApiUpdateAccountDomainData;
 
 export type OnApiUpdate = (update: ApiUpdate) => void;

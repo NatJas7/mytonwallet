@@ -14,8 +14,11 @@ on:
     branches:
       - master
 
+permissions:
+  contents: write
+
 concurrency:
-  group: ${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -23,18 +26,25 @@ env:
   PROXY_HOSTS: ${{ vars.PROXY_HOSTS }}
   STAKING_POOLS: ${{ vars.STAKING_POOLS }}
   PUBLISH_REPO: ${{ vars.PUBLISH_REPO }}
+  BRILLIANT_API_BASE_URL: ${{ vars.BRILLIANT_API_BASE_URL }}
+  SWAP_FEE_ADDRESS: ${{ vars.SWAP_FEE_ADDRESS }}
+  DIESEL_ADDRESS: ${{ vars.DIESEL_ADDRESS }}
+  WALLET_CONNECT_PROJECT_ID: ${{ vars.WALLET_CONNECT_PROJECT_ID }}
 
 jobs:
   electron-release:
     name: Build, package and publish Electron
-    runs-on: macos-13
+    runs-on: macos-15
+    environment: production
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
+        with:
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Import MacOS signing certificate
         env:
@@ -57,14 +67,14 @@ jobs:
 
       - name: Build, package and publish
         env:
-          ELECTRON_TONHTTPAPI_MAINNET_API_KEY: ${{ secrets.ELECTRON_TONHTTPAPI_MAINNET_API_KEY }}
-          ELECTRON_TONHTTPAPI_TESTNET_API_KEY: ${{ secrets.ELECTRON_TONHTTPAPI_TESTNET_API_KEY }}
+          ELECTRON_TONCENTER_MAINNET_KEY: ${{ secrets.ELECTRON_TONCENTER_MAINNET_KEY }}
+          ELECTRON_TONCENTER_TESTNET_KEY: ${{ secrets.ELECTRON_TONCENTER_TESTNET_KEY }}
 
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_URL: ${{ vars.BASE_URL }}
           IS_PREVIEW: ${{ steps.branch-name.outputs.current_branch != 'master' }}
         run: |
@@ -79,34 +89,56 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-x64.dmg
           path: dist-electron/${{ env.APP_NAME }}-x64.dmg
+          if-no-files-found: error
 
       - name: Upload macOS arm64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-arm64.dmg
           path: dist-electron/${{ env.APP_NAME }}-arm64.dmg
+          if-no-files-found: error
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-x86_64.AppImage
           path: dist-electron/${{ env.APP_NAME }}-x86_64.AppImage
+          if-no-files-found: error
 
-      - name: Upload Windows artifact
+      - name: Upload Windows x64 artifact (unsigned)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-x64-unsigned.exe
           path: dist-electron/${{ env.APP_NAME }}-x64.exe
+          if-no-files-found: error
+
+      - name: Upload Windows arm64 artifact (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-arm64-unsigned.exe
+          path: dist-electron/${{ env.APP_NAME }}-arm64.exe
+          if-no-files-found: error
+
+      - name: Upload Windows universal artifact (unsigned)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-unsigned.exe
+          path: dist-electron/${{ env.APP_NAME }}.exe
+          if-no-files-found: error
 
   electron-sign-for-windows:
     name: Sign and re-publish Windows package
     needs: electron-release
     runs-on: windows-latest
+    environment: production
     timeout-minutes: 10
     if: vars.PUBLISH_REPO != ''
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Install DigiCert Client tools
+        uses: digicert/ssm-code-signing@v1.0.1
+
       - name: Setup certificate
         shell: bash
         run: echo "${{ secrets.SM_CLIENT_CERT_FILE_B64 }}" | base64 --decode > /d/Certificate_pkcs12.p12
@@ -116,7 +148,9 @@ jobs:
         shell: bash
         run: |
           echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-          echo "FILE_NAME=${{ env.APP_NAME }}-x64.exe" >> "$GITHUB_ENV"
+          echo "FILE_NAME_X64=${{ env.APP_NAME }}-x64.exe" >> "$GITHUB_ENV"
+          echo "FILE_NAME_ARM64=${{ env.APP_NAME }}-arm64.exe" >> "$GITHUB_ENV"
+          echo "FILE_NAME_UNIVERSAL=${{ env.APP_NAME }}.exe" >> "$GITHUB_ENV"
           echo "SM_HOST=${{ secrets.SM_HOST }}" >> "$GITHUB_ENV"
           echo "SM_API_KEY=${{ secrets.SM_API_KEY }}" >> "$GITHUB_ENV"
           echo "SM_CLIENT_CERT_FILE=D:\\Certificate_pkcs12.p12" >> "$GITHUB_ENV"
@@ -125,49 +159,72 @@ jobs:
           echo "C:\Program Files (x86)\Microsoft SDKs\Windows\v10.0A\bin\NETFX 4.8 Tools" >> $GITHUB_PATH
           echo "C:\Program Files\DigiCert\DigiCert One Signing Manager Tools" >> $GITHUB_PATH
 
-      - name: Setup SSM KSP
-        env:
-          SM_API_KEY: ${{ secrets.SM_API_KEY }}
-        shell: cmd
-        run: |
-          curl.exe -X GET https://one.digicert.com/signingmanager/api-ui/v1/releases/smtools-windows-x64.msi/download -H "x-api-key:%SM_API_KEY%" -o smtools.msi
-          msiexec /i smtools.msi /quiet /qn
-          smksp_registrar.exe list
-          smctl.exe keypair ls
-          C:\Windows\System32\certutil.exe -csp "DigiCert Signing Manager KSP" -key -user
-          smksp_cert_sync.exe
-
-      - name: Download Windows package
-        id: download-artifact
+      - name: Download Windows x64 package
+        id: download-x64
         uses: actions/download-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-x64-unsigned.exe
 
-      - name: Sign package
+      - name: Download Windows arm64 package
+        id: download-arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-arm64-unsigned.exe
+
+      - name: Download Windows universal package
+        id: download-universal
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-unsigned.exe
+
+      - name: Sign Windows packages
         env:
           KEYPAIR_ALIAS: ${{ secrets.KEYPAIR_ALIAS }}
-          FILE_PATH: ${{ steps.download-artifact.outputs.download-path }}
-        shell: cmd
-        run: smctl.exe sign --keypair-alias=%KEYPAIR_ALIAS% --input "%FILE_PATH%\%FILE_NAME%"
 
-      - uses: actions/upload-artifact@v4
+          FILE_PATH_X64: ${{ steps.download-x64.outputs.download-path }}
+          FILE_PATH_ARM64: ${{ steps.download-arm64.outputs.download-path }}
+          FILE_PATH_UNIVERSAL: ${{ steps.download-universal.outputs.download-path }}
+        shell: cmd
+        run: |
+          smctl.exe sign --keypair-alias=%KEYPAIR_ALIAS% --input "%FILE_PATH_X64%\%FILE_NAME_X64%"
+          smctl.exe sign --keypair-alias=%KEYPAIR_ALIAS% --input "%FILE_PATH_ARM64%\%FILE_NAME_ARM64%"
+          smctl.exe sign --keypair-alias=%KEYPAIR_ALIAS% --input "%FILE_PATH_UNIVERSAL%\%FILE_NAME_UNIVERSAL%"
+
+      - name: Upload signed x64 artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.FILE_NAME }}
-          path: ${{ env.FILE_NAME }}
+          name: ${{ env.FILE_NAME_X64 }}
+          path: ${{ steps.download-x64.outputs.download-path }}/${{ env.FILE_NAME_X64 }}
+
+      - name: Upload signed arm64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE_NAME_ARM64 }}
+          path: ${{ steps.download-arm64.outputs.download-path }}/${{ env.FILE_NAME_ARM64 }}
+
+      - name: Upload signed universal artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE_NAME_UNIVERSAL }}
+          path: ${{ steps.download-universal.outputs.download-path }}/${{ env.FILE_NAME_UNIVERSAL }}
 
   extensions-package:
     name: Build and package extensions
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
+        with:
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Build and package
         run: |
+          export APP_COMMIT_HASH=${{ github.sha }}
           if [ -z "$PUBLISH_REPO" ]; then
             npm run extension-chrome:package:staging
             npm run extension-firefox:package:staging
@@ -192,6 +249,7 @@ jobs:
     name: Publish Chrome extension
     needs: extensions-package
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 5
     if: vars.PUBLISH_REPO != ''
     steps:
@@ -199,10 +257,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
-
+          node-version: ${{ vars.NODE_VERSION }}
       - name: Set environment variables
         id: variables
         run: |
@@ -226,6 +284,7 @@ jobs:
     name: Publish Firefox extension
     needs: extensions-package
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 5
     if: vars.PUBLISH_REPO != ''
     steps:
@@ -233,9 +292,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Set environment variables
         id: variables
@@ -259,6 +319,7 @@ jobs:
           unzip ${{ env.FIREFOX_FILE_NAME }} -d $UNZIP_DIR
           npx web-ext-submit --source-dir=$UNZIP_DIR
           echo "APP_NAME=\"${APP_NAME}\"
+          APP_COMMIT_HASH=${{ github.sha }}
           PROXY_HOSTS=\"${PROXY_HOSTS}\"
           STAKING_POOLS=\"${STAKING_POOLS}\"" >.env
           bash deploy/firefox_pack_sources.sh
@@ -268,6 +329,7 @@ jobs:
     name: Publish Edge extension
     needs: extensions-package
     runs-on: ubuntu-latest
+    environment: production
     if: vars.PUBLISH_REPO != ''
     timeout-minutes: 5
     steps:
@@ -275,9 +337,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
         with:
           dont-install-npm-packages: true
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Set environment variables
         id: variables
@@ -293,10 +356,9 @@ jobs:
         env:
           EDGE_PRODUCT_ID: ${{ secrets.EDGE_PRODUCT_ID }}
           EDGE_CLIENT_ID: ${{ secrets.EDGE_CLIENT_ID }}
-          EDGE_CLIENT_SECRET: ${{ secrets.EDGE_CLIENT_SECRET }}
-          EDGE_ACCESS_TOKEN_URL: ${{ secrets.EDGE_ACCESS_TOKEN_URL }}
+          EDGE_API_KEY: ${{ secrets.EDGE_API_KEY }}
         run: |
-          npm i @plasmohq/edge-addons-api@1.3.2
+          npm i @plasmohq/edge-addons-api@2.0.0
           export EDGE_FILE_PATH="./$CHROME_FILE_NAME"
           node deploy/edgePublish.js
 
@@ -309,6 +371,7 @@ jobs:
       - extensions-package
       - android-release
     runs-on: ubuntu-latest
+    environment: production
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -316,7 +379,10 @@ jobs:
       - name: Calculate sha256 hashes
         run: |
           mkdir release
-          mv */*.dmg MyTonWallet-x64.exe/MyTonWallet-x64.exe */*.AppImage */*.apk release/
+          mv */*.dmg */*.AppImage */*.apk release/
+          mv ${{ env.APP_NAME }}-x64.exe/${{ env.APP_NAME }}-x64.exe release/
+          mv ${{ env.APP_NAME }}-arm64.exe/${{ env.APP_NAME }}-arm64.exe release/
+          mv ${{ env.APP_NAME }}.exe/${{ env.APP_NAME }}.exe release/
           sha256sum release/* >${{ env.HASH_FILENAME }}
 
       - name: Upload hash artifact
@@ -328,6 +394,7 @@ jobs:
   android-release:
     name: Release Android app
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' && github.ref == 'refs/heads/master'
     steps:
@@ -335,7 +402,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
+        with:
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Build and sync mobile project
         run: |
@@ -352,11 +421,11 @@ jobs:
           bundler-cache: true
           working-directory: mobile
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v3
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: "21"
+          distribution: "temurin"
           cache: gradle
 
       - name: Setup Android SDK
@@ -408,15 +477,17 @@ jobs:
 
   ios-release:
     name: Release iOS app
-    runs-on: macos-15
+    runs-on: macos-26
+    environment: production
     timeout-minutes: 30
     if: github.event_name != 'workflow_dispatch' && github.ref == 'refs/heads/master'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Prepare the Node environment
-        uses: ./.github/actions/prepare_node
+        uses: mytonwallet-org/shared-actions/prepare_node@master
+        with:
+          node-version: ${{ vars.NODE_VERSION }}
 
       - name: Build and sync mobile project
         run: |
@@ -438,16 +509,19 @@ jobs:
           IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          IOS_PROVISION_PROFILE_WIDGET_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_WIDGET_BASE64 }}
           IOS_KEYCHAIN_PASSWORD: ${{ secrets.IOS_KEYCHAIN_PASSWORD }}
         run: |
           # create variables
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          PP_WIDGET_PATH=$RUNNER_TEMP/build_pp_widget.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
 
           # import certificate and provisioning profile from secrets
           echo -n "$IOS_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
           echo -n "$IOS_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+          echo -n "$IOS_PROVISION_PROFILE_WIDGET_BASE64" | base64 --decode -o $PP_WIDGET_PATH
 
           # create temporary keychain
           security create-keychain -p "$IOS_KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
@@ -461,11 +535,27 @@ jobs:
           # apply provisioning profile
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_WIDGET_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+          # print keychain contents
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+          security cms -D -i "$PP_PATH" > /tmp/app_profile.plist
+          /usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' /tmp/app_profile.plist
+          /usr/libexec/PlistBuddy -c 'Print :Name' /tmp/app_profile.plist
 
       - name: "iOS: Package and publish"
         env:
           IOS_AUTH_KEY_BASE64: ${{ secrets.IOS_AUTH_KEY_BASE64 }}
+          FASTLANE_XCODEBUILD_SETTINGS_TIMEOUT: 300
         run: |
+          sudo xcode-select --switch /Applications/Xcode_26.1.app/Contents/Developer
+          export DEVELOPER_DIR=/Applications/Xcode_26.1.app/Contents/Developer
+          xcodebuild -version
+          xcodebuild -showsdks
+          xcodebuild -downloadPlatform iOS || true
+          sudo xcodebuild -runFirstLaunch || true
+          xcodebuild -showsdks | grep iphoneos
+
           cd mobile/ios/App
           echo -n "$IOS_AUTH_KEY_BASE64" | base64 --decode -o ./AuthKey.p8
           if [ -z "$PUBLISH_REPO" ]; then
@@ -477,25 +567,40 @@ jobs:
   publish-release:
     name: Publish GitHub release
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 30
     needs:
       - android-release
       - electron-sign-for-windows
     if: github.event_name != 'workflow_dispatch' && github.ref == 'refs/heads/master' && vars.PUBLISH_REPO != ''
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Set environment variables
         id: variables
         run: |
-          echo "WINDOWS_FILE_NAME=${{ env.APP_NAME }}-x64.exe" >> "$GITHUB_ENV"
+          echo "WINDOWS_X64_FILE_NAME=${{ env.APP_NAME }}-x64.exe" >> "$GITHUB_ENV"
+          echo "WINDOWS_ARM64_FILE_NAME=${{ env.APP_NAME }}-arm64.exe" >> "$GITHUB_ENV"
+          echo "WINDOWS_UNIVERSAL_FILE_NAME=${{ env.APP_NAME }}.exe" >> "$GITHUB_ENV"
           echo "ANDROID_FILE_NAME=${{ env.APP_NAME }}.apk" >> "$GITHUB_ENV"
 
-      - name: Download Windows package
-        id: download-windows
+      - name: Download Windows x64 package
+        id: dl_win_x64
         uses: actions/download-artifact@v4
         with:
-          name: ${{ env.WINDOWS_FILE_NAME }}
+          name: ${{ env.WINDOWS_X64_FILE_NAME }}
+
+      - name: Download Windows arm64 package
+        id: dl_win_arm64
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.WINDOWS_ARM64_FILE_NAME }}
+
+      - name: Download Windows universal package
+        id: dl_win_universal
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.WINDOWS_UNIVERSAL_FILE_NAME }}
 
       - name: Download Android package
         id: download-android
@@ -509,25 +614,40 @@ jobs:
           RELEASE_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$PUBLISH_REPO/releases?per_page=1" | jq -r '.[0].id')
           echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
 
-      - name: Delete existing asset
+      - name: Replace Windows assets
         env:
           RELEASE_ID: ${{ steps.release-id.outputs.release_id }}
+          FILE_PATH_X64: ${{ steps.dl_win_x64.outputs.download-path }}
+          FILE_PATH_ARM64: ${{ steps.dl_win_arm64.outputs.download-path }}
+          FILE_PATH_UNIVERSAL: ${{ steps.dl_win_universal.outputs.download-path }}
         run: |
-          PUBLISH_FILE_NAME=${WINDOWS_FILE_NAME// /-} # Consistency with electron-builder
-          ASSET_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$PUBLISH_REPO/releases/$RELEASE_ID/assets" | jq -r --arg PUBLISH_FILE_NAME "$PUBLISH_FILE_NAME" '.[] | select(.name == $PUBLISH_FILE_NAME) | .id')
-          curl -X DELETE -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$PUBLISH_REPO/releases/assets/$ASSET_ID"
+          set -e
 
-      - name: Push new Windows asset
-        env:
-          FILE_PATH: ${{ steps.download-windows.outputs.download-path }}
-          RELEASE_ID: ${{ steps.release-id.outputs.release_id }}
-        run: |
-          FILE_NAME=$WINDOWS_FILE_NAME
-          PUBLISH_FILE_NAME=${WINDOWS_FILE_NAME// /-} # Consistency with electron-builder
-          curl -X POST -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary "@$FILE_PATH/$FILE_NAME" \
-            "https://uploads.github.com/repos/$PUBLISH_REPO/releases/$RELEASE_ID/assets?name=$PUBLISH_FILE_NAME"
+          upload () {
+            local FILE_PATH="$1"
+            local FILE_NAME="$2"
+            local PUBLISH_FILE_NAME="${FILE_NAME// /-}"
+
+            ASSET_ID=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$PUBLISH_REPO/releases/$RELEASE_ID/assets" \
+              | jq -r --arg PUBLISH_FILE_NAME "$PUBLISH_FILE_NAME" '.[] | select(.name == $PUBLISH_FILE_NAME) | .id')
+
+            if [ "$ASSET_ID" != "null" ] && [ -n "$ASSET_ID" ]; then
+              curl -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/$PUBLISH_REPO/releases/assets/$ASSET_ID"
+            fi
+
+            curl -X POST -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@$FILE_PATH/$FILE_NAME" \
+              "https://uploads.github.com/repos/$PUBLISH_REPO/releases/$RELEASE_ID/assets?name=$PUBLISH_FILE_NAME"
+
+            echo "Uploaded $FILE_NAME"
+          }
+
+          upload "$FILE_PATH_X64" "$WINDOWS_X64_FILE_NAME"
+          upload "$FILE_PATH_ARM64" "$WINDOWS_ARM64_FILE_NAME"
+          upload "$FILE_PATH_UNIVERSAL" "$WINDOWS_UNIVERSAL_FILE_NAME"
 
       - name: Push new Android asset
         env:

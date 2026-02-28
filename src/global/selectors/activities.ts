@@ -1,61 +1,81 @@
-import type { ApiChain, ApiTxTimestamps } from '../../api/types';
+import type { ApiActivity, ApiActivityTimestamps, ApiChain } from '../../api/types';
 import type { GlobalState } from '../types';
 
-import { findLast, mapValues } from '../../util/iteratees';
-import { getIsSwapId, getIsTxIdLocal } from '../helpers';
-import { selectAccount, selectAccountState } from './accounts';
+import { getIsActivitySuitableForFetchingTimestamp, getIsTxIdLocal } from '../../util/activities';
+import { compact, findLast, mapValues } from '../../util/iteratees';
+import { selectAccountState } from './accounts';
 
-export function selectNewestTxTimestamps(global: GlobalState, accountId: string): ApiTxTimestamps {
+export function selectNewestActivityTimestamps(global: GlobalState, accountId: string): ApiActivityTimestamps {
   return mapValues(
-    selectAccountState(global, accountId)?.activities?.newestTransactionsBySlug || {},
+    selectAccountState(global, accountId)?.activities?.newestActivitiesBySlug || {},
     ({ timestamp }) => timestamp,
   );
 }
 
-export function selectLastTxTimestamps(global: GlobalState, accountId: string): ApiTxTimestamps {
-  const txById = selectAccountState(global, accountId)?.activities?.byId ?? {};
-  const idsBySlug = selectAccountState(global, accountId)?.activities?.idsBySlug || {};
-
-  return Object.entries(idsBySlug).reduce((result, [slug, ids]) => {
-    const txId = findLast(ids, (id) => !getIsTxIdLocal(id) && !getIsSwapId(id));
-    if (txId && txId in txById) {
-      result[slug] = txById[txId].timestamp;
-    }
-    return result;
-  }, {} as ApiTxTimestamps);
-}
-
-export function selectLastMainTxTimestamp(global: GlobalState, accountId: string): number | undefined {
+export function selectLastActivityTimestamp(
+  global: GlobalState,
+  accountId: string,
+  tokenSlug?: string,
+): number | undefined {
   const activities = selectAccountState(global, accountId)?.activities;
   if (!activities) return undefined;
 
-  const { byId, idsMain = [] } = activities;
-  const txId = findLast(idsMain, (id) => !getIsTxIdLocal(id) && !getIsSwapId(id));
+  const { byId, idsMain, idsBySlug } = activities;
+  const ids = (tokenSlug ? idsBySlug?.[tokenSlug] : idsMain) || [];
+  const txId = findLast(ids, (id) => getIsActivitySuitableForFetchingTimestamp(byId[id]));
   if (!txId) return undefined;
 
   return byId[txId].timestamp;
 }
 
-export function selectAccountTxTokenSlugs(global: GlobalState, accountId: string, chain: ApiChain) {
-  const idsBySlug = selectAccountState(global, accountId)?.activities?.idsBySlug;
-  if (!idsBySlug) return undefined;
+export function selectLocalActivitiesSlow(global: GlobalState, accountId: string) {
+  const { byId = {}, localActivityIds = [] } = global.byAccountId[accountId]?.activities ?? {};
 
-  return Object.keys(idsBySlug).filter((slug) => slug.startsWith(`${chain}-`));
+  return compact(localActivityIds.map((id) => byId[id]));
 }
 
-export function selectLocalTransactions(global: GlobalState, accountId: string) {
-  const accountState = global.byAccountId?.[accountId];
+/** Doesn't include local activities */
+export function selectPendingActivitiesSlow(global: GlobalState, accountId: string, chain: ApiChain) {
+  const { byId = {}, pendingActivityIds = {} } = global.byAccountId[accountId]?.activities ?? {};
+  const ids = pendingActivityIds[chain] ?? [];
 
-  return accountState?.activities?.localTransactions;
+  return compact(ids.map((id) => byId[id]));
 }
 
-export function selectIsFirstTransactionsLoaded(global: GlobalState, accountId: string) {
-  const { byChain } = selectAccountState(global, accountId) ?? {};
-  const { addressByChain } = selectAccount(global, accountId)!;
+export function selectRecentNonLocalActivitiesSlow(global: GlobalState, accountId: string, maxCount: number) {
+  const { byId = {}, idsMain = [] } = global.byAccountId[accountId]?.activities ?? {};
+  const result: ApiActivity[] = [];
 
-  if (!byChain || !addressByChain) {
-    return false;
+  for (const id of idsMain) {
+    if (result.length >= maxCount) {
+      break;
+    }
+    if (getIsTxIdLocal(id)) {
+      continue;
+    }
+    const activity = byId[id];
+    if (activity) {
+      result.push(activity);
+    }
   }
 
-  return Object.keys(addressByChain).every((chain) => byChain[chain as ApiChain]?.isFirstTransactionsLoaded);
+  return result;
+}
+
+export function selectIsHistoryEndReached(global: GlobalState, accountId: string, tokenSlug?: string) {
+  const accountState = selectAccountState(global, accountId);
+  const { isMainHistoryEndReached, isHistoryEndReachedBySlug } = accountState?.activities ?? {};
+
+  return tokenSlug
+    ? !!isHistoryEndReachedBySlug?.[tokenSlug]
+    : !!isMainHistoryEndReached;
+}
+
+/** If returns `undefined`, the activities haven't been loaded yet. If returns `[]`, there are no activities. */
+export function selectActivityHistoryIds(global: GlobalState, accountId: string, tokenSlug?: string) {
+  const { idsMain, idsBySlug } = selectAccountState(global, accountId)?.activities ?? {};
+
+  return tokenSlug
+    ? idsBySlug?.[tokenSlug]
+    : idsMain;
 }

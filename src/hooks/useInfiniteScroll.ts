@@ -15,20 +15,23 @@ type LoadMoreBackwards = (args: { offsetId?: string | number }) => void;
 
 const DEFAULT_LIST_SLICE = 30;
 
-const useInfiniteScroll = <ListId extends string | number>(
-  loadMoreBackwards?: LoadMoreBackwards,
-  listIds?: ListId[],
+const useInfiniteScroll = <ListId extends string | number>({
+  loadMoreBackwards,
+  listIds,
   isDisabled = false,
   listSlice = DEFAULT_LIST_SLICE,
-  slug?: string,
-  isActive?: boolean,
+  slug,
+  isActive,
   withResetOnInactive = false,
-): [ListId[]?, GetMore?, ResetScroll?] => {
-  const requestParamsRef = useRef<{
-    direction?: LoadMoreDirection;
-    offsetId?: ListId;
-  }>();
-
+}: {
+  loadMoreBackwards?: LoadMoreBackwards;
+  listIds?: ListId[];
+  isDisabled?: boolean;
+  listSlice?: number;
+  slug?: string;
+  isActive?: boolean;
+  withResetOnInactive?: boolean;
+}): [ListId[]?, GetMore?, ResetScroll?] => {
   const currentStateRef = useRef<{ viewportIds: ListId[]; isOnTop: boolean } | undefined>();
   if (!currentStateRef.current && listIds && !isDisabled) {
     const {
@@ -39,10 +42,6 @@ const useInfiniteScroll = <ListId extends string | number>(
   }
 
   const forceUpdate = useForceUpdate();
-
-  if (isDisabled) {
-    requestParamsRef.current = {};
-  }
 
   const prevSlug = usePrevious2(slug);
 
@@ -55,7 +54,6 @@ const useInfiniteScroll = <ListId extends string | number>(
     } = getViewportSlice(listIds, LoadMoreDirection.Forwards, listSlice, listIds[0]);
 
     currentStateRef.current = { viewportIds: newViewportIds, isOnTop: newIsOnTop };
-    requestParamsRef.current = {};
   });
 
   useSyncEffect(() => {
@@ -67,15 +65,15 @@ const useInfiniteScroll = <ListId extends string | number>(
   const prevListIds = usePrevious(listIds);
   const prevIsDisabled = usePrevious(isDisabled);
   if (listIds && !isDisabled && (listIds !== prevListIds || isDisabled !== prevIsDisabled)) {
-    const { viewportIds, isOnTop } = currentStateRef.current || {};
-    const currentMiddleId = viewportIds && !isOnTop ? viewportIds[Math.round(viewportIds.length / 2)] : undefined;
-    const defaultOffsetId = currentMiddleId && listIds.includes(currentMiddleId) ? currentMiddleId : listIds[0];
-    const { offsetId = defaultOffsetId, direction = LoadMoreDirection.Forwards } = requestParamsRef.current || {};
-    const { newViewportIds, newIsOnTop } = getViewportSlice(listIds, direction, listSlice, offsetId);
+    const { viewportIds: oldViewportIds, isOnTop: oldIsOnTop } = currentStateRef.current ?? {};
+    const { newViewportIds, newIsOnTop } = getViewportSliceAfterListChange(
+      listIds,
+      oldViewportIds,
+      oldIsOnTop,
+      listSlice,
+    );
 
-    requestParamsRef.current = {};
-
-    if (!viewportIds || !areSortedArraysEqual(viewportIds, newViewportIds)) {
+    if (!oldViewportIds || !areSortedArraysEqual(oldViewportIds, newViewportIds)) {
       currentStateRef.current = { viewportIds: newViewportIds, isOnTop: newIsOnTop };
     }
   } else if (!listIds) {
@@ -92,8 +90,6 @@ const useInfiniteScroll = <ListId extends string | number>(
     const offsetId = viewportIds
       ? direction === LoadMoreDirection.Backwards ? viewportIds[viewportIds.length - 1] : viewportIds[0]
       : undefined;
-
-    requestParamsRef.current = { direction, offsetId };
 
     if (!listIds) {
       if (loadMoreBackwards) {
@@ -127,7 +123,7 @@ function getViewportSlice<ListId extends string | number>(
   offsetId?: ListId,
 ) {
   const { length } = sourceIds;
-  const index = offsetId ? sourceIds.indexOf(offsetId) : 0;
+  const index = (offsetId !== undefined) ? sourceIds.indexOf(offsetId) : 0;
   const isForwards = direction === LoadMoreDirection.Forwards;
   const indexForDirection = isForwards ? index : (index + 1) || length;
   const from = Math.max(0, indexForDirection - listSlice);
@@ -153,6 +149,27 @@ function getViewportSlice<ListId extends string | number>(
     areAllLocal,
     newIsOnTop: newViewportIds[0] === sourceIds[0],
   };
+}
+
+function getViewportSliceAfterListChange<ListId extends string | number>(
+  newListIds: ListId[],
+  oldViewportIds: ListId[] | undefined,
+  oldIsOnTop: boolean | undefined,
+  sliceLength: number,
+) {
+  if (oldIsOnTop) {
+    // When the offsetId is on the top, the viewport slice must include at least as many items as it already has.
+    // Otherwise, the ids, that the user is seeing, can disappear (that causes the list to scroll higher instantly).
+    // Subtracting 1 prevents getViewportSlice from expanding the viewport slice 1 item with each newListIds change.
+    sliceLength = Math.max(sliceLength, (oldViewportIds?.length ?? 0) - 1);
+    return getViewportSlice(newListIds, LoadMoreDirection.Backwards, sliceLength, newListIds[0]);
+  }
+
+  let offsetId = oldViewportIds?.[Math.round(oldViewportIds.length / 2)];
+  if (offsetId !== undefined && !newListIds.includes(offsetId)) offsetId = newListIds[0];
+  // The direction must be Forwards for getViewportSlice to keep the offsetId at the newViewportIds middle. Otherwise,
+  // the viewport slice will "walk" 1 item backward with each newListIds change.
+  return getViewportSlice(newListIds, LoadMoreDirection.Forwards, sliceLength, offsetId);
 }
 
 export default useInfiniteScroll;

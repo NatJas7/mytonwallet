@@ -1,40 +1,45 @@
 import { Address } from '@ton/core';
 
 import type { ApiNetwork } from '../../types';
+import { ApiCommonError } from '../../types';
 
-import dns from '../../../util/dns';
-import { fetchAddressBook } from './util/apiV3';
+import { getDnsDomainZone, isTonChainDns } from '../../../util/dns';
 import { dnsResolve } from './util/dns';
 import { getTonClient, toBase64Address } from './util/tonCore';
 import { getKnownAddressInfo } from '../../common/addresses';
 import { DnsCategory } from './constants';
+import { fetchAddressBook } from './toncenter';
 
-const TON_DNS_COLLECTION = 'EQC3dNlesgVD8YbAazcauIrXBPfiVhMMr5YYk2in0Mtsz0Bz';
-const VIP_DNS_COLLECTION = 'EQBWG4EBbPDv4Xj7xlPwzxd7hSyHMzwwLB5O6rY-0BBeaixS';
-const GRAM_DNS_COLLECTION = 'EQAic3zPce496ukFDhbco28FVsKKl2WUX_iJwaL87CBxSiLQ';
-
-export async function resolveAddress(network: ApiNetwork, address: string): Promise<{
+export async function resolveAddress(network: ApiNetwork, address: string, skipFormatSelection?: boolean): Promise<{
   address: string;
   name?: string;
   isMemoRequired?: boolean;
   isScam?: boolean;
-} | undefined> {
-  const isDomain = dns.isDnsDomain(address);
+} | { error: ApiCommonError }> {
+  const isDomain = isTonChainDns(address);
   let domain: string | undefined;
 
   if (isDomain) {
     const resolvedAddress = await resolveAddressByDomain(network, address);
     if (!resolvedAddress) {
-      return undefined;
+      return { error: ApiCommonError.DomainNotResolved };
     }
 
-    const addressBook = await fetchAddressBook(network, [resolvedAddress]);
-
     domain = address;
-    address = addressBook[resolvedAddress].user_friendly;
+    address = resolvedAddress;
+
+    if (!skipFormatSelection) {
+      const addressBook = await fetchAddressBook(network, [address]);
+      address = addressBook[address].user_friendly;
+    }
   }
 
-  const normalizedAddress = normalizeAddress(address);
+  let normalizedAddress: string;
+  try {
+    normalizedAddress = normalizeAddress(network, address);
+  } catch {
+    return { error: ApiCommonError.InvalidAddress };
+  }
   const known = getKnownAddressInfo(normalizedAddress);
 
   if (known) {
@@ -48,25 +53,17 @@ export async function resolveAddress(network: ApiNetwork, address: string): Prom
   return { address, name: domain };
 }
 
-async function resolveAddressByDomain(network: ApiNetwork, domain: string) {
+export async function resolveAddressByDomain(network: ApiNetwork, domain: string) {
   try {
-    let base: string;
-    let collection: string;
-    if (dns.isVipDnsDomain(domain)) {
-      base = dns.removeVipZone(domain)!;
-      collection = VIP_DNS_COLLECTION;
-    } else if (dns.isGramDnsDomain(domain)) {
-      base = dns.removeGramZone(domain)!;
-      collection = GRAM_DNS_COLLECTION;
-    } else {
-      base = dns.removeTonZone(domain);
-      collection = TON_DNS_COLLECTION;
+    const zoneMatch = getDnsDomainZone(domain);
+    if (!zoneMatch) {
+      return undefined;
     }
 
     const result = await dnsResolve(
       getTonClient(network),
-      collection,
-      base,
+      zoneMatch.zone.resolver,
+      zoneMatch.base,
       DnsCategory.Wallet,
     );
 
@@ -83,6 +80,6 @@ async function resolveAddressByDomain(network: ApiNetwork, domain: string) {
   }
 }
 
-export function normalizeAddress(address: string, network?: ApiNetwork) {
+export function normalizeAddress(network: ApiNetwork, address: string) {
   return toBase64Address(address, true, network);
 }

@@ -83,7 +83,7 @@ export function useLoadGiveaway(
     const giveawayId = getGiveawayId();
     if (!giveawayId) return;
 
-    fetchGiveaway(giveawayId).then((giveawayRes) => {
+    void fetchGiveaway(giveawayId).then((giveawayRes) => {
       setGiveaway(giveawayRes);
 
       if (!giveawayRes.tokenAddress) {
@@ -91,7 +91,7 @@ export function useLoadGiveaway(
         return;
       }
 
-      fetchJettonMetadata(
+      void fetchJettonMetadata(
         giveawayRes.tokenAddress,
       ).then((jettonMetadata) => {
         setTokenAddressData(jettonMetadata);
@@ -131,7 +131,7 @@ export function useLoadParticipantStatus(
     const participantAddress = wallet.account.address;
     const giveawayId = getGiveawayId();
     if (giveawayId) {
-      fetchParticipantStatus(
+      void fetchParticipantStatus(
         giveawayId, participantAddress,
       )
         .then((resParticipantStatus) => setParticipantStatus(resParticipantStatus));
@@ -149,15 +149,11 @@ export async function checkinGiveaway(
 
   if (!(wallet.connectItems?.tonProof && 'proof' in wallet.connectItems.tonProof && giveawayId)) {
     if (tonConnect.connected) {
-      tonConnect.disconnect();
+      void tonConnect.disconnect();
     }
 
     return;
   }
-
-  const { payload, signature } = wallet.connectItems.tonProof.proof;
-  const { publicKey } = wallet.account;
-  const receiverAddress = wallet.account.address;
 
   const checkinRes = await fetch(
     `${GIVEAWAYS_API_URL}/giveaways/${giveawayId}/checkin`,
@@ -168,11 +164,10 @@ export async function checkinGiveaway(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        signedProof: payload,
+        receiverAddress: wallet.account.address,
+        tonProof: wallet.connectItems.tonProof.proof,
+        stateInit: wallet.account.walletStateInit,
         captchaToken,
-        signature,
-        publicKey,
-        receiverAddress,
       }),
     },
   );

@@ -1,13 +1,13 @@
 import withCache from './withCache';
 
-const DEFAULT_SHIFT = 6;
-const FILLER = '...';
-const FILLER_LENGTH = FILLER.length;
+export const MEANINGFUL_CHAR_LENGTH = 6;
+const ELLIPSIS = '···';
+const ELLIPSIS_LENGTH = ELLIPSIS.length;
 
-export const shortenAddress = withCache((address: string, shift = DEFAULT_SHIFT, fromRight = shift) => {
+export const shortenAddress = withCache((address: string, shift = MEANINGFUL_CHAR_LENGTH, fromRight = shift) => {
   if (!address) return undefined;
 
-  if (address.length <= shift + fromRight + FILLER_LENGTH) return address;
+  if (address.length <= shift + fromRight + ELLIPSIS_LENGTH) return address;
 
-  return `${address.slice(0, shift)}${FILLER}${address.slice(-fromRight)}`;
+  return `${address.slice(0, shift)}${ELLIPSIS}${address.slice(-fromRight)}`;
 });

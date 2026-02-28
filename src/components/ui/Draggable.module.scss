@@ -1,12 +1,11 @@
 .container {
   position: absolute;
   z-index: 1;
-
   width: 100%;
 }
 
 .isDragging {
-  z-index: 2;
+  z-index: 2 !important;
 
   :global(.drag-item) {
     pointer-events: none;

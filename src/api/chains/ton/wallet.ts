@@ -1,22 +1,29 @@
 import { beginCell, Cell, storeStateInit } from '@ton/core';
+import type { WalletContractV5R1 } from '@ton/ton';
 
-import type { ApiNetwork, ApiTonWallet, ApiWalletInfo } from '../../types';
+import type {
+  ApiAnyDisplayError,
+  ApiNetwork,
+  ApiTonWallet,
+  ApiWalletInfo,
+  ApiWalletWithVersionInfo,
+} from '../../types';
 import type { ApiTonWalletVersion, ContractInfo } from './types';
 import type { TonWallet } from './util/tonCore';
 
-import { DEFAULT_WALLET_VERSION } from '../../../config';
+import { DEFAULT_WALLET_VERSION, TONCOIN } from '../../../config';
 import { parseAccountId } from '../../../util/account';
 import { extractKey, findLast } from '../../../util/iteratees';
 import withCacheAsync from '../../../util/withCacheAsync';
-import { stringifyTxId } from './util';
-import { getWalletInfos } from './util/apiV3';
-import { fetchJettonBalances } from './util/tonapiio';
 import {
   getTonClient, toBase64Address, walletClassMap,
 } from './util/tonCore';
-import { fetchStoredTonWallet } from '../../common/accounts';
+import { fetchStoredWallet } from '../../common/accounts';
 import { base64ToBytes, hexToBytes, sha256 } from '../../common/utils';
-import { ALL_WALLET_VERSIONS, KnownContracts, WORKCHAIN } from './constants';
+import { ALL_WALLET_VERSIONS, ContractType, KnownContracts, NETWORK_CONFIG, WORKCHAIN } from './constants';
+import { loadTokenBalances } from './tokens';
+import { fetchJettonWallets } from './tokens';
+import { getWalletInfos } from './toncenter';
 
 export const isAddressInitialized = withCacheAsync(
   async (network: ApiNetwork, walletOrAddress: TonWallet | string) => {
@@ -25,67 +32,67 @@ export const isAddressInitialized = withCacheAsync(
 );
 
 export const isActiveSmartContract = withCacheAsync(async (network: ApiNetwork, address: string) => {
-  const { isInitialized, isWallet } = await getWalletInfo(network, address);
-  return isInitialized ? !isWallet : undefined;
+  const { isInitialized, version } = await getWalletInfo(network, address);
+  return isInitialized ? !version : undefined;
 }, (value) => value !== undefined);
 
 export function publicKeyToAddress(
   network: ApiNetwork,
   publicKey: Uint8Array,
   walletVersion: ApiTonWalletVersion,
+  isTestnetSubwalletId?: boolean,
 ) {
-  const wallet = buildWallet(network, publicKey, walletVersion);
+  const wallet = buildWallet(publicKey, walletVersion, isTestnetSubwalletId);
   return toBase64Address(wallet.address, false, network);
 }
 
 export function buildWallet(
-  network: ApiNetwork,
   publicKey: Uint8Array | string,
   walletVersion: ApiTonWalletVersion,
+  isTestnetSubwalletId?: boolean,
 ): TonWallet {
   if (typeof publicKey === 'string') {
     publicKey = hexToBytes(publicKey);
   }
-  const client = getTonClient(network);
-  const WalletClass = walletClassMap[walletVersion]!;
-  return client.open(
-    WalletClass.create({
+
+  const WalletClass = walletClassMap[walletVersion];
+  if (!WalletClass) {
+    throw new Error(`Unsupported wallet contract version "${walletVersion}"`);
+  }
+
+  if (walletVersion === 'W5') {
+    return (WalletClass as typeof WalletContractV5R1).create({
       publicKey: Buffer.from(publicKey),
       workchain: WORKCHAIN,
-    }),
-  );
+      walletId: {
+        networkGlobalId: NETWORK_CONFIG[isTestnetSubwalletId ? 'testnet' : 'mainnet'].chainId,
+      },
+    });
+  }
+
+  return WalletClass.create({
+    publicKey: Buffer.from(publicKey),
+    workchain: WORKCHAIN,
+  });
 }
 
-export async function getWalletInfo(network: ApiNetwork, walletOrAddress: TonWallet | string): Promise<{
-  isInitialized: boolean;
-  isWallet: boolean;
-  seqno: number;
-  balance: bigint;
-  lastTxId?: string;
-}> {
+export async function getWalletInfo(network: ApiNetwork, walletOrAddress: TonWallet | string): Promise<ApiWalletInfo> {
   const address = typeof walletOrAddress === 'string'
     ? walletOrAddress
     : toBase64Address(walletOrAddress.address, undefined, network);
 
-  const {
-    account_state: accountState,
-    wallet: isWallet,
-    seqno = 0,
-    balance,
-    last_transaction_id: {
-      lt,
-      hash,
-    },
-  } = await getTonClient(network).getWalletInfo(address);
+  return (await getWalletInfos(network, [address]))[address];
+}
+
+export async function fetchBalances(network: ApiNetwork, address: string, sendUpdateTokens: NoneToVoidFunction) {
+  const [{ balance: tonBalance }, tokenBalances] = await Promise.all([
+    getWalletInfo(network, address),
+    loadTokenBalances(network, address, sendUpdateTokens),
+  ]);
 
   return {
-    isInitialized: accountState === 'active',
-    isWallet,
-    seqno,
-    balance: BigInt(balance || '0'),
-    lastTxId: lt === '0'
-      ? undefined
-      : stringifyTxId({ lt, hash }),
+    [TONCOIN.slug]: tonBalance,
+    ...tokenBalances,
   };
 }
 
@@ -95,18 +102,22 @@ export async function getContractInfo(network: ApiNetwork, address: string): Pro
   isWallet?: boolean;
   contractInfo?: ContractInfo;
   codeHash?: string;
+  codeHashOld?: string;
 }> {
   const data = await getTonClient(network).getAddressInfo(address);
 
   const { code, state } = data;
 
   const codeHashOld = Buffer.from(await sha256(base64ToBytes(code))).toString('hex');
-  const contractInfo = Object.values(KnownContracts).find((info) => info.hash === codeHashOld);
   // For inactive addresses, `code` is an empty string. Cell.fromBase64 throws when `code` is an empty string.
   const codeHash = code && Cell.fromBase64(code).hash().toString('hex');
 
+  const contractInfo = Object.values(KnownContracts).find(
+    (info) => info.hash === codeHash || info.oldHash === codeHashOld,
+  );
+
   const isInitialized = state === 'active';
-  const isWallet = state === 'active' ? contractInfo?.type === 'wallet' : undefined;
+  const isWallet = state === 'active' ? contractInfo?.type === ContractType.Wallet : undefined;
   const isSwapAllowed = contractInfo?.isSwapAllowed;
 
   return {
@@ -115,14 +126,8 @@ export async function getContractInfo(network: ApiNetwork, address: string): Pro
     isSwapAllowed,
     contractInfo,
     codeHash,
+    codeHashOld,
   };
-}
-
-export async function getAccountBalance(accountId: string) {
-  const { network } = parseAccountId(accountId);
-  const { address } = await fetchStoredTonWallet(accountId);
-
-  return getWalletBalance(network, address);
 }
 
 export async function getWalletBalance(network: ApiNetwork, walletOrAddress: TonWallet | string): Promise<bigint> {
@@ -141,7 +146,10 @@ export async function pickBestWallet(network: ApiNetwork, publicKey: Uint8Array)
   lastTxId?: string;
 }> {
   const allWallets = await getWalletVersionInfos(network, publicKey);
-  const defaultWallet = allWallets.filter(({ version }) => version === DEFAULT_WALLET_VERSION)[0];
+  const defaultWallets = allWallets.filter(({ version }) => version === DEFAULT_WALLET_VERSION);
+  const defaultWallet = defaultWallets.find(
+    ({ isTestnetSubwalletId }) => isTestnetSubwalletId,
+  ) ?? defaultWallets[0];
 
   if (defaultWallet.lastTxId) {
     return defaultWallet;
@@ -163,7 +171,7 @@ export async function pickBestWallet(network: ApiNetwork, publicKey: Uint8Array)
 
   // Workaround for NOT holders who do not have transactions
   const v4Wallet = allWallets.find(({ version }) => version === 'v4R2')!;
-  const v4JettonBalances = await fetchJettonBalances(network, v4Wallet.address);
+  const { jettonWallets: v4JettonBalances = [] } = await fetchJettonWallets(network, v4Wallet.address, 1);
   if (v4JettonBalances.length > 0) {
     return v4Wallet;
   }
@@ -175,52 +183,76 @@ export async function getWalletVersionInfos(
   network: ApiNetwork,
   publicKey: Uint8Array,
   versions: ApiTonWalletVersion[] = ALL_WALLET_VERSIONS,
-): Promise<(ApiWalletInfo & { wallet: TonWallet })[]> {
-  const items = versions.map((version) => {
-    const wallet = buildWallet(network, publicKey, version);
-    const address = toBase64Address(wallet.address, false, network);
-    return { wallet, address, version };
-  });
-
+): Promise<(ApiWalletWithVersionInfo & { wallet: TonWallet })[]> {
+  const items = getWalletVersions(network, publicKey, versions);
   const walletInfos = await getWalletInfos(network, extractKey(items, 'address'));
 
-  return items.map((item) => {
+  const result = items.map((item) => {
+    const walletInfo = walletInfos[item.address] ?? {
+      balance: 0n,
+      isInitialized: false,
+    };
+
     return {
-      ...walletInfos[item.address] ?? {
-        balance: 0n,
-        isInitialized: false,
-      },
+      ...walletInfo,
       ...item,
     };
   });
+
+  return result;
 }
+
+type ApiTonWalletVersionInfo = {
+  wallet: TonWallet;
+  address: string;
+  version: ApiTonWalletVersion;
+  isTestnetSubwalletId?: boolean;
+};
 
 export function getWalletVersions(
   network: ApiNetwork,
   publicKey: Uint8Array,
   versions: ApiTonWalletVersion[] = ALL_WALLET_VERSIONS,
-): {
-    wallet: TonWallet;
-    address: string;
-    version: ApiTonWalletVersion;
-  }[] {
-  return versions.map((version) => {
-    const wallet = buildWallet(network, publicKey, version);
+): ApiTonWalletVersionInfo[] {
+  return versions.flatMap((version): ApiTonWalletVersionInfo | ApiTonWalletVersionInfo[] => {
+    if (version === 'W5' && network === 'testnet') {
+      // Support wallets with both `subwallet_id` values for testnet to keep backwards compatibility
+      const testnetWallet = buildWallet(publicKey, version, true);
+      const testnetAddress = toBase64Address(testnetWallet.address, false, 'testnet');
+
+      const mainnetWallet = buildWallet(publicKey, version, false);
+      const mainnetAddress = toBase64Address(mainnetWallet.address, false, 'testnet');
+
+      return [{
+        wallet: testnetWallet,
+        address: testnetAddress,
+        version,
+        isTestnetSubwalletId: true,
+      }, {
+        wallet: mainnetWallet,
+        address: mainnetAddress,
+        version,
+        isTestnetSubwalletId: false,
+      }];
+    }
+
+    const wallet = buildWallet(publicKey, version);
     const address = toBase64Address(wallet.address, false, network);
 
     return {
       wallet,
       address,
       version,
+      isTestnetSubwalletId: undefined,
     };
   });
 }
 
-export async function getWalletStateInit(accountId: string, storedWallet: ApiTonWallet) {
-  const wallet = await getTonWallet(accountId, storedWallet);
+export function getWalletStateInit(storedWallet: ApiTonWallet) {
+  const wallet = getTonWallet(storedWallet);
 
   return beginCell()
-    .storeWritable(storeStateInit(wallet!.init))
+    .storeWritable(storeStateInit(wallet.init))
     .endCell();
 }
 
@@ -232,15 +264,45 @@ export function pickWalletByAddress(network: ApiNetwork, publicKey: Uint8Array, 
   return allWallets.find((w) => w.address === address)!;
 }
 
-export async function getTonWallet(accountId: string, tonWallet?: ApiTonWallet) {
-  const { network } = parseAccountId(accountId);
-  const { publicKey, version } = tonWallet ?? await fetchStoredTonWallet(accountId);
+/**
+ * Check if the wallet is with testnet subwallet ID
+ * @returns `undefined` if the wallet is not a W5 wallet,
+ * `true` if the wallet is with testnet subwallet ID, `false` otherwise
+ */
+function checkIsTestnetSubwalletId(
+  publicKey: Uint8Array,
+  version: ApiTonWalletVersion,
+  address: string,
+): boolean | undefined {
+  if (version !== 'W5') {
+    return undefined;
+  }
 
-  const publicKeyBytes = hexToBytes(publicKey);
-  return buildWallet(network, publicKeyBytes, version);
+  const testnetSubwalletAddress = publicKeyToAddress('testnet', publicKey, version, true);
+
+  return address === testnetSubwalletAddress;
 }
 
-export function resolveWalletVersion(wallet: TonWallet) {
-  return Object.entries(walletClassMap)
-    .find(([, walletClass]) => wallet instanceof walletClass)?.[0];
+export function getTonWallet(tonWallet: ApiTonWallet) {
+  const { publicKey, version, address } = tonWallet;
+  if (!publicKey) {
+    throw new Error('Public key is missing');
+  }
+
+  // For W5 wallets, determine the correct subwallet ID by comparing addresses
+  if (version === 'W5') {
+    const isTestnetSubwalletId = checkIsTestnetSubwalletId(hexToBytes(publicKey), version, address);
+    return buildWallet(publicKey, version, isTestnetSubwalletId);
+  }
+
+  return buildWallet(publicKey, version);
+}
+
+export async function verifyLedgerWalletAddress(accountId: string): Promise<string | { error: ApiAnyDisplayError }> {
+  const { network } = parseAccountId(accountId);
+  const [wallet, { verifyLedgerTonAddress }] = await Promise.all([
+    fetchStoredWallet(accountId, 'ton'),
+    import('./ledger'),
+  ]);
+  return verifyLedgerTonAddress(network, wallet);
 }

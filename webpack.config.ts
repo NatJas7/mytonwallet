@@ -1,78 +1,138 @@
+import './dev/loadEnv';
 import 'webpack-dev-server';
 
+import WatchFilePlugin from '@mytonwallet/webpack-watch-file-plugin';
 import StatoscopeWebpackPlugin from '@statoscope/webpack-plugin';
 // @ts-ignore
 import PreloadWebpackPlugin from '@vue/preload-webpack-plugin';
-// @ts-ignore
-import WebpackBeforeBuildPlugin from 'before-build-webpack';
 import CopyWebpackPlugin from 'copy-webpack-plugin';
-import dotenv from 'dotenv';
 import fs from 'fs';
 import { GitRevisionPlugin } from 'git-revision-webpack-plugin';
 import HtmlPlugin from 'html-webpack-plugin';
-import yaml from 'js-yaml';
 import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import path from 'path';
 import type { Compiler, Configuration } from 'webpack';
+import { EnvironmentPlugin, IgnorePlugin, ProvidePlugin } from 'webpack';
+
+import { convertI18nYamlToJson } from './dev/locales/convertI18nYamlToJson';
 import {
-  DefinePlugin, EnvironmentPlugin, IgnorePlugin, NormalModuleReplacementPlugin, ProvidePlugin,
-} from 'webpack';
-
-import { PRODUCTION_URL } from './src/config';
-
-dotenv.config();
-
-// GitHub workflow uses an empty string as the default value if it's not in repository variables, so we cannot define a default value here
-process.env.BASE_URL = process.env.BASE_URL || PRODUCTION_URL;
-
-const {
-  APP_ENV = 'production',
+  APP_COMMIT_HASH,
+  APP_ENV,
+  APP_NAME,
   BASE_URL,
-  HEAD,
-} = process.env;
-const IS_CAPACITOR = process.env.IS_CAPACITOR === '1';
-const IS_EXTENSION = process.env.IS_EXTENSION === '1';
-const IS_PACKAGED_ELECTRON = process.env.IS_PACKAGED_ELECTRON === '1';
-const IS_FIREFOX_EXTENSION = process.env.IS_FIREFOX_EXTENSION === '1';
-const IS_OPERA_EXTENSION = process.env.IS_OPERA_EXTENSION === '1';
+  BRILLIANT_API_BASE_URL,
+  EXTENSION_DESCRIPTION,
+  EXTENSION_NAME,
+  IFRAME_WHITELIST,
+  IPFS_GATEWAY_BASE_URL,
+  IS_CAPACITOR,
+  IS_CORE_WALLET,
+  IS_EXPLORER,
+  IS_EXTENSION,
+  IS_FIREFOX_EXTENSION,
+  IS_OPERA_EXTENSION,
+  IS_PACKAGED_ELECTRON,
+  IS_TELEGRAM_APP,
+  MTW_STATIC_BASE_URL,
+  PROXY_API_BASE_URL,
+  SOLANA_MAINNET_API_URL,
+  SOLANA_MAINNET_RPC_URL,
+  SOLANA_TESTNET_API_URL,
+  SOLANA_TESTNET_RPC_URL,
+  SSE_BRIDGE_URL,
+  SUBPROJECT_URL_MASK,
+  TONAPIIO_MAINNET_URL,
+  TONAPIIO_TESTNET_URL,
+  TONCENTER_MAINNET_URL,
+  TONCENTER_TESTNET_URL,
+  TRON_MAINNET_API_URL,
+  TRON_TESTNET_API_URL,
+  WALLET_CONNECT_BRIDGE_PATTERNS,
+} from './src/config';
 
-const gitRevisionPlugin = new GitRevisionPlugin();
-const branch = HEAD || gitRevisionPlugin.branch();
-const appRevision = !branch || branch === 'HEAD' ? gitRevisionPlugin.commithash()?.substring(0, 7) : branch;
-const canUseStatoscope = !IS_EXTENSION && !IS_PACKAGED_ELECTRON && !IS_CAPACITOR;
+const destinationDir = path.resolve(__dirname, 'dist');
+const appCommitHash = APP_COMMIT_HASH || new GitRevisionPlugin().commithash();
+const isStatoscopeBuild = process.env.IS_STATOSCOPE === '1'; // "Statoscope build" is a special mode where all the entries are used. It is used for comprehensive code size comparison in PRs.
+const isWebApp = !(IS_EXTENSION || IS_PACKAGED_ELECTRON || IS_CAPACITOR);
+const canUseStatoscope = isStatoscopeBuild || isWebApp;
 const cspConnectSrcExtra = APP_ENV === 'development'
   ? `http://localhost:3000 ${process.env.CSP_CONNECT_SRC_EXTRA_URL}`
   : '';
-const cspFrameSrcExtra = [
+const cspScriptSrcExtra = IS_TELEGRAM_APP ? 'https://telegram.org' : '';
+const cspFrameSrcExtra = IS_CORE_WALLET ? '' : [
   'https://buy-sandbox.moonpay.com/',
   'https://buy.moonpay.com/',
+  'https://sell.moonpay.com/',
+  'https://sell-sandbox.moonpay.com/',
+  'https://*.onetrust.com/', // This is a GDPR cookie consent widget from Moonpay
   'https://dreamwalkers.io/',
   'https://avanchange.com/',
-  'https://pay.wata.pro/',
-  'https://royalpay.cc/',
+  ...IFRAME_WHITELIST,
+  SUBPROJECT_URL_MASK,
 ].join(' ');
 
-// The `connect-src` rule contains `https:` due to arbitrary requests are needed for jetton JSON configs.
-// The `img-src` rule contains `https:` due to arbitrary image URLs being used as jetton logos.
+const cspConnectSrcHosts = Array.from(new Set([
+  BRILLIANT_API_BASE_URL,
+  BRILLIANT_API_BASE_URL.replace(/^http(s?):/, 'ws$1:'),
+  ensureTrailingSlash(PROXY_API_BASE_URL),
+  MTW_STATIC_BASE_URL,
+  TONCENTER_MAINNET_URL,
+  TONCENTER_MAINNET_URL.replace(/^http(s?):/, 'ws$1:'),
+  TONCENTER_TESTNET_URL,
+  TONCENTER_TESTNET_URL.replace(/^http(s?):/, 'ws$1:'),
+  TONAPIIO_MAINNET_URL,
+  TONAPIIO_TESTNET_URL,
+  TRON_MAINNET_API_URL,
+  TRON_TESTNET_API_URL,
+  SOLANA_MAINNET_RPC_URL,
+  SOLANA_MAINNET_RPC_URL.replace(/^http(s?):/, 'ws$1:'),
+  SOLANA_TESTNET_RPC_URL,
+  SOLANA_TESTNET_RPC_URL.replace(/^http(s?):/, 'ws$1:'),
+  SOLANA_MAINNET_API_URL,
+  SOLANA_TESTNET_API_URL,
+  WALLET_CONNECT_BRIDGE_PATTERNS,
+  ensureTrailingSlash(IPFS_GATEWAY_BASE_URL),
+  ensureTrailingSlash(SSE_BRIDGE_URL),
+])).join(' ');
+
+const cspImageSrcHosts = [
+  MTW_STATIC_BASE_URL,
+  'https://imgproxy.mytonwallet.org',
+  'https://dns-image.mytonwallet.org',
+  'https://mytonwallet.s3.eu-central-1.amazonaws.com',
+  'https://cache.tonapi.io', // Deprecated
+  'https://c.tonapi.io',
+  'https://imgproxy.toncenter.com',
+  'https://web-api.changelly.com',
+].join(' ');
+
 // The `media-src` rule contains `data:` because of iOS sound initialization.
 const CSP = `
   default-src 'none';
   manifest-src 'self';
-  connect-src 'self' https: ${cspConnectSrcExtra};
-  script-src 'self' 'wasm-unsafe-eval';
+  connect-src 'self' blob: ${cspConnectSrcHosts} ${cspConnectSrcExtra};
+  script-src 'self' 'wasm-unsafe-eval' ${cspScriptSrcExtra};
   style-src 'self' https://fonts.googleapis.com/;
-  img-src 'self' data: https: blob:;
-  media-src 'self' data:;
+  img-src 'self' data: blob: https: ${cspImageSrcHosts};
+  media-src 'self' data: https://static.mytonwallet.org/;
   object-src 'none';
-  base-uri 'none';
+  base-uri ${IS_EXPLORER ? '\'self\'' : '\'none\''};
   font-src 'self' https://fonts.gstatic.com/;
   form-action 'none';
-  frame-src 'self' ${cspFrameSrcExtra};`
+  frame-src 'self' https: ${cspFrameSrcExtra};`
   .replace(/\s+/g, ' ').trim();
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const appVersion = require('./package.json').version;
 
 const defaultI18nFilename = path.resolve(__dirname, './src/i18n/en.json');
+
+const statoscopeStatsFilename = 'statoscope-build-statistics.json';
+const statoscopeStatsFileToCompare = process.env.STATOSCOPE_STATS_TO_COMPARE;
+// If a compared stat file name is the same as the main stats file name, the Statoscope UI doesn't show it.
+if (path.basename(statoscopeStatsFileToCompare || '') === statoscopeStatsFilename) {
+  throw new Error(`The STATOSCOPE_STATS_TO_COMPARE file name mustn't be ${statoscopeStatsFilename}`);
+}
 
 export default function createConfig(
   _: any,
@@ -83,13 +143,10 @@ export default function createConfig(
     target: 'web',
 
     optimization: {
-      minimize: APP_ENV === 'production',
+      minimize: APP_ENV === 'production' && !IS_EXTENSION,
       usedExports: true,
       ...(APP_ENV === 'staging' && {
         chunkIds: 'named',
-      }),
-      ...(IS_EXTENSION && {
-        minimize: false,
       }),
       ...(IS_CAPACITOR && {
         splitChunks: false,
@@ -98,9 +155,15 @@ export default function createConfig(
 
     entry: {
       main: './src/index.tsx',
-      extensionServiceWorker: './src/extension/serviceWorker.ts',
-      extensionContentScript: './src/extension/contentScript.ts',
-      extensionPageScript: './src/extension/pageScript/index.ts',
+      ...((IS_EXTENSION || isStatoscopeBuild) && {
+        extensionServiceWorker: {
+          import: './src/extension/serviceWorker.ts',
+          // Extension service worker isn't allowed to load code dynamically. This option inlines all dynamic imports.
+          chunkLoading: false,
+        },
+        extensionContentScript: './src/extension/contentScript.ts',
+        extensionPageScript: './src/extension/pageScript/index.ts',
+      }),
     },
 
     devServer: {
@@ -108,6 +171,9 @@ export default function createConfig(
       host: '0.0.0.0',
       allowedHosts: 'all',
       hot: false,
+      // When using the History API, the index.html page will likely have to be served in place of any 404 responses
+      // https://webpack.js.org/configuration/dev-server/#devserverhistoryapifallback
+      historyApiFallback: IS_EXPLORER,
       static: [
         {
           directory: path.resolve(__dirname, 'public'),
@@ -130,14 +196,14 @@ export default function createConfig(
       filename: (pathData) => (pathData.chunk?.name?.startsWith('extension') ? '[name].js' : '[name].[contenthash].js'),
       chunkFilename: '[id].[chunkhash].js',
       assetModuleFilename: '[name].[contenthash][ext]',
-      path: path.resolve(__dirname, 'dist'),
+      path: destinationDir,
       clean: true,
     },
 
     module: {
       rules: [
         {
-          test: /\.(ts|tsx|js)$/,
+          test: /\.(ts|tsx|js|mjs|cjs)$/,
           loader: 'babel-loader',
           exclude: /node_modules/,
         },
@@ -162,6 +228,7 @@ export default function createConfig(
               loader: 'css-loader',
               options: {
                 modules: {
+                  namedExport: false,
                   exportLocalsConvention: 'camelCase',
                   auto: true,
                   localIdentName: APP_ENV === 'production' ? '[sha1:hash:base64:8]' : '[name]__[local]',
@@ -178,7 +245,7 @@ export default function createConfig(
           use: [MiniCssExtractPlugin.loader, 'css-loader', 'postcss-loader', 'sass-loader'],
         },
         {
-          test: /\.(woff(2)?|ttf|eot|svg|png|jpg|tgs|webp|mp3)(\?v=\d+\.\d+\.\d+)?$/,
+          test: /\.(woff(2)?|ttf|eot|svg|png|jpg|tgs|webp|mp3|mp4|avif)(\?v=\d+\.\d+\.\d+)?$/,
           type: 'asset/resource',
         },
         {
@@ -199,7 +266,7 @@ export default function createConfig(
     },
 
     resolve: {
-      extensions: ['.js', '.ts', '.tsx'],
+      extensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx'],
       fallback: {
         crypto: false,
         stream: require.resolve('stream-browserify'),
@@ -217,10 +284,8 @@ export default function createConfig(
       ...(IS_OPERA_EXTENSION ? [{
         apply: (compiler: Compiler) => {
           compiler.hooks.afterDone.tap('After Compilation', async () => {
-            const dir = './dist/';
-
-            for (const filename of await fs.promises.readdir(dir)) {
-              const file = path.join(dir, filename);
+            for (const filename of await fs.promises.readdir(destinationDir)) {
+              const file = path.join(destinationDir, filename);
 
               if (file.endsWith('.tgs')) {
                 await fs.promises.rename(file, file.replace('.tgs', '.json'));
@@ -234,17 +299,30 @@ export default function createConfig(
           });
         },
       }] : []),
-      new WebpackBeforeBuildPlugin((stats: any, callback: VoidFunction) => {
-        const defaultI18nYaml = fs.readFileSync('./src/i18n/en.yaml', 'utf8');
-        const defaultI18nJson = convertI18nYamlToJson(defaultI18nYaml, mode === 'production');
+      new WatchFilePlugin({
+        rules: [
+          {
+            name: 'i18n to JSON conversion',
+            files: 'src/i18n/en.yaml',
+            action: (filePath) => {
+              const defaultI18nYaml = fs.readFileSync(filePath, 'utf8');
+              const defaultI18nJson = convertI18nYamlToJson(defaultI18nYaml, mode === 'production');
 
-        if (!defaultI18nJson) {
-          return;
-        }
+              if (!defaultI18nJson) {
+                return;
+              }
 
-        fs.writeFile(defaultI18nFilename, defaultI18nJson, 'utf-8', () => {
-          callback();
-        });
+              fs.writeFileSync(defaultI18nFilename, defaultI18nJson, 'utf-8');
+            },
+            firstCompilation: true,
+          },
+          {
+            name: 'Icon font generation',
+            files: 'src/assets/font-icons/*.svg',
+            action: 'npm run build:icons',
+            sharedAction: true,
+          },
+        ],
       }),
       // Do not add the BIP39 word list in other languages
       new IgnorePlugin({
@@ -256,6 +334,9 @@ export default function createConfig(
         template: 'src/index.html',
         chunks: ['main'],
         csp: CSP,
+        title: APP_NAME,
+        homepage: IS_CORE_WALLET ? 'https://wallet.ton.org' : 'https://mytonwallet.io',
+        assets_prefix: IS_CORE_WALLET ? 'coreWallet/' : '',
       }),
       new PreloadWebpackPlugin({
         include: 'allAssets',
@@ -265,6 +346,9 @@ export default function createConfig(
           /theme_.*?\.png/, // Theme icons
           /chain_.*?\.png/, // Chain icons
           /settings_.*?\.svg/, // Settings icons (svg)
+          ...(IS_CORE_WALLET ? [
+            /core_wallet_.*?\.png/, // Lottie thumbs for TON Wallet
+          ] : []),
         ],
         as(entry: string) {
           if (/\.png$/.test(entry)) return 'image';
@@ -281,18 +365,22 @@ export default function createConfig(
         APP_ENV: 'production',
         APP_NAME: '',
         APP_VERSION: appVersion,
-        APP_REVISION: appRevision ?? '',
+        APP_COMMIT_HASH: appCommitHash ?? '',
         TEST_SESSION: '',
-        TONHTTPAPI_MAINNET_URL: '',
-        TONHTTPAPI_MAINNET_API_KEY: '',
-        TONHTTPAPI_TESTNET_URL: '',
-        TONHTTPAPI_TESTNET_API_KEY: '',
+        TONCENTER_MAINNET_URL: '',
+        TONCENTER_MAINNET_KEY: '',
+        TONCENTER_TESTNET_URL: '',
+        TONCENTER_TESTNET_KEY: '',
         TONAPIIO_MAINNET_URL: '',
         TONAPIIO_TESTNET_URL: '',
-        TONHTTPAPI_V3_MAINNET_API_KEY: '',
-        TONHTTPAPI_V3_TESTNET_API_KEY: '',
         BRILLIANT_API_BASE_URL: '',
         TRON_MAINNET_API_URL: '',
+        SOLANA_MAINNET_RPC_URL: '',
+        SOLANA_TESTNET_RPC_URL: '',
+        SOLANA_MAINNET_API_URL: '',
+        SOLANA_MAINNET_API_KEY: '',
+        SOLANA_TESTNET_API_URL: '',
+        SOLANA_TESTNET_API_KEY: '',
         TRON_TESTNET_API_URL: '',
         PROXY_HOSTS: '',
         STAKING_POOLS: '',
@@ -300,27 +388,22 @@ export default function createConfig(
         LIQUID_JETTON: '',
         IS_PACKAGED_ELECTRON: 'false',
         IS_ANDROID_DIRECT: 'false',
-        ELECTRON_TONHTTPAPI_MAINNET_API_KEY: '',
-        ELECTRON_TONHTTPAPI_TESTNET_API_KEY: '',
+        ELECTRON_TONCENTER_MAINNET_KEY: '',
+        ELECTRON_TONCENTER_TESTNET_KEY: '',
         BASE_URL,
         BOT_USERNAME: '',
-        IS_EXTENSION: 'false',
+        IS_EXTENSION: '', // It's necessary to use an empty string, because it's used in bundle-time conditions
         IS_FIREFOX_EXTENSION: 'false',
         IS_CAPACITOR: 'false',
         IS_AIR_APP: 'false',
+        IS_CORE_WALLET: 'false',
+        IS_TELEGRAM_APP: 'false',
+        IS_EXPLORER: 'false',
         SWAP_FEE_ADDRESS: '',
         DIESEL_ADDRESS: '',
         GIVEAWAY_CHECKIN_URL: '',
-      }),
-      /* eslint-enable no-null/no-null */
-      new DefinePlugin({
-        APP_REVISION: DefinePlugin.runtimeValue(
-          () => {
-            const { gitBranch, commit } = getGitMetadata();
-            return JSON.stringify(!gitBranch || gitBranch === 'HEAD' ? commit : gitBranch);
-          },
-          mode === 'development' ? true : [],
-        ),
+        PROXY_API_BASE_URL: '',
+        WALLET_CONNECT_PROJECT_ID: '',
       }),
       new ProvidePlugin({
         Buffer: ['buffer', 'Buffer'],
@@ -335,9 +418,19 @@ export default function createConfig(
             transform: (content) => {
               const manifest = JSON.parse(content.toString());
               manifest.version = appVersion;
+              manifest.name = EXTENSION_NAME;
+              manifest.description = EXTENSION_DESCRIPTION;
               manifest.content_security_policy = {
                 extension_pages: CSP,
               };
+              manifest.action = { default_title: APP_NAME };
+              manifest.icons = IS_CORE_WALLET
+                ? {
+                  192: 'coreWallet/icon-192x192.png',
+                  256: 'coreWallet/icon-256x256.png',
+                  512: 'coreWallet/icon-512x512.png',
+                }
+                : { 192: 'icon-192x192.png', 384: 'icon-384x384.png', 512: 'icon-512x512.png' };
 
               if (IS_FIREFOX_EXTENSION) {
                 manifest.background = {
@@ -364,7 +457,7 @@ export default function createConfig(
             ) as any,
           },
           {
-            from: 'src/_headers',
+            from: IS_TELEGRAM_APP ? 'src/_headers_telegram' : 'src/_headers',
             transform: (content: Buffer) => content.toString().replace('{{CSP}}', CSP),
           },
         ],
@@ -373,62 +466,17 @@ export default function createConfig(
         statsOptions: {
           context: __dirname,
         },
-        saveReportTo: path.resolve('./public/statoscope-report.html'),
-        saveStatsTo: path.resolve('./public/statoscope-build-statistics.json'),
+        saveReportTo: path.join(destinationDir, 'statoscope-report.html'),
+        saveStatsTo: path.join(destinationDir, statoscopeStatsFilename),
         normalizeStats: true,
         open: false,
-        extensions: [new WebpackContextExtension()], // eslint-disable-line @typescript-eslint/no-use-before-define
+        extensions: [new WebpackContextExtension()],
+        ...(statoscopeStatsFileToCompare ? { additionalStats: [statoscopeStatsFileToCompare] } : undefined),
       })] : []),
-      ...(IS_EXTENSION
-        ? [
-          new NormalModuleReplacementPlugin(
-            /src\/api\/providers\/worker\/connector\.ts/,
-            '../extension/connectorForPopup.ts',
-          ),
-        ]
-        : []),
     ],
 
-    devtool:
-      IS_EXTENSION ? 'cheap-source-map' : APP_ENV === 'production' && IS_PACKAGED_ELECTRON ? undefined : 'source-map',
+    devtool: IS_EXTENSION ? 'cheap-source-map' : APP_ENV === 'production' && !isWebApp ? undefined : 'source-map',
   };
-}
-
-function getGitMetadata() {
-  const revisionPlugin = new GitRevisionPlugin();
-  const commit = revisionPlugin.commithash()?.substring(0, 7);
-
-  return {
-    gitBranch: HEAD || gitRevisionPlugin.branch(),
-    commit,
-  };
-}
-
-function convertI18nYamlToJson(content: string, shouldThrowException: boolean): string | undefined {
-  try {
-    const i18n = yaml.load(content) as AnyLiteral;
-
-    const json: AnyLiteral = Object.entries(i18n).reduce((acc: AnyLiteral, [key, value]) => {
-      if (typeof value === 'string') {
-        acc[key] = value;
-      }
-      if (typeof value === 'object') {
-        acc[key] = { ...value };
-      }
-
-      return acc;
-    }, {});
-
-    return JSON.stringify(json, undefined, 2);
-  } catch (err: any) {
-    console.error(err.message); // eslint-disable-line no-console
-
-    if (shouldThrowException) {
-      throw err;
-    }
-  }
-
-  return undefined;
 }
 
 class WebpackContextExtension {
@@ -448,4 +496,16 @@ class WebpackContextExtension {
       payload: { context: this.context },
     };
   }
+}
+
+/**
+ * Adds a trailing slash to the given url.
+ * This is needed for the CSP to work correctly:
+ *  - paths that end in `/` match any path they are a prefix of. For example:
+ *    `example.com/api/` will permit resources from `example.com/api/users/new`.
+ *
+ * https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy#host-source
+ */
+function ensureTrailingSlash(url: string) {
+  return url.endsWith('/') ? url : url + '/';
 }

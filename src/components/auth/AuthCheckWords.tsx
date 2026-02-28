@@ -1,40 +1,45 @@
-import React, { memo } from '../../lib/teact/teact';
+import React, { memo, useRef } from '../../lib/teact/teact';
 import { getActions } from '../../global';
 
 import buildClassName from '../../util/buildClassName';
 
+import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
 
 import CheckWordsContent from '../common/backup/CheckWordsContent';
-import Button from '../ui/Button';
+import Header from './Header';
 
 import styles from './Auth.module.scss';
 
 interface OwnProps {
-  isActive?: boolean;
+  isActive: boolean;
   mnemonic?: string[];
   checkIndexes?: number[];
 }
 
 const AuthCheckWords = ({ isActive, mnemonic, checkIndexes }: OwnProps) => {
-  const lang = useLang();
-
   const { openMnemonicPage } = getActions();
+
+  const lang = useLang();
+  const headerRef = useRef<HTMLDivElement>();
+  const title = lang('Let\'s Check!');
+
+  useHistoryBack({ isActive, onBack: openMnemonicPage });
 
   return (
     <div className={styles.wrapper}>
-      <div className={buildClassName(styles.container, 'custom-scroll')}>
+      <Header
+        isActive={isActive}
+        title={title}
+        topTargetRef={headerRef}
+        onBackClick={openMnemonicPage}
+      />
 
-        <div className={styles.header}>
-          <Button isSimple isText onClick={openMnemonicPage} className={styles.headerBackBlock}>
-            <i className={buildClassName(styles.iconChevron, 'icon-chevron-left')} aria-hidden />
-            <span>{lang('Back')}</span>
-          </Button>
-          <span className={styles.headerTitle}>{lang('Let\'s Check!')}</span>
-        </div>
-
+      <div className={buildClassName(styles.container, styles.container_scrollable, 'custom-scroll')}>
         <CheckWordsContent
           isActive={isActive}
+          headerRef={headerRef}
+          stickerClassName={styles.topSticker}
           mnemonic={mnemonic}
           checkIndexes={checkIndexes}
         />

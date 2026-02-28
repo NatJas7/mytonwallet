@@ -2,26 +2,23 @@ import * as tonWebMnemonic from 'tonweb-mnemonic';
 import * as bip39 from 'bip39';
 import nacl from 'tweetnacl';
 
-import type {
-  ApiAccountWithMnemonic,
-  ApiLedgerAccount,
-  ApiNetwork,
-  ApiTonAccount,
-  ApiTonWallet,
-} from '../../types';
+import type { ApiAccountWithMnemonic, ApiAnyDisplayError, ApiNetwork, ApiTonWallet } from '../../types';
 import type { ApiTonWalletVersion } from './types';
 import type { TonWallet } from './util/tonCore';
 
+import { DEFAULT_WALLET_VERSION } from '../../../config';
 import * as HDKey from '../../../lib/ed25519-hd-key';
-import { parseAccountId } from '../../../util/account';
 import isMnemonicPrivateKey from '../../../util/isMnemonicPrivateKey';
+import { extractKey, omitUndefined } from '../../../util/iteratees';
 import { logDebugError } from '../../../util/logs';
-import { toBase64Address } from './util/tonCore';
-import { fetchStoredAccount, getNewAccountId, setAccountValue } from '../../common/accounts';
+import { getWalletPublicKey, toBase64Address } from './util/tonCore';
+import { fetchStoredAccount } from '../../common/accounts';
 import { getMnemonic } from '../../common/mnemonic';
 import { bytesToHex, hexToBytes } from '../../common/utils';
+import { resolveAddress } from './address';
 import { TON_BIP39_PATH } from './constants';
-import { buildWallet, pickBestWallet, publicKeyToAddress } from './wallet';
+import { getWalletInfos } from './toncenter';
+import { buildWallet, getWalletInfo, pickBestWallet, publicKeyToAddress } from './wallet';
 
 export function generateMnemonic() {
   return tonWebMnemonic.generateMnemonic();
@@ -33,6 +30,11 @@ export function validateMnemonic(mnemonic: string[]) {
 
 export function privateKeyHexToKeyPair(privateKeyHex: string) {
   return nacl.sign.keyPair.fromSeed(hexToBytes(privateKeyHex));
+}
+
+export async function fetchPrivateKeyString(accountId: string, password: string, account?: ApiAccountWithMnemonic) {
+  const privateKey = await fetchPrivateKey(accountId, password, account);
+  return privateKey && bytesToHex(privateKey);
 }
 
 export async function fetchPrivateKey(accountId: string, password: string, account?: ApiAccountWithMnemonic) {
@@ -87,36 +89,36 @@ export function getWalletFromBip39Mnemonic(
   version?: ApiTonWalletVersion,
 ): Promise<ApiTonWallet> {
   const { publicKey } = bip39MnemonicToKeyPair(mnemonic);
-  return getWalletFromKeys(publicKey, network, version);
+  return getWalletFromKeys(network, publicKey, version);
 }
 
 export async function getWalletFromMnemonic(
-  mnemonic: string[],
   network: ApiNetwork,
+  mnemonic: string[],
   version?: ApiTonWalletVersion,
 ): Promise<ApiTonWallet & { lastTxId?: string }> {
   const { publicKey } = await tonWebMnemonic.mnemonicToKeyPair(mnemonic);
-  return getWalletFromKeys(publicKey, network, version);
+  return getWalletFromKeys(network, publicKey, version);
 }
 
 export function getWalletFromPrivateKey(
-  privateKey: string,
   network: ApiNetwork,
+  privateKey: string,
   version?: ApiTonWalletVersion,
 ): Promise<ApiTonWallet> {
   const { publicKey } = privateKeyHexToKeyPair(privateKey);
-  return getWalletFromKeys(publicKey, network, version);
+  return getWalletFromKeys(network, publicKey, version);
 }
 
 async function getWalletFromKeys(
-  publicKey: Uint8Array,
   network: ApiNetwork,
+  publicKey: Uint8Array,
   version?: ApiTonWalletVersion,
 ): Promise<ApiTonWallet & { lastTxId?: string }> {
   let wallet: TonWallet;
   let lastTxId: string | undefined;
   if (version) {
-    wallet = buildWallet(network, publicKey, version);
+    wallet = buildWallet(publicKey, version, network === 'testnet');
   } else {
     ({ wallet, version, lastTxId } = await pickBestWallet(network, publicKey));
   }
@@ -125,7 +127,6 @@ async function getWalletFromKeys(
   const publicKeyHex = bytesToHex(publicKey);
 
   return {
-    type: 'ton',
     publicKey: publicKeyHex,
     address,
     version,
@@ -140,34 +141,73 @@ function bip39MnemonicToKeyPair(mnemonic: string[]) {
   return nacl.sign.keyPair.fromSeed(privateKey);
 }
 
-export async function importNewWalletVersion(accountId: string, version: ApiTonWalletVersion) {
-  const { network } = parseAccountId(accountId);
+export function getOtherVersionWallet(
+  network: ApiNetwork,
+  wallet: ApiTonWallet,
+  otherVersion: ApiTonWalletVersion,
+  isTestnetSubwalletId?: boolean,
+): ApiTonWallet {
+  if (!wallet.publicKey) {
+    throw new Error('The wallet has no public key');
+  }
 
-  const account = await fetchStoredAccount<ApiTonAccount | ApiLedgerAccount>(accountId);
-  const publicKey = hexToBytes(account.ton.publicKey);
-
-  const newAddress = publicKeyToAddress(network, publicKey, version);
-  const newAccountId = await getNewAccountId(network);
-  const newAccount: ApiTonAccount | ApiLedgerAccount = {
-    ...account,
-    ton: {
-      type: 'ton',
-      address: newAddress,
-      publicKey: account.ton.publicKey,
-      version,
-      index: account.ton.index,
-    },
-  };
-
-  const ledger = account.type === 'ledger'
-    ? { index: account.ton.index, driver: account.driver }
-    : undefined;
-
-  await setAccountValue(newAccountId, 'accounts', newAccount);
+  const publicKey = hexToBytes(wallet.publicKey);
+  const newAddress = publicKeyToAddress(network, publicKey, otherVersion, isTestnetSubwalletId);
 
   return {
-    accountId: newAccountId,
     address: newAddress,
-    ledger,
+    publicKey: wallet.publicKey,
+    version: otherVersion,
+    index: wallet.index,
   };
+}
+
+export async function getWalletFromAddress(
+  network: ApiNetwork,
+  addressOrDomain: string,
+): Promise<{ title?: string; wallet: ApiTonWallet } | { error: ApiAnyDisplayError }> {
+  const resolvedAddress = await resolveAddress(network, addressOrDomain, true);
+  if ('error' in resolvedAddress) return resolvedAddress;
+  const rawAddress = resolvedAddress.address;
+
+  const [walletInfo, publicKey] = await Promise.all([
+    getWalletInfo(network, rawAddress),
+    getWalletPublicKey(network, rawAddress),
+  ]);
+
+  return {
+    title: resolvedAddress.name,
+    wallet: omitUndefined<ApiTonWallet>({
+      publicKey: publicKey ? bytesToHex(publicKey) : undefined,
+      address: walletInfo.address,
+      // The wallet has no version until it's initialized as a wallet. Using the default version just for the type
+      // compliance, it plays no role for view wallets anyway.
+      version: walletInfo?.version ?? DEFAULT_WALLET_VERSION,
+      index: 0,
+      isInitialized: walletInfo?.isInitialized ?? false,
+    }),
+  };
+}
+
+export async function getWalletsFromLedgerAndLoadBalance(
+  network: ApiNetwork,
+  accountIndices: number[],
+): Promise<{ wallet: ApiTonWallet; balance: bigint }[] | { error: ApiAnyDisplayError }> {
+  const { getLedgerTonWallet } = await import('./ledger');
+  const wallets: ApiTonWallet[] = [];
+
+  // Load the wallets from Ledger
+  for (const accountIndex of accountIndices) {
+    const wallet = await getLedgerTonWallet(network, accountIndex);
+    if ('error' in wallet) return { error: wallet.error };
+    wallets.push(wallet);
+  }
+
+  // Fetch the wallets' balances
+  const walletInfos = await getWalletInfos(network, extractKey(wallets, 'address'));
+
+  return wallets.map((wallet) => ({
+    wallet,
+    balance: walletInfos[wallet.address].balance,
+  }));
 }

@@ -1,18 +1,18 @@
 import type { StartScanOptions } from '@capacitor-mlkit/barcode-scanning';
-import { BarcodeFormat, BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
+import { BarcodeFormat, BarcodeScanner, Resolution } from '@capacitor-mlkit/barcode-scanning';
 import React, { memo, useRef, useState } from '../../../lib/teact/teact';
 import { addExtraClass, removeExtraClass } from '../../../lib/teact/teact-dom';
 import { getActions } from '../../../global';
 
 import buildClassName from '../../../util/buildClassName';
-import { vibrateOnSuccess } from '../../../util/capacitor';
+import { vibrateOnSuccess } from '../../../util/haptics';
 import { pause } from '../../../util/schedulers';
-import { DPR, IS_DELEGATING_BOTTOM_SHEET, IS_IOS } from '../../../util/windowEnvironment';
+import { DPR, IS_IOS } from '../../../util/windowEnvironment';
 
-import useEffectOnce from '../../../hooks/useEffectOnce';
 import useEffectWithPrevDeps from '../../../hooks/useEffectWithPrevDeps';
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
+import useShowTransition from '../../../hooks/useShowTransition';
 
 import Modal from '../../ui/Modal';
 
@@ -39,23 +39,14 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
   const [isFlashlightAvailable, setIsFlashlightAvailable] = useState(false);
   const [isFlashlightEnabled, setIsFlashlightEnabled] = useState(false);
   const [isScannerStarted, setIsScannerStarted] = useState(false);
+  const { ref: flashlightRef, shouldRender: flashlightShouldRender } = useShowTransition({
+    isOpen: isFlashlightAvailable,
+    withShouldRender: true,
+  });
 
   const lang = useLang();
-  // eslint-disable-next-line no-null/no-null
-  const scanSquareRef = useRef<HTMLDivElement>(null);
 
-  useEffectOnce(() => {
-    BarcodeScanner
-      .isTorchAvailable()
-      .then((result) => {
-        setIsFlashlightAvailable(result.available);
-      });
-    BarcodeScanner
-      .isTorchEnabled()
-      .then((result) => {
-        setIsFlashlightEnabled(result.enabled);
-      });
-  });
+  const scanSquareRef = useRef<HTMLDivElement>();
 
   const onCloseAnimationEnd = useLastCallback(async () => {
     removeExtraClass(document.documentElement, styles.documentRoot);
@@ -64,21 +55,23 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
 
   const handleClose = useLastCallback(() => {
     setIsScannerStarted(false);
+    setIsFlashlightEnabled(false);
     onClose();
   });
 
   const startScan = useLastCallback(async () => {
     const options: StartScanOptions = {
       formats: [BarcodeFormat.QrCode],
+      resolution: Resolution['3840x2160'],
     };
 
     const scanAreaCoordinates = getDomNodeDimensions(scanSquareRef.current);
 
     await BarcodeScanner.removeAllListeners();
     const listener = await BarcodeScanner.addListener(
-      'barcodeScanned',
-      async (event) => {
-        let { cornerPoints: qrCodeCoordinates } = event.barcode;
+      'barcodesScanned',
+      async ({ barcodes: [barcode] }) => {
+        let qrCodeCoordinates = barcode.cornerPoints;
         qrCodeCoordinates = qrCodeCoordinates ? sortCoordinatesClockwise(qrCodeCoordinates) : undefined;
 
         if (
@@ -91,7 +84,7 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
 
         await listener.remove();
         await vibrateOnSuccess();
-        handleQrCode({ data: event.barcode.rawValue });
+        handleQrCode({ data: barcode.rawValue });
         handleClose();
         await pause(DESTROY_SCANNER_DELAY_MS);
         if (IS_IOS) {
@@ -102,11 +95,23 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
 
     setIsScannerStarted(true);
     await BarcodeScanner.startScan(options);
+
+    // Wait until the scanner is started, after that we can determine if flashlight is available
+    if (!isFlashlightAvailable) {
+      void BarcodeScanner
+        .isTorchAvailable()
+        .then((result) => {
+          setIsFlashlightAvailable(result.available);
+        });
+    }
+    void BarcodeScanner
+      .isTorchEnabled()
+      .then((result) => {
+        setIsFlashlightEnabled(result.enabled);
+      });
   });
 
   useEffectWithPrevDeps(([prevIsOpen]) => {
-    if (IS_DELEGATING_BOTTOM_SHEET) return undefined;
-
     let startScanTimeoutId: number;
     let documentClassModifyTimeoutId: number;
     if (isOpen) {
@@ -142,8 +147,6 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
     <Modal
       isOpen={isOpen}
       onClose={handleClose}
-      nativeBottomSheetKey="qr-scanner"
-      forceFullNative
       onCloseAnimationEnd={onCloseAnimationEnd}
     >
       <div className={buildClassName(styles.scanner, isScannerStarted && styles.scannerStarted)}>
@@ -157,8 +160,9 @@ function QrScannerModal({ isOpen, onClose }: OwnProps) {
           <i className={buildClassName(modalStyles.closeIcon, 'icon-close')} aria-hidden />
         </div>
 
-        {isFlashlightAvailable && (
+        {flashlightShouldRender && (
           <div
+            ref={flashlightRef}
             className={flashlightButtonClassName}
             onClick={handleFlashlightClick}
             aria-label={lang('Toggle Flashlight')}
@@ -193,7 +197,7 @@ function sortCoordinatesClockwise(coordinates: Square): Square {
   return [...topHalf, ...bottomHalf];
 }
 
-function getDomNodeDimensions(node: HTMLDivElement | null): Square | undefined {
+function getDomNodeDimensions(node: HTMLDivElement | undefined): Square | undefined {
   if (!node) {
     return undefined;
   }

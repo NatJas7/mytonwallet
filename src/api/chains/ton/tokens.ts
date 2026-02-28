@@ -1,23 +1,20 @@
-import type { JettonBalance } from 'tonapi-sdk-js';
 import { Address, Cell } from '@ton/core';
 
-import type { ApiNetwork, ApiToken } from '../../types';
-import type {
-  AnyPayload, ApiTransactionExtra, JettonMetadata, TonTransferParams,
-} from './types';
-
-import { TON_USDT_SLUG } from '../../../config';
-import { parseAccountId } from '../../../util/account';
-import { fetchJsonWithProxy } from '../../../util/fetch';
-import { logDebugError } from '../../../util/logs';
-import { fixIpfsUrl } from '../../../util/metadata';
+import type { MetadataMap } from './toncenter/types';
+import type { JettonMetadata, TonTransferParams } from './types';
 import {
-  fetchJettonMetadata,
-  fixBase64ImageData,
-  parseJettonWalletMsgBody,
-  parsePayloadBase64,
-} from './util/metadata';
-import { fetchJettonBalances } from './util/tonapiio';
+  type ApiBalanceBySlug,
+  type ApiNetwork,
+  type ApiToken,
+  type ApiTokenWithMaybePrice,
+  type ApiTokenWithPrice,
+} from '../../types';
+
+import { getToncoinAmountForTransfer } from '../../../util/fee/getTonOperationFees';
+import { fetchJsonWithProxy, fixIpfsUrl } from '../../../util/fetch';
+import { logDebugError } from '../../../util/logs';
+import withCacheAsync from '../../../util/withCacheAsync';
+import { fetchJettonMetadata, fixBase64ImageData, parsePayloadBase64 } from './util/metadata';
 import {
   buildTokenTransferBody,
   getTokenBalance,
@@ -26,18 +23,10 @@ import {
   resolveTokenWalletAddress,
   toBase64Address, toRawAddress,
 } from './util/tonCore';
-import { fetchStoredTonWallet } from '../../common/accounts';
-import { buildTokenSlug, getTokenByAddress } from '../../common/tokens';
-import {
-  CLAIM_MINTLESS_AMOUNT,
-  DEFAULT_DECIMALS,
-  TINIEST_TOKEN_TRANSFER_REAL_AMOUNT,
-  TINY_TOKEN_TRANSFER_AMOUNT,
-  TINY_TOKEN_TRANSFER_REAL_AMOUNT,
-  TOKEN_TRANSFER_AMOUNT,
-  TOKEN_TRANSFER_FORWARD_AMOUNT,
-  TOKEN_TRANSFER_REAL_AMOUNT,
-} from './constants';
+import { buildTokenSlug, getTokenByAddress, updateTokens } from '../../common/tokens';
+import { callToncenterV3 } from './toncenter/other';
+import { DEFAULT_DECIMALS, TOKEN_TRANSFER_FORWARD_AMOUNT } from './constants';
+import { updateTokenHashes } from './priceless';
 import { isActiveSmartContract } from './wallet';
 
 export type TokenBalanceParsed = {
@@ -47,33 +36,91 @@ export type TokenBalanceParsed = {
   jettonWallet: string;
 };
 
-export async function getAccountTokenBalances(accountId: string) {
-  const { network } = parseAccountId(accountId);
-  const { address } = await fetchStoredTonWallet(accountId);
+type ToncenterJettonWallet = {
+  address: string;
+  balance: string;
+  jetton: string;
+  owner: string;
+  last_transaction_lt: string;
+};
 
-  return getTokenBalances(network, address);
+type JettonWalletsResponse = {
+  jetton_wallets: ToncenterJettonWallet[];
+  metadata?: MetadataMap;
+};
+
+async function getTokenBalances(network: ApiNetwork, address: string) {
+  const { jettonWallets, metadata } = await fetchJettonWallets(network, address);
+  const parsed = await Promise.all(
+    jettonWallets.map((wallet) => parseTokenBalance(network, wallet, metadata)),
+  );
+  return parsed.filter(Boolean);
 }
+const JETTON_WALLETS_LIMIT = 1000;
 
-export async function getTokenBalances(network: ApiNetwork, address: string) {
-  const balancesRaw = await fetchJettonBalances(network, address);
-  return balancesRaw.map((balance) => parseTokenBalance(network, balance)).filter(Boolean);
-}
+export async function fetchJettonWallets(network: ApiNetwork, address: string, maxLimit?: number) {
+  const jettonWallets: ToncenterJettonWallet[] = [];
+  let metadata: MetadataMap = {};
+  let offset = 0;
+  const limit = maxLimit && maxLimit < JETTON_WALLETS_LIMIT ? maxLimit : JETTON_WALLETS_LIMIT;
 
-function parseTokenBalance(network: ApiNetwork, balanceRaw: JettonBalance): TokenBalanceParsed | undefined {
-  if (!balanceRaw.jetton) {
-    return undefined;
+  while (true) {
+    const requestLimit = Math.min(limit, maxLimit ? maxLimit - jettonWallets.length : limit);
+    const {
+      jetton_wallets: newJettonWallets = [],
+      metadata: newMetadata = {},
+    } = await callToncenterV3<JettonWalletsResponse>(network, '/jetton/wallets', {
+      owner_address: address,
+      exclude_zero_balance: false,
+      limit: requestLimit,
+      offset,
+    });
+    jettonWallets.push(...newJettonWallets);
+    metadata = { ...metadata, ...newMetadata };
+
+    // Check if we have reached the end of the jetton wallets
+    if (newJettonWallets.length < requestLimit) {
+      break;
+    }
+
+    // Check if we fetched enough jetton wallets
+    if (maxLimit && jettonWallets.length >= maxLimit) {
+      break;
+    }
+
+    offset += newJettonWallets.length;
   }
 
+  return { jettonWallets, metadata };
+}
+
+async function parseTokenBalance(
+  network: ApiNetwork,
+  wallet: ToncenterJettonWallet,
+  metadata: MetadataMap,
+): Promise<TokenBalanceParsed | undefined> {
   try {
-    const { balance, jetton, wallet_address: walletAddress } = balanceRaw;
-    const tokenAddress = toBase64Address(jetton.address, true, network);
-    const token = buildTokenByMetadata(tokenAddress, jetton);
+    const tokenAddress = toBase64Address(wallet.jetton, true, network);
+    const jettonMetadata = getJettonMetadataFromMap(wallet.jetton, metadata)
+      ?? await fetchJettonMetadata(network, tokenAddress).catch((error) => {
+        logDebugError('fetchJettonMetadata', error);
+        return undefined;
+      });
+    const metadataToUse = jettonMetadata && !('error' in jettonMetadata)
+      ? jettonMetadata
+      : {
+        name: tokenAddress,
+        symbol: tokenAddress.slice(0, 4),
+        decimals: DEFAULT_DECIMALS,
+      } satisfies JettonMetadata;
+
+    const token = buildTokenByMetadata(tokenAddress, metadataToUse);
 
     return {
       slug: token.slug,
-      balance: BigInt(balance),
+      balance: BigInt(wallet.balance),
       token,
-      jettonWallet: toBase64Address(walletAddress.address, undefined, network),
+      jettonWallet: toBase64Address(wallet.address, undefined, network),
     };
   } catch (err) {
     logDebugError('parseTokenBalance', err);
@@ -81,47 +128,19 @@ function parseTokenBalance(network: ApiNetwork, balanceRaw: JettonBalance): Toke
   }
 }
 
-export function parseTokenTransaction(
-  network: ApiNetwork,
-  tx: ApiTransactionExtra,
-  slug: string,
-  walletAddress: string,
-): ApiTransactionExtra | undefined {
-  const { extraData } = tx;
-  if (!extraData?.body) {
+function getJettonMetadataFromMap(rawAddress: string, metadata: MetadataMap): JettonMetadata | undefined {
+  const tokenMetadata = metadata?.[rawAddress]?.token_info?.find((token) => token.type === 'jetton_masters');
+
+  if (!tokenMetadata) {
     return undefined;
   }
-
-  const parsedData = parseJettonWalletMsgBody(network, extraData.body);
-  if (!parsedData) {
-    return undefined;
-  }
-
-  const {
-    operation,
-    jettonAmount,
-    address,
-    comment,
-    encryptedComment,
-    type,
-  } = parsedData;
-  const isIncoming = operation === 'InternalTransfer';
-
-  const fromAddress = isIncoming ? (address ?? tx.fromAddress) : walletAddress;
-  const toAddress = isIncoming ? walletAddress : address!;
-  const normalizedAddress = toBase64Address(isIncoming ? fromAddress : toAddress, true);
 
   return {
-    ...tx,
-    type,
-    slug,
-    fromAddress,
-    toAddress,
-    normalizedAddress,
-    amount: isIncoming ? jettonAmount : -jettonAmount,
-    comment,
-    encryptedComment,
-    isIncoming,
+    name: tokenMetadata.name ?? rawAddress,
+    symbol: tokenMetadata.symbol ?? tokenMetadata.name ?? rawAddress,
+    description: tokenMetadata.description,
+    image: tokenMetadata.image,
+    decimals: tokenMetadata.extra?.decimals ?? DEFAULT_DECIMALS,
   };
 }
 
@@ -165,6 +184,7 @@ export async function insertMintlessPayload(
     tokenAmount: parsedPayload.amount,
     forwardAmount: parsedPayload.forwardAmount,
     forwardPayload: Cell.fromBase64(parsedPayload.forwardPayload!),
+    noInlineForwardPayload: true, // Not sure whether it's necessary; setting true to be on the safe side
     responseAddress: parsedPayload.responseDestination,
     customPayload: Cell.fromBase64(customPayload!),
   });
@@ -173,7 +193,6 @@ export async function insertMintlessPayload(
     ...transfer,
     stateInit: stateInit ? Cell.fromBase64(stateInit) : undefined,
     payload: newPayload,
-    isBase64Payload: false,
   };
 }
 
@@ -183,9 +202,10 @@ export async function buildTokenTransfer(options: {
   fromAddress: string;
   toAddress: string;
   amount: bigint;
-  payload?: AnyPayload;
+  payload?: Cell;
   shouldSkipMintless?: boolean;
   forwardAmount?: bigint;
+  isLedger?: boolean;
 }) {
   const {
     network,
@@ -195,6 +215,7 @@ export async function buildTokenTransfer(options: {
     amount,
     shouldSkipMintless,
     forwardAmount = TOKEN_TRANSFER_FORWARD_AMOUNT,
+    isLedger,
   } = options;
   let { payload } = options;
 
@@ -218,6 +239,9 @@ export async function buildTokenTransfer(options: {
     }
   }
 
+  // In ledger-app-ton v2.7.0 a queryId not equal to 0 is handled incorrectly.
+  const queryId = isLedger ? 0n : undefined;
+
   payload = buildTokenTransferBody({
     tokenAmount: amount,
     toAddress,
@@ -225,6 +249,7 @@ export async function buildTokenTransfer(options: {
     forwardPayload: payload,
     responseAddress: fromAddress,
     customPayload: customPayload ? Cell.fromBase64(customPayload) : undefined,
+    queryId,
   });
 
   // eslint-disable-next-line prefer-const
@@ -348,6 +373,7 @@ async function fetchMintlessTokenWalletData(customPayloadApiUrl: string, address
 
 export async function fetchToken(network: ApiNetwork, address: string) {
   const metadata = await fetchJettonMetadata(network, address);
+  if ('error' in metadata) return metadata;
 
   return buildTokenByMetadata(address, metadata);
 }
@@ -374,34 +400,48 @@ function buildTokenByMetadata(address: string, metadata: JettonMetadata): ApiTok
   };
 }
 
-/**
- * A pure function guessing the "fee" that needs to be attached to the token transfer.
- * In contrast to the blockchain fee, this fee is a part of the transfer itself.
- *
- * `amount` is what should be attached (acts as a fee for the user);
- * `realAmount` is approximately what will be actually spent (the rest will return in the excess).
- */
-export function getToncoinAmountForTransfer(token: ApiToken, willClaimMintless: boolean) {
-  let amount = 0n;
-  let realAmount = 0n;
-
-  if (token.isTiny) {
-    amount += TINY_TOKEN_TRANSFER_AMOUNT;
-
-    if (token.slug === TON_USDT_SLUG) {
-      realAmount += TINIEST_TOKEN_TRANSFER_REAL_AMOUNT;
-    } else {
-      realAmount += TINY_TOKEN_TRANSFER_REAL_AMOUNT;
-    }
-  } else {
-    amount += TOKEN_TRANSFER_AMOUNT;
-    realAmount += TOKEN_TRANSFER_REAL_AMOUNT;
+export async function importToken(network: ApiNetwork, address: string, sendUpdateTokens: NoneToVoidFunction) {
+  const rawToken = await fetchToken(network, address);
+  if ('error' in rawToken) {
+    logDebugError(`${address} is not a token address`, rawToken);
+    return;
   }
 
-  if (willClaimMintless) {
-    amount += CLAIM_MINTLESS_AMOUNT;
-    realAmount += CLAIM_MINTLESS_AMOUNT;
-  }
+  const token: ApiTokenWithPrice = {
+    ...rawToken,
+    priceUsd: 0,
+    percentChange24h: 0,
+  };
+  await updateTokens([token], sendUpdateTokens);
+  await updateTokenHashes(network, [token.slug], sendUpdateTokens);
+}
 
-  return { amount, realAmount };
+export async function importUnknownTokens(
+  network: ApiNetwork,
+  tokenAddresses: string[],
+  sendUpdateTokens: NoneToVoidFunction,
+) {
+  await Promise.all(tokenAddresses.map(
+    (tokenAddress) => importUnknownToken(network, tokenAddress, sendUpdateTokens),
+  ));
+}
+
+// Using `withCacheAsync` mainly to prevent concurrent execution
+const importUnknownToken = withCacheAsync(importToken);
+
+export async function loadTokenBalances(
+  network: ApiNetwork,
+  address: string,
+  sendUpdateTokens: NoneToVoidFunction,
+): Promise<ApiBalanceBySlug> {
+  const tokenBalances = await getTokenBalances(network, address);
+  const tokens: ApiTokenWithMaybePrice[] = tokenBalances.map(({ token }) => ({
+    ...token,
+    priceUsd: undefined,
+    percentChange24h: undefined,
+  }));
+  await updateTokens(tokens, sendUpdateTokens);
+  await updateTokenHashes(network, tokens.map((token) => token.slug), sendUpdateTokens);
+
+  return Object.fromEntries(tokenBalances.map(({ slug, balance }) => [slug, balance]));
 }

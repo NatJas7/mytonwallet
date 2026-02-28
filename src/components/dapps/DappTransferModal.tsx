@@ -1,32 +1,29 @@
-import React, {
-  memo, useEffect, useMemo, useState,
-} from '../../lib/teact/teact';
+import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { GlobalState, HardwareConnectState, UserToken } from '../../global/types';
+import type { ApiActivity, ApiDappTransfer, ApiToken } from '../../api/types';
+import type { GlobalState } from '../../global/types';
 import { TransferState } from '../../global/types';
 
-import { ANIMATED_STICKER_SMALL_SIZE_PX, IS_CAPACITOR, TONCOIN } from '../../config';
-import { selectCurrentAccountTokens } from '../../global/selectors';
+import { IS_CAPACITOR } from '../../config';
+import { selectCurrentDappTransferTotals } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
-import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
-import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
 
 import LedgerConfirmOperation from '../ledger/LedgerConfirmOperation';
 import LedgerConnect from '../ledger/LedgerConnect';
-import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
-import Button from '../ui/Button';
+import { getActivityHeight } from '../main/sections/Content/Activity';
 import Modal from '../ui/Modal';
 import ModalHeader from '../ui/ModalHeader';
 import PasswordForm from '../ui/PasswordForm';
 import Transition from '../ui/Transition';
-import DappLedgerWarning from './DappLedgerWarning';
-import DappTransfer from './DappTransfer';
+import DappTransaction from './DappTransaction';
+import DappTransferComplete from './DappTransferComplete';
 import DappTransferInitial from './DappTransferInitial';
 
 import modalStyles from '../ui/Modal.module.scss';
@@ -34,52 +31,56 @@ import styles from './Dapp.module.scss';
 
 interface StateProps {
   currentDappTransfer: GlobalState['currentDappTransfer'];
-  tokens?: UserToken[];
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
+  tokensBySlug: Record<string, ApiToken>;
   isMediaViewerOpen?: boolean;
+  isDangerous: boolean;
 }
 
 function DappTransferModal({
   currentDappTransfer: {
-    dapp,
-    transactions,
     isLoading,
     viewTransactionOnIdx,
     state,
+    transactions,
+    emulation,
     error,
   },
-  tokens,
-  hardwareState,
-  isLedgerConnected,
-  isTonAppConnected,
+  tokensBySlug,
   isMediaViewerOpen,
+  isDangerous,
 }: StateProps) {
   const {
     setDappTransferScreen,
     clearDappTransferError,
-    submitDappTransferPassword,
-    submitDappTransferHardware,
+    submitDappTransfer,
     closeDappTransfer,
     cancelDappTransfer,
   } = getActions();
 
   const lang = useLang();
-  const tonToken = useMemo(() => tokens?.find(({ slug }) => slug === TONCOIN.slug), [tokens])!;
 
   const isOpen = state !== TransferState.None;
 
-  const [forceFullNative, setForceFullNative] = useState(false);
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, isOpen);
-  const renderingTransactions = useCurrentOrPrev(transactions, true);
-  const isNftTransfer = renderingTransactions?.[0].payload?.type === 'nft:transfer';
-  const isDappLoading = dapp === undefined;
-  const withPayloadWarning = renderingTransactions?.[0].payload?.type === 'unknown';
+  const needsExtraHeight = useMemo(
+    () => {
+      // Apply the extra height only on mobile apps.
+      // On the web, the height is controlled by the CSS.
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+      if (IS_CAPACITOR && renderingKey === TransferState.Password) {
+        return true;
+      }
 
-  useEffect(() => {
-    setForceFullNative(isOpen && (withPayloadWarning || renderingKey === TransferState.Password));
-  }, [withPayloadWarning, renderingKey, isOpen]);
+      // Do not apply the extra height if the transfer is complete, otherwise the Close button will be hidden on the iOS device
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+      if (renderingKey === TransferState.Complete) {
+        return false;
+      }
+
+      return shouldForceFullScreen(transactions, emulation?.activities, isDangerous);
+    },
+    [transactions, emulation, isDangerous, renderingKey],
+  );
 
   const handleBackClick = useLastCallback(() => {
     if (state === TransferState.Confirm || state === TransferState.Password) {
@@ -88,11 +89,11 @@ function DappTransferModal({
   });
 
   const handleTransferPasswordSubmit = useLastCallback((password: string) => {
-    submitDappTransferPassword({ password });
+    submitDappTransfer({ password });
   });
 
   const handleLedgerConnect = useLastCallback(() => {
-    submitDappTransferHardware();
+    submitDappTransfer();
   });
 
   const handleResetTransfer = useLastCallback(() => {
@@ -100,49 +101,24 @@ function DappTransferModal({
     updateNextKey();
   });
 
-  function renderSingleTransaction(isActive: boolean) {
-    const transaction = viewTransactionOnIdx !== undefined ? transactions?.[viewTransactionOnIdx] : undefined;
-
-    return (
-      <>
-        <ModalHeader title={lang('Is it all ok?')} onClose={closeDappTransfer} />
-        <div className={modalStyles.transitionContent}>
-          <AnimatedIconWithPreview
-            size={ANIMATED_STICKER_SMALL_SIZE_PX}
-            play={isActive}
-            noLoop={false}
-            nonInteractive
-            className={buildClassName(styles.sticker, styles.sticker_sizeSmall)}
-            tgsUrl={ANIMATED_STICKERS_PATHS.bill}
-            previewUrl={ANIMATED_STICKERS_PATHS.billPreview}
-          />
-
-          {Boolean(transaction) && (
-            <DappTransfer
-              transaction={transaction}
-              tonToken={tonToken}
-              tokens={tokens}
-            />
-          )}
-          <div className={modalStyles.buttons}>
-            <Button onClick={handleBackClick}>{lang('Back')}</Button>
-          </div>
-        </div>
-      </>
-    );
-  }
-
   function renderPassword(isActive: boolean) {
+    const title = (transactions?.length ?? 0) > 1
+      ? '$classic_confirm_actions'
+      : 'Confirm Action';
+
     return (
       <>
-        {!IS_CAPACITOR && <ModalHeader title={lang('Confirm Action')} onClose={closeDappTransfer} />}
+        {!getDoesUsePinPad() && (
+          <ModalHeader title={lang(title)} onClose={closeDappTransfer} />
+        )}
         <PasswordForm
           isActive={isActive}
           isLoading={isLoading}
           error={error}
           withCloseButton={IS_CAPACITOR}
-          submitLabel={lang('Send')}
+          submitLabel={lang('Confirm')}
           cancelLabel={lang('Back')}
+          noAutoConfirm
           onSubmit={handleTransferPasswordSubmit}
           onCancel={handleBackClick}
           onUpdate={clearDappTransferError}
@@ -151,85 +127,48 @@ function DappTransferModal({
     );
   }
 
-  function renderWaitForConnection() {
-    const renderRow = (isLarge?: boolean) => (
-      <div className={buildClassName(styles.rowContainerSkeleton, isLarge && styles.rowContainerLargeSkeleton)}>
-        <div className={buildClassName(styles.rowTextSkeleton, isLarge && styles.rowTextLargeSkeleton)} />
-        <div className={buildClassName(styles.rowSkeleton, isLarge && styles.rowLargeSkeleton)} />
-      </div>
-    );
-
-    return (
-      <>
-        <ModalHeader title={lang('Send Transaction')} onClose={closeDappTransfer} />
-        <div className={modalStyles.transitionContent}>
-          <div className={styles.transactionDirection}>
-            <div className={styles.transactionDirectionLeftSkeleton}>
-              <div className={buildClassName(styles.nameSkeleton, styles.nameDappSkeleton)} />
-              <div className={buildClassName(styles.descSkeleton, styles.descDappSkeleton)} />
-            </div>
-            <div className={styles.transactionDirectionRightSkeleton}>
-              <div className={buildClassName(styles.dappInfoIconSkeleton, styles.transactionDappIconSkeleton)} />
-              <div className={styles.dappInfoDataSkeleton}>
-                <div className={buildClassName(styles.nameSkeleton, styles.nameDappSkeleton)} />
-                <div className={buildClassName(styles.descSkeleton, styles.descDappSkeleton)} />
-              </div>
-            </div>
-          </div>
-          {renderRow(true)}
-          {renderRow()}
-          {renderRow()}
-        </div>
-      </>
-    );
-  }
-
-  function renderTransferInitialWithSkeleton() {
-    return (
-      <Transition name="semiFade" activeKey={isDappLoading ? 0 : 1} slideClassName={styles.skeletonTransitionWrapper}>
-        {isDappLoading ? renderWaitForConnection() : (
-          <>
-            <ModalHeader title={lang(isNftTransfer ? 'Send NFT' : 'Send Transaction')} onClose={closeDappTransfer} />
-            <DappTransferInitial onClose={closeDappTransfer} tonToken={tonToken} />
-          </>
-        )}
-      </Transition>
-    );
-  }
-
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: TransferState) {
     switch (currentKey) {
       case TransferState.Initial:
-        return renderTransferInitialWithSkeleton();
-      case TransferState.WarningHardware:
-        return (
-          <>
-            <ModalHeader title={lang('Send Transaction')} onClose={closeDappTransfer} />
-            <DappLedgerWarning tonToken={tonToken} />
-          </>
-        );
+        return <DappTransferInitial onClose={closeDappTransfer} />;
+
       case TransferState.Confirm:
-        return renderSingleTransaction(isActive);
+        return (
+          <DappTransaction
+            transaction={viewTransactionOnIdx !== undefined ? transactions?.[viewTransactionOnIdx] : undefined}
+            tokensBySlug={tokensBySlug}
+            isActive={isActive}
+            onBack={handleBackClick}
+            onClose={closeDappTransfer}
+          />
+        );
+
       case TransferState.Password:
         return renderPassword(isActive);
+
       case TransferState.ConnectHardware:
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isTonAppConnected={isTonAppConnected}
-            isLedgerConnected={isLedgerConnected}
             onConnected={handleLedgerConnect}
             onClose={closeDappTransfer}
           />
         );
+
       case TransferState.ConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm transaction on your Ledger')}
+            text={lang('Please confirm transfer on your Ledger')}
             error={error}
-            onTryAgain={submitDappTransferHardware}
+            onTryAgain={handleLedgerConnect}
+            onClose={closeDappTransfer}
+          />
+        );
+
+      case TransferState.Complete:
+        return (
+          <DappTransferComplete
+            isActive={isActive}
             onClose={closeDappTransfer}
           />
         );
@@ -241,9 +180,7 @@ function DappTransferModal({
       hasCloseButton
       isOpen={isOpen && !isMediaViewerOpen}
       noBackdropClose
-      dialogClassName={buildClassName(styles.modalDialog, withPayloadWarning && styles.modalDialogExtraHeight)}
-      nativeBottomSheetKey="dapp-transfer"
-      forceFullNative={forceFullNative}
+      dialogClassName={buildClassName(styles.modalDialog, needsExtraHeight && styles.modalDialogExtraHeight)}
       onClose={closeDappTransfer}
       onCloseAnimationEnd={handleResetTransfer}
     >
@@ -262,18 +199,37 @@ function DappTransferModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
+  const { isDangerous } = selectCurrentDappTransferTotals(global);
 
   return {
     currentDappTransfer: global.currentDappTransfer,
-    tokens: selectCurrentAccountTokens(global),
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
+    tokensBySlug: global.tokenInfo.bySlug,
     isMediaViewerOpen: Boolean(global.mediaViewer.mediaId),
+    isDangerous,
   };
 })(DappTransferModal));
+
+function shouldForceFullScreen(
+  transactions?: ApiDappTransfer[],
+  activities?: ApiActivity[],
+  isDangerous?: boolean,
+) {
+  let height = 0; // rem
+
+  if (transactions) {
+    height += transactions.length * 3;
+    if (transactions.length > 1) height += 5.125; // The Total Amount field
+  }
+
+  if (activities) {
+    for (const activity of activities) {
+      height += getActivityHeight(activity, true);
+    }
+  }
+
+  if (isDangerous) {
+    height += 4.6;
+  }
+
+  return height >= 14.5; // The actual available height is 15.125. Leaving a margin just in case.
+}

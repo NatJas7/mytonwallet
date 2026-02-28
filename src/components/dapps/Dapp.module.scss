@@ -1,4 +1,8 @@
-@import "../../styles/mixins";
+$fieldGap: 1.25rem;
+$labelGap: 0.375rem;
+$labelLineHeight: 1.125rem;
+$labelSkeletonHeight: 1rem;
+$labelSidePadding: 0.5rem;
 
 .modalDialog {
   height: 35rem;
@@ -22,15 +26,15 @@
 
 .dapp {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.625rem;
   align-items: center;
   justify-self: center;
 
   width: 100%;
   padding: 0.875rem 1rem;
+  border-radius: var(--border-radius-default);
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 
   &_first {
     margin-top: 0.125rem;
@@ -39,6 +43,12 @@
   &_push {
     margin-bottom: 1.25rem;
   }
+
+  &_transfer {
+    z-index: 1;
+    padding: 0.75rem 0.6875rem;
+    background-color: unset;
+  }
 }
 
 .dappIcon {
@@ -46,12 +56,36 @@
   line-height: 1.875rem;
 }
 
+.dappLargePreviewLogo {
+  display: block;
+
+  width: 5rem;
+  height: 5rem;
+  border-radius: var(--border-radius-content);
+
+  object-fit: cover;
+
+  &_icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 3rem;
+    color: var(--color-default-dapp-logo);
+
+    background: var(--color-default-dapp-logo-background);
+  }
+
+  &_skeleton {
+    background-color: var(--skeleton-background-color);
+  }
+}
+
 .dappLogo {
   width: 2.25rem;
   height: 2.25rem;
-
-  object-fit: cover;
   border-radius: var(--border-radius-tiny);
+  object-fit: cover;
 
   &_icon {
     display: flex;
@@ -62,6 +96,15 @@
 
     background: var(--color-default-dapp-logo-background);
   }
+
+  .dapp_transfer & {
+    width: 2.625rem;
+    height: 2.625rem;
+  }
+}
+
+.transactionAccount {
+  padding: 0.75rem 1rem;
 }
 
 .transactionAccount,
@@ -69,40 +112,203 @@
   flex: 1;
   // Allows the flex cell to be clamped
   min-width: 0;
+
+  .dapp_transfer & {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    max-width: 100%;
+  }
+}
+
+.dappLargePreviewBlock {
+  $margin-top: calc((62 - 40) / 16 * 1rem * -1); // Modal header height - distance to the dapp logo
+  --skeleton-background-color: var(--color-separator-input-stroke);
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: $margin-top;
 }
 
 .dappName,
-.dappUrl {
+.dappHost,
+.dappHostText {
   overflow: hidden;
   display: block;
+
+  max-width: inherit;
 
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.dappUrl {
-  font-size: 0.75rem;
+.dappLargePreviewName {
+  margin-top: 1.25rem;
+
+  font-size: 1.5rem;
+  font-weight: 800;
+  line-height: 2rem;
+  color: var(--color-black);
+  text-align: center;
+
+  &_skeleton {
+    width: 15rem;
+    height: 2rem; // Must match the line height
+    border-radius: var(--border-radius-tiny);
+    background-color: var(--skeleton-background-color);
+  }
+}
+
+.dappLargePreviewHost {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+  justify-content: center;
+
+  margin-top: 0.25rem;
+
+  font-size: 1rem;
   font-weight: 600;
+  line-height: 1.25rem;
+  color: var(--color-accent);
+
+  &_skeleton {
+    width: 4.5rem;
+    height: 1.25rem; // Must match the line height
+    border-radius: var(--border-radius-tiny);
+    background-color: var(--skeleton-background-color);
+  }
+}
+
+.dappLargePreviewHostWarning {
+  flex-shrink: 0;
+}
+
+.dappLargePreviewDescription {
+  margin-top: 1rem;
+  margin-bottom: 2rem;
+
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3125rem;
+  color: var(--color-gray-1);
+  text-align: center;
+}
+
+.accountSelectorTitle {
+  margin-bottom: 0.375rem;
+  margin-left: 0.5rem;
+
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.125rem;
+  color: var(--color-gray-2);
+
+  &_2 {
+    display: flex;
+    gap: 0.25rem;
+    align-items: center;
+    margin-top: 1rem;
+  }
+}
+
+.accountSelectorButton {
+  margin-bottom: 0.5rem;
+  border-radius: var(--border-radius-default);
+}
+
+.accountSelectorChevron {
+  flex-shrink: 0;
+
+  margin-top: -0.0625rem;
+  margin-left: -0.625rem; // gap between the balance and the chevron
+
+  font-size: 1rem;
   color: var(--color-gray-2);
 }
 
-.dappName {
-  margin-bottom: 0.1875rem;
+// Account list in selection slide
+.accountList {
+  overflow: hidden;
+  width: 100%;
+  border-radius: var(--border-radius-default);
+  background-color: var(--color-background-first);
+}
 
-  font-size: var(--font-size-title, 0.9375rem);
-  font-weight: var(--font-weight-title, 600);
-  line-height: 1;
+.accountListItem {
+  position: relative;
+}
+
+.accountListItem + .accountListItem {
+  &::before {
+    content: '';
+
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 4rem;
+
+    height: 0.0625rem;
+
+    box-shadow: inset 0 -0.025rem 0 0 var(--color-separator);
+  }
+}
+
+.dappHostWarningIcon {
+  margin-inline-end: 0.25rem;
+
+  .dapp_transfer & {
+    margin-inline-start: 0.25rem;
+    margin-inline-end: unset;
+  }
+}
+
+.dappHostWarningText {
+  margin: 0;
+  color: var(--color-gray-1);
+}
+
+.dappName {
+  margin-bottom: 0.25rem;
+
+  font-size: 0.9375rem;
+  font-weight: 600;
+  line-height: 0.9375rem;
   color: var(--color-black);
+
+  .dapp_transfer & {
+    font-size: 1rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+    color: var(--color-card-text);
+  }
+}
+
+.dappHost {
+  display: flex;
+  align-items: center;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 0.75rem;
+  color: var(--color-gray-2);
+
+  .dapp_transfer & {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1rem;
+    color: var(--color-card-second-text);
+  }
 }
 
 .dappDisconnect {
   height: 1.75rem !important;
   padding: 0.4375rem 0.625rem !important;
+  border-radius: 0.875rem !important;
 
   font-size: 0.875rem !important;
   line-height: 0.875rem !important;
-
-  border-radius: 0.875rem !important;
 }
 
 .label {
@@ -110,15 +316,12 @@
 
   display: block;
 
-  margin-bottom: 0.5rem;
-  padding: 0 0.5rem;
+  margin: 0 $labelSidePadding $labelGap;
 
   font-size: 0.8125rem;
   font-weight: 700;
-  line-height: unset;
+  line-height: $labelLineHeight;
   color: var(--color-gray-2);
-
-  background-color: var(--color-background-window);
 }
 
 .description {
@@ -127,6 +330,7 @@
 
 .footer {
   display: flex;
+  flex-direction: column;
   justify-content: center;
 
   margin-top: auto;
@@ -137,18 +341,17 @@
   display: flex;
   gap: 0.5rem;
   justify-content: center;
-
   margin-top: 1.5rem;
 }
 
 .button {
   flex: 1 1 calc(50% - 0.25rem);
-
   min-width: 9rem !important;
 }
 
+.rowContainerSkeleton,
 .dataField {
-  margin-bottom: 1.25rem;
+  margin-bottom: $fieldGap;
 }
 
 .receivingAddress {
@@ -161,8 +364,10 @@
   overflow: hidden;
 
   box-sizing: border-box;
-  margin-bottom: 1.25rem;
+  margin-bottom: $fieldGap;
   padding: 0.875rem 0.75rem;
+  border: none;
+  border-radius: var(--border-radius-default);
 
   font-size: 1rem;
   font-weight: 600;
@@ -173,12 +378,15 @@
   white-space: nowrap;
 
   background: var(--color-background-first);
-  border: none;
-  border-radius: var(--border-radius-default);
   outline: none;
 
   &_expanded {
     word-break: break-all !important;
+    white-space: normal;
+  }
+
+  &_text {
+    overflow-wrap: break-word;
     white-space: normal;
   }
 }
@@ -192,13 +400,13 @@
   bottom: 0;
 
   padding: 0.875rem 0.75rem;
+  border-radius: 0 var(--border-radius-default) var(--border-radius-default) 0;
 
   font-size: 1rem;
   font-weight: 600;
   color: var(--color-accent);
 
   background: var(--color-background-first);
-  border-radius: 0 var(--border-radius-default) var(--border-radius-default) 0;
 
   &::before {
     content: '';
@@ -214,11 +422,14 @@
   }
 }
 
-.transactionList {
-  margin-bottom: 1.25rem;
+.payloadFieldTerm {
+  white-space: nowrap;
+}
 
-  background: var(--color-background-first);
+.transactionList {
+  margin-bottom: $fieldGap;
   border-radius: var(--border-radius-default);
+  background: var(--color-background-first);
 }
 
 .transactionRow {
@@ -244,11 +455,13 @@
   }
 
   &:first-child {
-    border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
+    border-top-left-radius: var(--border-radius-default);
+    border-top-right-radius: var(--border-radius-default);
   }
 
   &:last-child {
-    border-radius: 0 0 var(--border-radius-default) var(--border-radius-default);
+    border-bottom-right-radius: var(--border-radius-default);
+    border-bottom-left-radius: var(--border-radius-default);
   }
 
   @media (hover: hover) {
@@ -268,14 +481,13 @@
     left: 1rem;
 
     height: 0.0625rem;
-    /* stylelint-disable-next-line plugin/whole-pixel */
+
     box-shadow: inset 0 -0.025rem 0 0 var(--color-separator);
   }
 }
 
 .transactionRowAmount {
   margin-inline-end: 0.25rem;
-
   color: var(--color-black);
 }
 
@@ -299,39 +511,42 @@
   width: 2.75rem;
   height: 1.0625rem;
   margin-right: 0.25rem;
-
   vertical-align: bottom;
 }
 
 .transactionDirection {
+  --color-skeleton-shimmer: var(--color-card-button-shimmer);
+  --skeleton-background-color: var(--color-card-button);
+
   position: relative;
 
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.5rem;
   align-items: center;
 
   min-height: 4rem;
-  margin-bottom: 1.25rem;
+  margin: 0.375rem 0 1.25rem;
+  border-radius: var(--border-radius-default);
 
   color: var(--color-card-text);
 
   background: #3679C0 url(../../assets/transfer_dapp_bg.jpg) no-repeat 50% 0;
   background-size: cover;
-  border-radius: var(--border-radius-default);
 
   &::after {
     content: '';
 
     position: absolute;
     top: 0;
-    right: 0;
+    left: calc(50% - 1.5rem / 2);
 
-    width: calc(50% + 2rem);
+    width: calc(50% + 1.5rem / 2);
     height: 100%;
-
-    background: url("../../assets/transfer_dapp_info_bg.svg") no-repeat 100% 50%;
-    background-size: cover;
     border-radius: 0 var(--border-radius-default) var(--border-radius-default) 0;
+
+    background: url("../../assets/transfer_dapp_info_bg.svg") no-repeat 0 0;
+    background-size: cover;
   }
 }
 
@@ -340,41 +555,21 @@
 
   font-size: 1rem;
   font-weight: 700;
+  line-height: 1.25rem;
   white-space: nowrap;
 }
 
 .accountBalance {
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1rem;
   color: var(--second-text, var(--color-card-second-text));
 }
 
 .accountBalance,
 .accountTitle {
   overflow: hidden;
-
-  padding: 0 1rem;
-
   text-overflow: ellipsis;
-}
-
-.transactionDapp {
-  --color-black: var(--color-card-text);
-  --color-gray-2: var(--color-card-second-text);
-  --font-weight-title: 700;
-  --font-size-title: 1rem;
-
-  position: relative;
-  z-index: 1;
-
-  justify-self: center;
-
-  width: 8.125rem;
-  height: 100%;
-  margin: 0 0.25rem;
-  padding: 0 !important;
-
-  background: transparent;
 }
 
 .sticker {
@@ -385,178 +580,103 @@
   }
 }
 
-.descriptionContent {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-
-  padding: 1rem;
-
-  background: var(--color-background-first);
-  border-radius: 1rem;
-}
-
-@keyframes shimmer {
-  0% {
-    background-position: 200%;
-  }
-
-  100% {
-    background-position: -200%;
-  }
-}
-
-@mixin skeleton($color: var(--color-background-first), $edgeColor: var(--color-separator-input-stroke)) {
-  background: linear-gradient(
-      90deg,
-      $edgeColor,
-      $edgeColor,
-      $color,
-      $edgeColor,
-      $edgeColor
-  );
-  background-repeat: no-repeat;
-  background-size: 400% 100%;
-
-  animation: shimmer 2s infinite linear;
-}
-
 .dappInfoSkeleton {
+  --skeleton-background-color: var(--color-separator-input-stroke);
+
   display: flex;
   gap: 0.625rem;
   align-items: center;
 
   height: 4rem;
   padding: 0.875rem 1rem;
+  border-radius: var(--border-radius-default);
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-default);
-}
-
-.accountWrapperSkeleton {
-  margin-top: 1.25rem;
 }
 
 .dappInfoIconSkeleton {
-  @include skeleton();
-
-  width: 2.25rem;
-  height: 2.25rem;
-
-  background-color: var(--color-separator-input-stroke);
+  width: 2.625rem;
+  height: 2.625rem;
   border-radius: var(--border-radius-tiny);
 }
 
-.transactionDappIconSkeleton {
-  @include skeleton(var(--color-background-first), #00000000);
-
-  background-color: var(--color-card-button);
-}
-
-.dappInfoTextSkeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.nameSkeleton {
-  @include skeleton();
-
-  width: 4rem;
-  height: 0.75rem;
-
-  background-color: var(--color-separator-input-stroke);
-  border-radius: var(--border-radius-tiny);
-}
-
+.nameSkeleton,
 .descSkeleton {
-  @include skeleton();
-
-  width: 5rem;
   height: 0.75rem;
-
-  background-color: var(--color-separator-input-stroke);
   border-radius: var(--border-radius-tiny);
+}
+
+.accountTitleSkeleton {
+  width: 7rem;
+  height: 0.875rem;
+}
+
+.accountBalanceSkeleton {
+  width: 4rem;
+  height: 0.6875rem;
 }
 
 .nameDappSkeleton {
-  @include skeleton(var(--color-background-first), #00000000);
-
+  width: 3.5rem;
   height: 0.875rem;
-
-  background-color: var(--color-card-button);
 }
 
 .descDappSkeleton {
-  @include skeleton(var(--color-background-first), #00000000);
-
+  width: 2.5rem;
   height: 0.6875rem;
-
-  background-color: var(--color-card-button);
 }
 
 .transactionDirectionLeftSkeleton {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-
+  gap: 0.4375rem;
   margin-left: 1rem;
 }
 
 .transactionDirectionRightSkeleton {
   display: flex;
-  gap: 0.5rem;
+  flex-direction: row-reverse;
+  gap: 0.625rem;
   align-items: center;
-  justify-self: center;
+  justify-self: flex-end;
 
   width: 8.125rem;
+  margin-right: 0.6875rem;
 }
 
 .dappInfoDataSkeleton {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-
-.rowContainerSkeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-
-  margin-bottom: 1.25rem;
-}
-
-.rowContainerLargeSkeleton {
-  margin-bottom: 1.125rem;
+  gap: 0.4375rem;
+  align-items: flex-end;
 }
 
 .rowSkeleton {
-  @include skeleton(var(--color-background-second));
-
   width: 100%;
   height: 3rem;
-
-  background-color: var(--color-separator-input-stroke);
   border-radius: var(--border-radius-default);
 }
 
 .rowLargeSkeleton {
-  height: 3.75rem;
+  height: 4rem;
 }
 
-.rowTextSkeleton {
-  @include skeleton(var(--color-background-second));
-
+.rowLabelSkeleton {
   width: 3.0625rem;
-  height: 1rem;
-  margin-left: 0.5rem;
-
-  background-color: var(--color-separator-input-stroke);
-  border-radius: var(--border-radius-default);
+  height: $labelSkeletonHeight;
+  margin: 0 auto ($labelGap + ($labelLineHeight - $labelSkeletonHeight)) $labelSidePadding;
+  border-radius: var(--border-radius-tiny);
 }
 
 .rowTextLargeSkeleton {
   width: 6.8125rem;
+}
+
+.rowFeeSkeleton {
+  width: 4.5rem;
+  height: $labelSkeletonHeight;
+  margin: $labelGap $labelSidePadding 0 auto;
+  border-radius: var(--border-radius-tiny);
 }
 
 .skeletonTransitionWrapper {
@@ -564,20 +684,68 @@
   flex-direction: column;
 }
 
-.contentWithBackground {
-  height: 100%;
+.skeletonBackground {
+  background-color: var(--background-color); // To ensure a glitch-free "semiFade" transition
+  background-clip: content-box; // To prevent the background from un-rounding the bottom corners of the modal
+}
 
-  background-color: var(--color-background-window);
+.transferWarning {
+  margin: -0.5rem 0 $fieldGap
 }
 
 .warningForPayload {
-  width: 100%;
-  padding: 0.75rem;
+  position: relative;
 
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: var(--color-transaction-amount-red-text);
+  overflow: hidden;
 
-  background-color: var(--color-transaction-amount-red-bg);
-  border-radius: var(--border-radius-normal);
+  padding: 0.5625rem 0.75rem 0.625rem 1rem;
+  border-radius: var(--border-radius-small);
+
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.125rem;
+  color: var(--color-orange);
+
+  background-color: var(--color-background-yellow);
+
+  &::before {
+    content: '';
+
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    display: block;
+
+    width: 0.25rem;
+    height: 100%;
+
+    background: currentColor;
+  }
+}
+
+.emulation {
+  margin-bottom: 0;
+
+  &Fee {
+    margin: $labelGap $labelSidePadding $fieldGap;
+    text-align: right !important;
+  }
+}
+
+.transferButtons {
+  padding-top: 0.875rem;
+}
+
+.transactionContent {
+  padding-top: 1rem;
+}
+
+.balanceError {
+  margin-bottom: 1rem;
+
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-red);
+  text-align: center;
 }

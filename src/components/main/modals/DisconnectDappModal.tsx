@@ -1,7 +1,9 @@
 import React, { memo } from '../../../lib/teact/teact';
 import { getActions } from '../../../global';
 
-import type { ApiDapp } from '../../../api/types';
+import type { StoredDappConnection } from '../../../api/dappProtocols/storage';
+
+import { getDappConnectionUniqueId } from '../../../util/getDappConnectionUniqueId';
 
 import useLang from '../../../hooks/useLang';
 import useLastCallback from '../../../hooks/useLastCallback';
@@ -13,7 +15,7 @@ import styles from './DisconnectDappModal.module.scss';
 
 interface OwnProps {
   isOpen?: boolean;
-  dapp?: ApiDapp;
+  dapp?: StoredDappConnection;
   onClose: NoneToVoidFunction;
 }
 
@@ -31,7 +33,7 @@ function DisconnectDappModal({ isOpen, dapp, onClose }: OwnProps) {
   });
 
   const handleDeleteDapp = useLastCallback(() => {
-    void deleteDapp({ origin: dapp!.origin });
+    void deleteDapp({ url: dapp!.url, uniqueId: getDappConnectionUniqueId(dapp!) });
     onClose();
   });
 

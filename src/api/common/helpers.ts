@@ -1,17 +1,21 @@
-import type chains from '../chains';
-import type { ApiTransactionExtra } from '../chains/ton/types';
+import type * as tonSdk from '../chains/ton';
+import type { StoredDappsState } from '../dappProtocols/storage';
 import type { ApiDbSseConnection } from '../db';
 import type { StorageKey } from '../storages/types';
 import type {
+  ApiActivity,
   ApiLocalTransactionParams,
+  ApiTonAccount,
   ApiTonWallet,
-  ApiTransaction,
   ApiTransactionActivity,
   OnApiUpdate,
 } from '../types';
 
-import { IS_CAPACITOR, IS_EXTENSION, MAIN_ACCOUNT_ID } from '../../config';
+import {
+  IS_CAPACITOR, IS_CORE_WALLET, IS_EXTENSION, MAIN_ACCOUNT_ID,
+} from '../../config';
 import { parseAccountId } from '../../util/account';
+import { buildLocalTxId } from '../../util/activities';
 import { areDeepEqual } from '../../util/areDeepEqual';
 import { assert } from '../../util/assert';
 import { logDebugError } from '../../util/logs';
@@ -21,52 +25,52 @@ import * as migrations from '../migrations';
 import { storage } from '../storages';
 import capacitorStorage from '../storages/capacitorStorage';
 import idbStorage from '../storages/idb';
-import { isAccountActive } from './accounts';
+import localStorage from '../storages/localStorage';
 import {
-  checkHasScamLink, checkHasTelegramBotMention, getKnownAddresses, getScamMarkers,
+  checkHasScamLink,
+  checkHasTelegramBotMention,
+  getKnownAddresses,
+  getScamMarkers,
 } from './addresses';
 import { hexToBytes } from './utils';
 
-let localCounter = 0;
-const getNextLocalId = () => `${Date.now()}|${localCounter++}`;
-
-const actualStateVersion = 17;
-let migrationEnsurePromise: Promise<void>;
+const actualStateVersion = 21;
 
 export function buildLocalTransaction(
   params: ApiLocalTransactionParams,
   normalizedAddress: string,
+  subId?: number,
 ): ApiTransactionActivity {
-  const { amount, txId, ...restParams } = params;
+  const id = buildLocalTxId(params.id, subId);
 
-  const transaction: ApiTransaction = updateTransactionMetadata({
-    ...restParams,
-    txId: txId ? `${txId}|` : getNextLocalId(),
+  return updateActivityMetadata({
+    // Local transactions are trusted pending
+    status: 'pendingTrusted',
+    kind: 'transaction',
     timestamp: Date.now(),
     isIncoming: false,
-    amount: -amount,
     normalizedAddress,
-    extraData: {},
+    ...params,
+    amount: -params.amount,
+    id,
   });
-
-  return {
-    ...transaction,
-    id: transaction.txId,
-    kind: 'transaction',
-  };
 }
 
-export function updateTransactionMetadata(transaction: ApiTransactionExtra): ApiTransactionExtra {
-  const {
-    normalizedAddress, comment, type, isIncoming, nft,
-  } = transaction;
-  let { metadata = {} } = transaction;
+export function updateActivityMetadata<T extends ApiActivity>(activity: T): T {
+  if (activity.kind !== 'transaction') {
+    return activity;
+  }
 
-  const isNftTransfer = type === 'nftTransferred' || type === 'nftReceived' || Boolean(nft);
+  const {
+    normalizedAddress, comment, isIncoming, type, nft, status,
+  } = activity;
+  let { metadata = {} } = activity;
   const knownAddresses = getKnownAddresses();
   const hasScamMarkers = comment ? getScamMarkers().some((sm) => sm.test(comment)) : false;
-  const shouldCheckComment = !hasScamMarkers && comment && isIncoming
-    && (isNftTransfer || comment.toLowerCase().includes('claim'));
+  const isBounced = type === 'bounced';
+  const isNft = Boolean(nft);
+  const shouldCheckComment = !hasScamMarkers && comment && (isIncoming || isBounced)
+    && (isNft || comment.toLowerCase().includes('claim') || isBounced || status === 'failed');
   const hasScamInComment = shouldCheckComment
     ? (checkHasScamLink(comment) || checkHasTelegramBotMention(comment))
     : false;
@@ -79,7 +83,7 @@ export function updateTransactionMetadata(transaction: ApiTransactionExtra): Api
     metadata.isScam = true;
   }
 
-  return { ...transaction, metadata };
+  return { ...activity, metadata };
 }
 
 let currentOnUpdate: OnApiUpdate | undefined;
@@ -92,35 +96,31 @@ export function disconnectUpdater() {
   currentOnUpdate = undefined;
 }
 
-export function isAlive(_onUpdate: OnApiUpdate, accountId: string) {
-  return isUpdaterAlive(_onUpdate) && isAccountActive(accountId);
-}
-
 export function isUpdaterAlive(onUpdate: OnApiUpdate) {
   return currentOnUpdate === onUpdate;
 }
 
-export function startStorageMigration(onUpdate: OnApiUpdate, ton: typeof chains.ton) {
-  migrationEnsurePromise = migrateStorage(onUpdate, ton)
-    .catch((err) => {
-      logDebugError('Migration error', err);
-      currentOnUpdate?.({
-        type: 'showError',
-        error: 'Migration error',
-      });
+export async function tryMigrateStorage(onUpdate: OnApiUpdate, ton: typeof tonSdk, accountIds?: string[]) {
+  try {
+    return await migrateStorage(onUpdate, ton, accountIds);
+  } catch (err) {
+    logDebugError('Migration error', err);
+    onUpdate?.({
+      type: 'showError',
+      error: 'Migration error',
     });
-  return migrationEnsurePromise;
+  }
 }
 
-export function waitStorageMigration() {
-  return migrationEnsurePromise;
-}
-
-export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.ton) {
+export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof tonSdk, accountIds?: string[]) {
   let version = Number(await storage.getItem('stateVersion', true));
 
   if (version === actualStateVersion) {
     return;
+  }
+
+  if (IS_CORE_WALLET && !version) {
+    await migrateCoreWallet(onUpdate);
   }
 
   if (IS_CAPACITOR && !version) {
@@ -212,10 +212,10 @@ export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.t
   }
 
   if (version === 5) {
-    const dapps = await storage.getItem('dapps');
+    const dapps = await storage.getItem('dapps') as StoredDappsState;
     if (dapps) {
-      for (const accountDapps of Object.values(dapps) as any[]) {
-        for (const dapp of Object.values(accountDapps) as any[]) {
+      for (const accountDapps of Object.values(dapps)) {
+        for (const dapp of Object.values(accountDapps as Record<string, any>)) {
           dapp.connectedAt = 1;
         }
       }
@@ -268,9 +268,8 @@ export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.t
         onUpdate({
           type: 'updateAccount',
           accountId,
-          partial: {
-            address: newAddress,
-          },
+          chain: 'ton',
+          address: newAddress,
         });
       }
 
@@ -286,13 +285,13 @@ export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.t
 
   if (version === 8) {
     if (getEnvironment().isSseSupported) {
-      const dapps = await storage.getItem('dapps');
+      const dapps = await storage.getItem('dapps') as StoredDappsState;
 
       if (dapps) {
         const items: ApiDbSseConnection[] = [];
 
-        for (const accountDapps of Object.values(dapps) as any[]) {
-          for (const dapp of Object.values(accountDapps) as any[]) {
+        for (const accountDapps of Object.values(dapps)) {
+          for (const dapp of Object.values(accountDapps as Record<string, any>)) {
             if (dapp.sse?.appClientId) {
               items.push({ clientId: dapp.sse?.appClientId });
             }
@@ -372,9 +371,8 @@ export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.t
           onUpdate({
             type: 'updateAccount',
             accountId,
-            partial: {
-              address: account.address,
-            },
+            chain: 'ton',
+            address: account.address,
           });
         }
       }
@@ -397,6 +395,34 @@ export async function migrateStorage(onUpdate: OnApiUpdate, ton: typeof chains.t
     await migrations.migration16.start();
 
     version = 17;
+    await storage.setItem('stateVersion', version);
+  }
+
+  if (version === 17) {
+    await migrations.migration17.start();
+
+    version = 18;
+    await storage.setItem('stateVersion', version);
+  }
+
+  if (version === 18) {
+    await migrations.migration18.start(accountIds);
+
+    version = 19;
+    await storage.setItem('stateVersion', version);
+  }
+
+  if (version === 19) {
+    await migrations.migration19.start();
+
+    version = 20;
+    await storage.setItem('stateVersion', version);
+  }
+
+  if (version === 20) {
+    await migrations.migration20.start();
+
+    version = 21;
     await storage.setItem('stateVersion', version);
   }
 }
@@ -439,5 +465,92 @@ async function iosBackupAndMigrateKeychainMode() {
         await capacitorStorage.setItem(key as StorageKey, value);
       }
     }
+  }
+}
+
+async function migrateCoreWallet(onUpdate: OnApiUpdate) {
+  const currentStorage = IS_EXTENSION ? storage : localStorage;
+
+  const [
+    // Default Core Wallet version is v3R2
+    // https://github.com/toncenter/ton-wallet/blob/master/src/js/Controller.js#L128
+    walletVersion = 'v3R2',
+    isTestnet,
+    address,
+    words,
+    publicKey,
+    isTonProxyEnabled,
+  ] = await Promise.all([
+    currentStorage.getItem('walletVersion' as StorageKey),
+    currentStorage.getItem('isTestnet' as StorageKey),
+    currentStorage.getItem('address' as StorageKey),
+    currentStorage.getItem('words' as StorageKey),
+    currentStorage.getItem('publicKey' as StorageKey),
+    currentStorage.getItem('proxy' as StorageKey),
+  ]);
+
+  if (isTestnet) {
+    onUpdate({
+      type: 'updateSettings',
+      settings: {
+        isTestnet: true,
+      },
+    });
+  }
+
+  const network = isTestnet ? 'testnet' : 'mainnet';
+  const accountId = `0-ton-${network}`;
+
+  if (address && words && publicKey) {
+    const secondNetwork = network === 'mainnet' ? 'testnet' : 'mainnet';
+    const secondAccountId = `0-ton-${secondNetwork}`;
+    const secondAddress = toBase64Address(address, false, secondNetwork);
+
+    const newAccountById: Record<string, ApiTonAccount> = {};
+    newAccountById[accountId] = {
+      type: 'ton',
+      mnemonicEncrypted: words,
+      byChain: {
+        ton: {
+          address,
+          version: walletVersion,
+          publicKey,
+          index: 0,
+        },
+      },
+    };
+
+    newAccountById[secondAccountId] = {
+      type: 'ton',
+      mnemonicEncrypted: words,
+      byChain: {
+        ton: {
+          address: secondAddress,
+          version: walletVersion,
+          publicKey,
+          index: 0,
+        },
+      },
+    };
+
+    await storage.setItem('accounts', newAccountById);
+
+    onUpdate({
+      type: 'migrateCoreApplication',
+      isTestnet,
+      accountId,
+      address,
+      secondAccountId,
+      secondAddress,
+      isTonProxyEnabled,
+    });
+
+    // Clean up storage after migrate the app from Core Wallet
+    [
+      'walletVersion', 'isTestnet', 'words', 'address', 'publicKey', 'proxy', 'isLedger',
+      'ledgerTransportType', '__time', 'isDebug',
+    ].forEach((key) => {
+      void currentStorage.removeItem(key as StorageKey);
+    });
   }
 }

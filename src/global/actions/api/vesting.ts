@@ -1,53 +1,28 @@
-import type { ApiSubmitTransferOptions } from '../../../api/methods/types';
-import { ApiCommonError } from '../../../api/types';
+import type { ApiSubmitTransferOptions } from '../../../api/types';
+import type { FormReducer } from '../../helpers/transfer';
 import { VestingUnfreezeState } from '../../types';
 
 import {
   CLAIM_ADDRESS,
   CLAIM_AMOUNT,
   CLAIM_COMMENT,
-  IS_CAPACITOR,
-  MYCOIN,
+  MYCOIN_MAINNET,
   MYCOIN_TESTNET,
-  TONCOIN,
 } from '../../../config';
-import { vibrateOnError, vibrateOnSuccess } from '../../../util/capacitor';
-import { callActionInMain } from '../../../util/multitab';
-import { IS_DELEGATED_BOTTOM_SHEET } from '../../../util/windowEnvironment';
 import { callApi } from '../../../api';
+import { handleTransferResult } from '../../helpers/transfer';
+import { prepareTransfer } from '../../helpers/transfer';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
-import {
-  clearIsPinAccepted,
-  setIsPinAccepted,
-  updateVesting,
-} from '../../reducers';
-import { selectVestingPartsReadyToUnfreeze } from '../../selectors';
+import { updateVesting } from '../../reducers';
+import { selectCurrentAccountId, selectVestingPartsReadyToUnfreeze } from '../../selectors';
 
-addActionHandler('submitClaimingVesting', async (global, actions, { password }) => {
-  const accountId = global.currentAccountId!;
-  if (!(await callApi('verifyPassword', password))) {
-    setGlobal(updateVesting(getGlobal(), accountId, { error: 'Wrong password, please try again.' }));
+addActionHandler('submitClaimingVesting', async (global, actions, { password } = {}) => {
+  const accountId = selectCurrentAccountId(global)!;
+  const updateVestingState: FormReducer<VestingUnfreezeState> = (global, update) => {
+    return updateVesting(global, accountId, update);
+  };
 
-    return;
-  }
-  global = getGlobal();
-
-  if (IS_CAPACITOR) {
-    global = setIsPinAccepted(global);
-  }
-
-  global = updateVesting(global, accountId, {
-    isLoading: true,
-    error: undefined,
-  });
-  setGlobal(global);
-
-  if (IS_CAPACITOR) {
-    await vibrateOnSuccess(true);
-  }
-
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('submitClaimingVesting', { password });
+  if (!await prepareTransfer(VestingUnfreezeState.ConfirmHardware, updateVestingState, password)) {
     return;
   }
 
@@ -55,29 +30,18 @@ addActionHandler('submitClaimingVesting', async (global, actions, { password }) 
   const unfreezeRequestedIds = selectVestingPartsReadyToUnfreeze(global, accountId);
 
   const options: ApiSubmitTransferOptions = {
-    accountId: global.currentAccountId!,
+    // This may be different from the `accountId` if the user switched accounts
+    // while the transfer is preparing
+    accountId: selectCurrentAccountId(global)!,
     password,
     toAddress: CLAIM_ADDRESS,
     amount: CLAIM_AMOUNT,
-    comment: CLAIM_COMMENT,
+    payload: { type: 'comment', text: CLAIM_COMMENT },
   };
   const result = await callApi('submitTransfer', 'ton', options);
 
-  global = getGlobal();
-  global = updateVesting(global, accountId, { isLoading: false });
-  setGlobal(global);
-
-  if (!result || 'error' in result) {
-    if (IS_CAPACITOR) {
-      global = getGlobal();
-      global = clearIsPinAccepted(global);
-      setGlobal(global);
-      void vibrateOnError();
-    }
-    actions.showError({ error: result?.error });
+  if (!handleTransferResult(result, updateVestingState)) {
     return;
-  } else if (IS_CAPACITOR) {
-    void vibrateOnSuccess();
   }
 
   global = getGlobal();
@@ -90,48 +54,11 @@ addActionHandler('submitClaimingVesting', async (global, actions, { password }) 
   actions.openVestingModal();
 });
 
-addActionHandler('submitClaimingVestingHardware', async (global, actions) => {
-  global = updateVesting(global, global.currentAccountId!, {
-    isLoading: true,
-    error: undefined,
-    unfreezeState: VestingUnfreezeState.ConfirmHardware,
-  });
-  setGlobal(global);
-
-  const ledgerApi = await import('../../../util/ledger');
-  global = getGlobal();
-
-  const accountId = global.currentAccountId!;
-  const unfreezeRequestedIds = selectVestingPartsReadyToUnfreeze(global, accountId);
-  const options: ApiSubmitTransferOptions = {
-    accountId,
-    password: '',
-    toAddress: CLAIM_ADDRESS,
-    amount: CLAIM_AMOUNT,
-    comment: CLAIM_COMMENT,
-  };
-
-  const result = await ledgerApi.submitLedgerTransfer(options, TONCOIN.slug);
-
-  global = getGlobal();
-  global = updateVesting(global, accountId, { isLoading: false });
-  setGlobal(global);
-
-  if (!result) {
-    actions.showError({ error: ApiCommonError.Unexpected });
-  } else {
-    global = getGlobal();
-    global = updateVesting(global, accountId, {
-      isConfirmRequested: undefined,
-      unfreezeRequestedIds,
-    });
-    setGlobal(global);
-    actions.openVestingModal();
-  }
-});
-
 addActionHandler('loadMycoin', (global, actions) => {
   const { isTestnet } = global.settings;
 
-  actions.importToken({ address: isTestnet ? MYCOIN_TESTNET.minterAddress : MYCOIN.minterAddress });
+  actions.importToken({
+    chain: 'ton',
+    address: isTestnet ? MYCOIN_TESTNET.minterAddress : MYCOIN_MAINNET.minterAddress,
+  });
 });

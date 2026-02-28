@@ -1,3 +1,4 @@
+@use "../../styles/mixins";
 
 .infoBlock {
   position: relative;
@@ -10,6 +11,8 @@
 }
 
 .infoRow {
+  --border-radius-value: 0.25rem;
+
   display: grid;
   grid-template-areas: "icon token token amount"
                        "icon chain currency currency";
@@ -18,9 +21,9 @@
   align-items: center;
 
   padding: 0.875rem 1rem;
+  border-radius: var(--border-radius-default);
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 
   &.noIcon {
     grid-template-areas: "token token amount"
@@ -37,6 +40,16 @@
       grid-template-areas: "token amount"
                            "chain amount";
       grid-template-columns: 1fr auto;
+    }
+  }
+
+  &.clickable {
+    cursor: var(--custom-cursor, pointer);
+
+    @include mixins.transition(opacity 150ms);
+
+    &:hover {
+      opacity: 0.85;
     }
   }
 }
@@ -62,6 +75,7 @@
   height: 0.9375rem;
   margin-inline-start: 0.25rem;
   padding: 0.1875rem;
+  border-radius: 0.25rem;
 
   font-size: 0.625rem;
   font-weight: 700;
@@ -69,7 +83,6 @@
   color: var(--color-gray-2);
 
   background-color: var(--color-activity-gray-background);
-  border-radius: 0.25rem;
 }
 
 .infoRowChain {
@@ -121,12 +134,12 @@
 
 .infoRowCurrencyValue {
   margin-inline-start: 0.25rem;
-
   font-weight: 650;
 }
 
 .infoSeparator {
   position: absolute;
+  z-index: 1;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -137,9 +150,9 @@
 
   width: 2.5rem;
   height: 2.5rem;
+  border-radius: 50%;
 
   background-color: var(--color-background-window);
-  border-radius: 50%;
 }
 
 .infoSeparatorIcon {

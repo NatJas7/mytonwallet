@@ -1,18 +1,16 @@
-import type { ApiBaseCurrency, ApiStakingCommonData, ApiTokenPrice } from '../types';
+import type { ApiBackendConfig, ApiStakingCommonData } from '../types';
 
-import { DEFAULT_PRICE_CURRENCY } from '../../config';
+import Deferred from '../../util/Deferred';
 
 export type AccountCache = { stakedAt?: number };
 
-let stakingCommonCache: ApiStakingCommonData;
+let stakingCommonCache: ApiStakingCommonData | undefined;
+const stakingCommonCacheDeferred = new Deferred();
+
 const accountCache: Record<string, AccountCache> = {};
-const pricesCache: {
-  baseCurrency: ApiBaseCurrency;
-  bySlug: Record<string, ApiTokenPrice>;
-} = {
-  baseCurrency: DEFAULT_PRICE_CURRENCY,
-  bySlug: {},
-};
+
+let backendConfig: ApiBackendConfig | undefined;
+const configDeferred = new Deferred();
 
 export function getAccountCache(accountId: string, address: string) {
   return accountCache[`${accountId}:${address}`] ?? {};
@@ -25,12 +23,21 @@ export function updateAccountCache(accountId: string, address: string, partial: 
 
 export function setStakingCommonCache(data: ApiStakingCommonData) {
   stakingCommonCache = data;
+  stakingCommonCacheDeferred.resolve();
 }
 
-export function getStakingCommonCache() {
-  return stakingCommonCache;
+export async function getStakingCommonCache() {
+  await stakingCommonCacheDeferred.promise;
+  return stakingCommonCache!;
 }
 
-export function getPricesCache() {
-  return pricesCache;
+export function setBackendConfigCache(config: ApiBackendConfig) {
+  backendConfig = config;
+  configDeferred.resolve();
+}
+
+/** Returns the config provided by the backend */
+export async function getBackendConfigCache() {
+  await configDeferred.promise;
+  return backendConfig!;
 }

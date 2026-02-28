@@ -1,4 +1,4 @@
-@import "../../styles/mixins";
+@use "../../styles/mixins";
 
 .modalDialog {
   height: 35rem;
@@ -13,10 +13,10 @@
   align-items: center;
 
   margin-bottom: 1.25rem;
-  padding: 1rem 2rem 1rem 1rem;
+  padding: 1rem;
+  border-radius: var(--border-radius-default);
 
   background: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 
   &_static {
     margin-bottom: 1.5rem;
@@ -44,12 +44,12 @@
 
   margin: 0.5rem 0 0.875rem;
   padding: 0.375rem;
+  border-radius: var(--border-radius-tiny);
 
   line-height: 0.9375rem;
   color: var(--color-apy-text);
 
   background: var(--color-apy-background);
-  border-radius: var(--border-radius-tiny);
 }
 
 .textButton {
@@ -69,6 +69,10 @@
   &:active {
     opacity: 0.8;
   }
+
+  & + .textButton {
+    margin-top: 0.75rem;
+  }
 }
 
 .sticker {
@@ -84,96 +88,7 @@
   border-radius: var(--border-radius-default) !important;
 }
 
-.ton {
-  display: inline-flex;
-  align-items: center;
-
-  margin: 0;
-  padding: 0.75rem 1.125rem 0.75rem 0.5rem !important;
-
-  background-color: transparent;
-}
-
-.tonIcon {
-  width: 1.5rem;
-  height: 1.5rem;
-  margin-inline-end: 0.375rem;
-
-  border-radius: 50%;
-}
-
-.tonName {
-  height: 1rem;
-
-  font-size: 0.9375rem;
-  font-weight: 700;
-  color: var(--color-input-button-text);
-}
-
-.amountTopRight {
-  position: relative;
-  z-index: 1;
-
-  align-self: flex-end;
-
-  width: 75%;
-  height: auto !important;
-  min-height: 1rem;
-  margin: 0 0.5rem -0.8125rem auto;
-
-  font-size: 0.8125rem;
-  line-height: 1rem;
-
-  &_static {
-    --color-background-window: transparent;
-  }
-
-  &_slide {
-    text-align: right;
-
-    background: var(--color-background-window);
-  }
-
-  &.Transition {
-    > .Transition_slide-from {
-      animation-duration: 150ms !important;
-    }
-
-    > .Transition_slide-to {
-      animation-duration: 150ms !important;
-    }
-  }
-}
-
-.amountBottomWrapper {
-  position: relative;
-
-  &_static {
-    --color-background-window: transparent;
-  }
-}
-
-.amountBottom {
-  position: absolute;
-  top: -1.75rem;
-
-  display: flex;
-  justify-content: space-between;
-
-  width: 100%;
-  min-height: 1rem;
-  padding: 0 0.5rem;
-
-  font-size: 0.75rem;
-  line-height: 1rem;
-  color: var(--color-input-hint);
-}
-
 .amountBottomRight {
-  flex: 1;
-
-  color: var(--color-gray-3);
-
   transition: color 150ms;
 
   &_error {
@@ -181,9 +96,7 @@
   }
 
   &_slide {
-    text-align: right;
-
-    background: var(--color-background-window);
+    background: var(--background-color);
   }
 
   &.animating {
@@ -201,68 +114,20 @@
   color: var(--color-red);
 }
 
-.minAmountValue,
-.amountInCurrency,
 .historyTotalValue {
   font-weight: 600;
-}
-
-.balanceContainer {
-  position: relative;
-  z-index: 1;
-
-  width: 100%;
-}
-
-.balance {
-  position: absolute;
-  top: 0;
-  right: 0;
-
-  display: flex;
-  gap: 0.25rem;
-
-  font-size: 0.8125rem;
-  color: var(--color-gray-1);
-}
-
-.balanceLink {
-  cursor: var(--custom-cursor, pointer);
-
-  font-weight: 600;
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      text-decoration: none;
-    }
-  }
 }
 
 .stakingBalance {
   margin-bottom: 0.75rem;
 }
 
-.amountInput {
-  margin-bottom: 2rem;
-}
-
-.inputStatic,
-.inputRichStatic {
-  background: transparent;
-  border: 1px solid var(--color-separator-input-stroke);
-}
-
-.inputStatic {
-  /* default input padding minus 1px accounted for border width */
-  padding: 0.5rem 0.6875rem 0.375rem;
-}
-
 .balanceResultWrapper {
-  margin-bottom: 0 !important;
+  height: 5.4375rem;
+
+  &__slide {
+    background: var(--background-color);
+  }
 }
 
 .balanceResultInput {
@@ -304,7 +169,6 @@
 
 .stakingInfoModal {
   overflow: hidden;
-
   max-height: 19.875rem !important;
 
   &_withHistory {
@@ -332,25 +196,31 @@
   --color-close-button-background: var(--color-gpurple-button-background-rest);
   --color-close-button-background-hover: var(--color-gpurple-button-background-hover);
 
-  background: var(--color-background-purple-2);
+  --sensitive-data-extra-width: 0.5rem;
+
   border-radius: var(--border-radius-small);
+  background: var(--color-background-purple-2);
 
   &_modal {
     padding: 0 1rem 1rem;
-
     border-radius: var(--border-radius-default);
 
-    @include respond-below(xs) {
+    @include mixins.respond-below(xs) {
+      :global(.is-telegram-app) &,
       :global(.is-android) & {
         border-top-left-radius: 0;
         border-top-right-radius: 0;
+      }
+
+      :global(html.is-mobile-telegram-app.is-fullscreen) & {
+        margin-top: calc(-1 * var(--tg-content-safe-area-inset-top));
+        padding-top: var(--tg-content-safe-area-inset-top);
       }
     }
   }
 
   &:global(.staking-info) {
     position: relative;
-
     background: none;
 
     &::before {
@@ -362,15 +232,20 @@
       bottom: -1rem;
       left: -1rem;
 
-      background: var(--color-background-purple-2);
       border-radius: var(--border-radius-default) 0 var(--border-radius-default) var(--border-radius-default);
+
+      background: var(--color-background-purple-2);
     }
   }
 }
 
-@include respond-below(xs) {
+@include mixins.respond-below(xs) {
   .stakingInfoNoHistory {
     border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
+
+    :global(.is-telegram-app) & {
+      border-radius: 0;
+    }
 
     @supports (padding-bottom: max(1rem, var(--safe-area-bottom))) {
       padding-bottom: max(1rem, var(--safe-area-bottom))
@@ -388,13 +263,11 @@
       // Workaround for the bottom padding on flex layout
       &::after {
         content: '';
-
         flex-shrink: 0;
-
         height: 1rem;
       }
 
-      @include adapt-padding-to-scrollbar(1rem);
+      @include mixins.adapt-padding-to-scrollbar(1rem);
     }
   }
 
@@ -404,18 +277,37 @@
       overflow-y: scroll;
     }
   }
+
+  &.withBackground {
+    border-top-left-radius: var(--border-radius-default);
+    border-top-right-radius: var(--border-radius-default);
+    background: var(--color-background-purple-2);
+
+    @include mixins.respond-above(xs) {
+      border-radius: var(--border-radius-default);
+    }
+
+    :global(.is-telegram-app) &,
+    :global(.is-android) & {
+      border-radius: 0;
+    }
+  }
+
+  @include mixins.respond-above(xs) {
+    max-height: min(80vh, 48rem);
+  }
 }
 
 .stakingInfoLoading {
   align-self: center;
-
   width: 0;
 }
 
 .stakingInfoLoadingAnimation {
+  --spinner-size: 1.5rem;
+
   position: relative;
   right: 2.5rem;
-  --spinner-size: 1.5rem;
 }
 
 .stakingInfoClose {
@@ -425,13 +317,23 @@
 
 .stakingInfoButtons {
   position: relative;
-
   display: flex;
   gap: 0.5rem;
-
   margin-top: 1.25rem;
+
   &_withMargin {
     margin-bottom: 2rem;
+  }
+
+  &_adaptiveWidth {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: repeat(auto-fit, minmax(max-content, 1fr));
+
+    & .stakingInfoButton {
+      min-width: 4rem !important;
+      padding: 0.5rem !important;
+    }
   }
 }
 
@@ -439,8 +341,30 @@
   width: 100%;
   min-width: 8rem !important;
   max-width: 100% !important;
-
   font-size: 0.9375rem !important;
+}
+
+.checkEligibilityButton {
+  position: relative;
+
+  margin: 1rem auto;
+
+  font-size: 1rem !important;
+  color: var(--color-gpurple-button-text-rest);
+
+  background: linear-gradient(81.88deg, var(--color-purple-1) 19.42%, #1EC160 71.55%);
+  background-clip: text;
+
+  transition: opacity 150ms;
+
+  -webkit-text-fill-color: transparent;
+
+  @media (hover: hover) {
+    &:hover,
+    &:focus-visible {
+      opacity: 0.8;
+    }
+  }
 }
 
 .insufficientBalance {
@@ -459,6 +383,7 @@
   max-width: 19rem;
   margin: 0.25rem auto 0;
   padding: 0.75rem;
+  border-radius: var(--border-radius-buttons);
 
   font-size: 0.9375rem;
   font-weight: 500;
@@ -466,13 +391,10 @@
   text-align: center;
 
   background: var(--color-gray-button-background-light);
-  border-radius: var(--border-radius-buttons);
 
   &_purple {
     margin-top: 1.25rem;
-
     color: var(--color-gpurple-button-text-rest);
-
     background: var(--color-gpurple-button-background-rest);
   }
 }
@@ -531,11 +453,9 @@
 
 .historyList {
   flex-grow: 1;
-
   margin-top: 0.5rem;
-
-  background: var(--color-background-first);
   border-radius: var(--border-radius-default);
+  background: var(--color-background-first);
 
   &_static {
     margin-right: -1rem;
@@ -546,8 +466,11 @@
 
 .transactionBanner {
   align-self: center;
-
   margin-bottom: 2rem;
+}
+
+.unstakeInfoTransition.unstakeInfoTransition { // The goal is overriding the Transition's height style
+  height: 4rem;
 }
 
 .unstakeInfo {
@@ -559,6 +482,7 @@
   max-width: 19rem;
   margin: 0.25rem auto 0;
   padding: 0.75rem;
+  border-radius: var(--border-radius-buttons);
 
   font-size: 0.9375rem;
   font-weight: 600;
@@ -566,33 +490,4 @@
   text-align: center;
 
   background: var(--color-transaction-amount-green-bg);
-  border-radius: var(--border-radius-buttons);
-}
-
-.tokenDropdown {
-  --offset-y-value: calc(100% - 3.25rem);
-  --offset-x-value: 0;
-
-  position: relative;
-  top: 0.375rem;
-  right: 0.375rem;
-}
-
-.tokenDropdownItem :global(.menuItemName), .tokenDropdownItem :global(.itemName) {
-  font-weight: 700;
-}
-
-.tokenDropdownMenu {
-  color: var(--color-gpurple-button-text-rest) !important;
-
-  background: var(--color-input-button-background-purple-rest) !important;
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      color: var(--color-gpurple-button-text-hover) !important;
-
-      background-color: var(--color-input-button-background-purple-hover) !important;
-    }
-  }
 }

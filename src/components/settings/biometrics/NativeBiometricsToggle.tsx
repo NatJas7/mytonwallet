@@ -1,15 +1,18 @@
-import { Dialog } from 'native-dialog';
+import { Dialog } from '@capacitor/dialog';
 import React, { memo } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
+import { IS_CAPACITOR } from '../../../config';
 import renderText from '../../../global/helpers/renderText';
-import buildClassName from '../../../util/buildClassName';
+import { selectIsNativeBiometricAuthEnabled } from '../../../global/selectors';
 import {
   getIsFaceIdAvailable,
   getIsNativeBiometricAuthSupported,
   getIsTouchIdAvailable,
-} from '../../../util/capacitor';
-import { IS_DELEGATED_BOTTOM_SHEET, IS_IOS } from '../../../util/windowEnvironment';
+} from '../../../util/biometrics';
+import buildClassName from '../../../util/buildClassName';
+import { getIsTelegramBiometricsRestricted, getTelegramApp } from '../../../util/telegram';
+import { IS_IOS } from '../../../util/windowEnvironment';
 
 import useFlag from '../../../hooks/useFlag';
 import useLang from '../../../hooks/useLang';
@@ -57,10 +60,10 @@ function NativeBiometricsToggle({ isBiometricAuthEnabled, onEnable }: OwnProps &
   });
 
   useSyncEffect(() => {
-    if (!IS_DELEGATED_BOTTOM_SHEET) return;
+    if (!IS_CAPACITOR) return;
 
     if (isWarningModalOpen) {
-      Dialog.confirm({
+      void Dialog.confirm({
         title: lang(warningTitle),
         message: lang(warningDescription),
         okButtonTitle: lang('Yes'),
@@ -76,6 +79,11 @@ function NativeBiometricsToggle({ isBiometricAuthEnabled, onEnable }: OwnProps &
   }, [handleConfirmDisableBiometrics, isWarningModalOpen, lang, warningDescription, warningTitle]);
 
   const handleBiometricAuthToggle = useLastCallback(() => {
+    if (getIsTelegramBiometricsRestricted()) {
+      getTelegramApp()?.BiometricManager.openSettings();
+      return;
+    }
+
     if (isBiometricAuthEnabled) {
       openWarningModal();
     } else {
@@ -84,7 +92,7 @@ function NativeBiometricsToggle({ isBiometricAuthEnabled, onEnable }: OwnProps &
   });
 
   function renderDisableNativeBiometricsWarning() {
-    if (IS_DELEGATED_BOTTOM_SHEET) return undefined;
+    if (IS_CAPACITOR) return undefined;
 
     return (
       <Modal
@@ -130,9 +138,7 @@ function NativeBiometricsToggle({ isBiometricAuthEnabled, onEnable }: OwnProps &
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const { authConfig } = global.settings;
-
   return {
-    isBiometricAuthEnabled: !!authConfig && authConfig.kind === 'native-biometrics',
+    isBiometricAuthEnabled: selectIsNativeBiometricAuthEnabled(global),
   };
 })(NativeBiometricsToggle));

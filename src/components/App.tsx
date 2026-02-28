@@ -2,21 +2,32 @@ import React, { memo, useEffect, useLayoutEffect } from '../lib/teact/teact';
 import { getActions, withGlobal } from '../global';
 
 import type { Theme } from '../global/types';
-import { AppState, ContentTab } from '../global/types';
+import { AppState } from '../global/types';
 
-import { INACTIVE_MARKER, IS_ANDROID_DIRECT, IS_CAPACITOR } from '../config';
-import { selectCurrentAccountSettings, selectCurrentAccountState } from '../global/selectors';
+import {
+  APP_NAME,
+  INACTIVE_MARKER,
+  IS_ANDROID_DIRECT,
+  IS_CAPACITOR,
+  IS_CORE_WALLET,
+  IS_EXPLORER,
+} from '../config';
+import { selectCurrentAccountId, selectCurrentAccountSettings, selectCurrentAccountState } from '../global/selectors';
 import { useAccentColor } from '../util/accentColor';
 import { setActiveTabChangeListener } from '../util/activeTabMonitor';
 import buildClassName from '../util/buildClassName';
 import { MINUTE } from '../util/dateFormat';
+import { closeThisTab } from '../util/ledger/tab';
 import { resolveRender } from '../util/renderPromise';
 import {
-  IS_ANDROID, IS_DELEGATED_BOTTOM_SHEET, IS_ELECTRON, IS_IOS, IS_LINUX,
+  IS_ANDROID, IS_ELECTRON, IS_IOS, IS_LEDGER_EXTENSION_TAB, IS_LINUX,
 } from '../util/windowEnvironment';
 import { updateSizes } from '../util/windowSize';
 import { callApi } from '../api';
+import { SwapActivityModal, TransactionInfoModal, TransactionModal } from './main/modals/transaction';
+import IFrameBrowser from './ui/IFrameBrowser';
 
+import { useAppIntersectionObserver } from '../hooks/useAppIntersectionObserver';
 import useAppTheme from '../hooks/useAppTheme';
 import useBackgroundMode from '../hooks/useBackgroundMode';
 import { useDeviceScreen } from '../hooks/useDeviceScreen';
@@ -26,26 +37,29 @@ import useSyncEffect from '../hooks/useSyncEffect';
 import useTimeout from '../hooks/useTimeout';
 
 import AppInactive from './AppInactive';
-import AppLocked from './AppLocked';
+import AppLocked from './appLocked/AppLocked';
 import Auth from './auth/Auth';
+import AuthImportWalletModal from './auth/AuthImportWalletModal';
+import CustomizeWalletModal from './customizeWallet/CustomizeWalletModal';
 import DappConnectModal from './dapps/DappConnectModal';
+import DappSignDataModal from './dapps/DappSignDataModal';
 import DappTransferModal from './dapps/DappTransferModal';
 import Dialogs from './Dialogs';
 import ElectronHeader from './electron/ElectronHeader';
 import Explore from './explore/Explore';
 import LedgerModal from './ledger/LedgerModal';
 import Main from './main/Main';
-import AddAccountModal from './main/modals/AddAccountModal';
 import BackupModal from './main/modals/BackupModal';
+import NftAttributesModal from './main/modals/NftAttributesModal';
+import OffRampWidgetModal from './main/modals/OffRampWidgetModal';
 import OnRampWidgetModal from './main/modals/OnRampWidgetModal';
 import QrScannerModal from './main/modals/QrScannerModal';
 import SignatureModal from './main/modals/SignatureModal';
-import SwapActivityModal from './main/modals/SwapActivityModal';
-import TransactionModal from './main/modals/TransactionModal';
 import UnhideNftModal from './main/modals/UnhideNftModal';
-import Notifications from './main/Notifications';
 import BottomBar from './main/sections/Actions/BottomBar';
+import Toasts from './main/Toasts';
 import MediaViewer from './mediaViewer/MediaViewer';
+import MintCardModal from './mintCard/MintCardModal';
 import Settings from './settings/Settings';
 import SettingsModal from './settings/SettingsModal';
 import SwapModal from './swap/SwapModal';
@@ -64,10 +78,13 @@ interface StateProps {
   isBackupWalletModalOpen?: boolean;
   isQrScannerOpen?: boolean;
   isHardwareModalOpen?: boolean;
+  isCustomizeWalletModalOpen?: boolean;
   isExploreOpen?: boolean;
+  isFullscreen: boolean;
   areSettingsOpen?: boolean;
   theme: Theme;
   accentColorIndex?: number;
+  isAppReady?: boolean;
 }
 
 const APP_STATES_WITH_BOTTOM_BAR = new Set([AppState.Main, AppState.Settings, AppState.Explore]);
@@ -84,11 +101,14 @@ function App({
   accountId,
   isBackupWalletModalOpen,
   isHardwareModalOpen,
+  isCustomizeWalletModalOpen,
   isQrScannerOpen,
   isExploreOpen,
+  isFullscreen,
   areSettingsOpen,
   theme,
   accentColorIndex,
+  isAppReady,
 }: StateProps) {
   const {
     closeBackupWalletModal,
@@ -111,7 +131,7 @@ function App({
       ? AppState.Settings
       : isExploreOpen && isPortrait
         ? AppState.Explore : appState;
-  const withBottomBar = isPortrait && APP_STATES_WITH_BOTTOM_BAR.has(renderingKey);
+  const withBottomBar = isPortrait && (!IS_EXPLORER || isAppReady) && APP_STATES_WITH_BOTTOM_BAR.has(renderingKey);
   const transitionName = withBottomBar
     ? 'semiFade'
     : isPortrait
@@ -123,7 +143,7 @@ function App({
     renderingKey === AppState.Auth && !canPrerenderMain ? PRERENDER_MAIN_DELAY : undefined,
   );
 
-  useInterval(checkAppVersion, APP_UPDATE_INTERVAL);
+  useInterval(checkAppVersion, IS_CORE_WALLET ? undefined : APP_UPDATE_INTERVAL);
 
   useEffect(() => {
     document.documentElement.classList.toggle('with-bottombar', withBottomBar);
@@ -132,7 +152,7 @@ function App({
   useEffect(() => {
     updateSizes();
     setActiveTabChangeListener(() => {
-      document.title = `MyTonWallet ${INACTIVE_MARKER}`;
+      document.title = `${APP_NAME} ${INACTIVE_MARKER}`;
 
       markInactive();
       closeSettings();
@@ -144,12 +164,16 @@ function App({
     void callApi('setIsAppFocused', false);
   }, () => {
     void callApi('setIsAppFocused', true);
-  });
+  }, IS_LEDGER_EXTENSION_TAB);
 
   useLayoutEffect(() => {
     document.documentElement.classList.add('is-rendered');
     resolveRender();
   }, []);
+  useLayoutEffect(() => {
+    document.documentElement.classList.toggle('is-fullscreen', isFullscreen);
+    requestAnimationFrame(updateSizes);
+  }, [isFullscreen]);
 
   useSyncEffect(() => {
     if (accountId) {
@@ -160,8 +184,9 @@ function App({
   const appTheme = useAppTheme(theme);
   useAccentColor('body', appTheme, accentColorIndex);
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  useAppIntersectionObserver();
+
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: AppState) {
     switch (currentKey) {
       case AppState.Auth:
         return <Auth />;
@@ -190,9 +215,9 @@ function App({
       case AppState.Explore:
         return <Explore isActive={isActive} />;
       case AppState.Settings:
-        return <Settings />;
+        return <Settings isActive={isActive} />;
       case AppState.Ledger:
-        return <LedgerModal isOpen onClose={handleCloseBrowserTab} />;
+        return <LedgerModal isOpen noBackdropClose onClose={closeThisTab} />;
       case AppState.Inactive:
         return <AppInactive />;
     }
@@ -200,7 +225,7 @@ function App({
 
   return (
     <>
-      {IS_ELECTRON && !IS_LINUX && <ElectronHeader withTitle />}
+      {IS_ELECTRON && <ElectronHeader withTitle />}
 
       <Transition
         name={transitionName}
@@ -220,39 +245,49 @@ function App({
           isOpen={areSettingsOpen}
           onClose={closeSettings}
         >
-          <Settings isInsideModal />
+          <Settings isActive={!!areSettingsOpen} isInsideModal />
         </SettingsModal>
       )}
       <AppLocked />
       <MediaViewer />
       {!isInactive && (
         <>
+          <AuthImportWalletModal />
           <LedgerModal isOpen={isHardwareModalOpen} onClose={closeHardwareWalletModal} />
           <BackupModal
             isOpen={isBackupWalletModalOpen}
             onClose={closeBackupWalletModal}
           />
           <TransferModal />
-          <SwapModal />
+          {!IS_CORE_WALLET && (
+            <>
+              <SwapModal />
+              <MintCardModal />
+              <CustomizeWalletModal isOpen={isCustomizeWalletModalOpen} />
+            </>
+          )}
           <SignatureModal />
           <TransactionModal />
+          <TransactionInfoModal />
           <SwapActivityModal />
           <DappConnectModal />
+          <DappSignDataModal />
           <DappTransferModal />
-          <AddAccountModal />
           <OnRampWidgetModal />
+          <OffRampWidgetModal />
           <UnhideNftModal />
-          {!IS_DELEGATED_BOTTOM_SHEET && <Notifications />}
+          <NftAttributesModal />
           {IS_CAPACITOR && (
             <QrScannerModal
               isOpen={isQrScannerOpen}
               onClose={closeQrScanner}
             />
           )}
-          {!IS_DELEGATED_BOTTOM_SHEET && <Dialogs />}
-          {!IS_DELEGATED_BOTTOM_SHEET && <ConfettiContainer />}
-          {IS_CAPACITOR && !IS_DELEGATED_BOTTOM_SHEET && <InAppBrowser />}
-          {!IS_DELEGATED_BOTTOM_SHEET && <LoadingOverlay />}
+          <Toasts />
+          <Dialogs />
+          <ConfettiContainer />
+          {IS_CAPACITOR ? <InAppBrowser /> : <IFrameBrowser />}
+          <LoadingOverlay />
         </>
       )}
       {withBottomBar && <BottomBar />}
@@ -261,23 +296,18 @@ function App({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const { activeContentTab } = selectCurrentAccountState(global) ?? {};
-
   return {
     appState: global.appState,
-    accountId: global.currentAccountId,
+    accountId: selectCurrentAccountId(global),
     isBackupWalletModalOpen: global.isBackupWalletModalOpen,
     isHardwareModalOpen: global.isHardwareModalOpen,
-    isExploreOpen: !global.areSettingsOpen && activeContentTab === ContentTab.Explore,
+    isCustomizeWalletModalOpen: global.isCustomizeWalletModalOpen,
+    isExploreOpen: global.isExploreOpen,
     areSettingsOpen: global.areSettingsOpen,
     isQrScannerOpen: global.isQrScannerOpen,
+    isFullscreen: Boolean(global.isFullscreen),
     theme: global.settings.theme,
     accentColorIndex: selectCurrentAccountSettings(global)?.accentColorIndex,
+    isAppReady: selectCurrentAccountState(global)?.isAppReady,
   };
 })(App));
-
-async function handleCloseBrowserTab() {
-  const tab = await chrome.tabs.getCurrent();
-  if (!tab?.id) return;
-  await chrome.tabs.remove(tab.id);
-}

@@ -1,3 +1,4 @@
+import type { TeactNode } from '../../lib/teact/teact';
 import React, { memo } from '../../lib/teact/teact';
 import { withGlobal } from '../../global';
 
@@ -10,7 +11,7 @@ import Modal from '../ui/Modal';
 import styles from './Settings.module.scss';
 
 interface OwnProps {
-  children: React.ReactNode;
+  children: TeactNode;
   isOpen?: boolean;
   onClose: () => void;
 }
@@ -33,8 +34,6 @@ function SettingsModal({
       isOpen={isOpen && !isMediaViewerOpen}
       dialogClassName={fullDialogClassName}
       contentClassName={styles.modalContent}
-      nativeBottomSheetKey="settings"
-      forceFullNative
       onClose={onClose}
     >
       {children}

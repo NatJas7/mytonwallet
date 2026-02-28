@@ -1,5 +1,7 @@
+@use "../../../../styles/mixins";
+
 .container {
-  margin-bottom: 0.75rem;
+  margin-top: 1rem;
 }
 
 .buttons {
@@ -27,6 +29,7 @@
   width: 100%;
   height: 3.625rem;
   padding: 0;
+  border-radius: var(--border-radius-default);
 
   font-size: 0.8125rem;
   font-weight: 600;
@@ -34,7 +37,6 @@
   color: var(--color-black);
 
   background: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 
   transition: background-color 150ms, color 150ms;
 
@@ -59,6 +61,10 @@
   }
 }
 
+.buttonActive {
+  color: var(--color-accent);
+}
+
 .buttonIcon {
   display: block;
 
@@ -74,4 +80,29 @@
   .button_purple > & {
     color: unset;
   }
+
+  @include mixins.is-not-mobile() {
+    width: 1.875rem;
+    height: 1.875rem;
+    font-size: 1.875rem;
+  }
+}
+
+.name {
+  white-space: nowrap;
+}
+
+.divider {
+  margin: 0 0.25rem;
+  color: var(--color-gray-4);
+}
+
+.menu {
+  --offset-y-value: 0;
+  --offset-y-bottom-value: 0;
+  --offset-x-value: 0;
+
+  right: auto !important;
+  left: 0 !important;
+  max-height: max(70vh, 20rem);
 }

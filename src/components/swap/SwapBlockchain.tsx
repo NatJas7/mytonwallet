@@ -6,13 +6,13 @@ import { getActions } from '../../global';
 
 import { SwapState, SwapType, type UserSwapToken } from '../../global/types';
 
-import { ANIMATED_STICKER_BIG_SIZE_PX, IS_FIREFOX_EXTENSION } from '../../config';
+import { ANIMATED_STICKER_BIG_SIZE_PX } from '../../config';
 import buildClassName from '../../util/buildClassName';
-import { vibrate } from '../../util/capacitor';
 import { readClipboardContent } from '../../util/clipboard';
+import { vibrate } from '../../util/haptics';
 import { shortenAddress } from '../../util/shortenAddress';
 import getChainNetworkName from '../../util/swap/getChainNetworkName';
-import { IS_FIREFOX } from '../../util/windowEnvironment';
+import { getIsMobileTelegramApp, IS_CLIPBOARDS_SUPPORTED, IS_IOS } from '../../util/windowEnvironment';
 import { callApi } from '../../api';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
@@ -53,21 +53,19 @@ function SwapBlockchain({
   const {
     cancelSwap,
     setSwapCexAddress,
-    showNotification,
+    showToast,
     setSwapScreen,
     requestOpenQrScanner,
   } = getActions();
   const lang = useLang();
   const { isPortrait } = useDeviceScreen();
 
-  // eslint-disable-next-line no-null/no-null
-  const toAddressRef = useRef<HTMLInputElement>(null);
+  const toAddressRef = useRef<HTMLInputElement>();
 
-  // Note: As of 27-11-2023, Firefox does not support readText()
-  const [shouldRenderPasteButton, setShouldRenderPasteButton] = useState(!(IS_FIREFOX || IS_FIREFOX_EXTENSION));
+  const [shouldRenderPasteButton, setShouldRenderPasteButton] = useState(IS_CLIPBOARDS_SUPPORTED);
   const [isAddressFocused, markAddressFocused, unmarkAddressFocused] = useFlag();
   const [hasToAddressError, setHasToAddressError] = useState(false);
-  const [canContinue, setCanContinue] = useState(swapType !== SwapType.CrosschainFromWallet);
+  const [canContinue, setCanContinue] = useState(false);
 
   const isQrScannerSupported = useQrScannerSupport();
 
@@ -118,7 +116,7 @@ function SwapBlockchain({
     }
 
     const response = await callApi('swapCexValidateAddress', {
-      slug: tokenOut?.slug!,
+      slug: tokenOut!.slug,
       address,
     });
 
@@ -146,10 +144,10 @@ function SwapBlockchain({
 
       if (type === 'text/plain') {
         setSwapCexAddress({ toAddress: text.trim() });
-        validateToAddress(text.trim());
+        await validateToAddress(text.trim());
       }
     } catch (error) {
-      showNotification({
+      showToast({
         message: lang('Error reading clipboard'),
       });
       setShouldRenderPasteButton(false);
@@ -157,15 +155,20 @@ function SwapBlockchain({
   });
 
   useEffect(() => {
-    validateToAddress(toAddress);
+    void validateToAddress(toAddress);
   }, [toAddress, validateToAddress]);
 
   const submitPassword = useLastCallback(() => {
-    vibrate();
+    void vibrate();
     setSwapScreen({ state: SwapState.Password });
   });
 
   const handleQrScanClick = useLastCallback(() => {
+    if (IS_IOS && getIsMobileTelegramApp()) {
+      alert('Scanning is temporarily not available');
+      return;
+    }
+
     requestOpenQrScanner();
     cancelSwap();
   });
@@ -232,11 +235,11 @@ function SwapBlockchain({
     );
   }
 
-  const title = (lang('$swap_from_to', {
+  const title = lang('$swap_from_to', {
     from: tokenIn?.symbol,
-    icon: <i className={buildClassName('icon-arrow-right', styles.swapArrowIconTitle)} aria-hidden />,
+    icon: <i className={buildClassName('icon-chevron-right', styles.swapArrowIcon)} aria-hidden />,
     to: tokenOut?.symbol,
-  }) as TeactNode[]);
+  }) as TeactNode[];
 
   return (
     <>

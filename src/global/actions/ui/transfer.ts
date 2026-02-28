@@ -1,20 +1,14 @@
 import { ActiveTab, TransferState } from '../../types';
 
+import { getInMemoryPassword } from '../../../util/authApi/inMemoryPasswordStore';
 import { fromDecimal, toDecimal } from '../../../util/decimals';
-import { callActionInMain } from '../../../util/multitab';
-import { IS_DELEGATED_BOTTOM_SHEET } from '../../../util/windowEnvironment';
+import { getChainBySlug } from '../../../util/tokens';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
-import { updateCurrentTransfer } from '../../reducers';
-import { selectAccount } from '../../selectors';
+import { resetHardware, setCurrentTransferAddress, updateCurrentTransfer } from '../../reducers';
+import { selectIsHardwareAccount } from '../../selectors';
 
 addActionHandler('startTransfer', (global, actions, payload) => {
-  const isOpen = global.currentTransfer.state !== TransferState.None;
-  if (IS_DELEGATED_BOTTOM_SHEET && !isOpen) {
-    callActionInMain('startTransfer', payload);
-    return;
-  }
-
-  const { isPortrait, ...rest } = payload ?? {};
+  const { isPortrait, isOfframp, ...rest } = payload ?? {};
 
   const nftTokenSlug = Symbol('nft');
   const previousFeeTokenSlug = global.currentTransfer.nfts?.length ? nftTokenSlug : global.currentTransfer.tokenSlug;
@@ -26,10 +20,21 @@ addActionHandler('startTransfer', (global, actions, payload) => {
     error: undefined,
     ...(shouldClearFee ? { fee: undefined, realFee: undefined, diesel: undefined } : {}),
     ...rest,
+    isOfframp,
   }));
 
   if (!isPortrait) {
     actions.setLandscapeActionsActiveTabIndex({ index: ActiveTab.Transfer });
+  }
+
+  // For offramp mode, automatically submit to calculate fee and go to Confirm screen
+  if (isOfframp && payload?.tokenSlug && payload?.amount && payload?.toAddress) {
+    actions.submitTransferInitial({
+      tokenSlug: payload.tokenSlug,
+      amount: payload.amount,
+      toAddress: payload.toAddress,
+      comment: payload.comment,
+    });
   }
 });
 
@@ -62,55 +67,56 @@ addActionHandler('changeTransferToken', (global, actions, { tokenSlug, withReset
 addActionHandler('setTransferScreen', (global, actions, payload) => {
   const { state } = payload;
 
-  setGlobal(updateCurrentTransfer(global, { state }));
+  return updateCurrentTransfer(global, { state });
 });
 
 addActionHandler('setTransferAmount', (global, actions, { amount }) => {
-  setGlobal(
-    updateCurrentTransfer(global, {
-      amount,
-    }),
-  );
+  return updateCurrentTransfer(global, { amount });
 });
 
 addActionHandler('setTransferToAddress', (global, actions, { toAddress }) => {
-  setGlobal(
-    updateCurrentTransfer(global, {
-      toAddress,
-    }),
-  );
+  return setCurrentTransferAddress(global, toAddress);
 });
 
 addActionHandler('setTransferComment', (global, actions, { comment }) => {
-  setGlobal(
-    updateCurrentTransfer(global, {
-      comment,
-    }),
-  );
+  return updateCurrentTransfer(global, { comment });
 });
 
 addActionHandler('setTransferShouldEncrypt', (global, actions, { shouldEncrypt }) => {
-  setGlobal(
-    updateCurrentTransfer(global, {
-      shouldEncrypt,
-    }),
-  );
+  return updateCurrentTransfer(global, { shouldEncrypt });
 });
 
-addActionHandler('submitTransferConfirm', (global, actions) => {
-  const accountId = global.currentAccountId!;
-  const account = selectAccount(global, accountId)!;
+addActionHandler('submitTransferConfirm', async (global, actions) => {
+  const inMemoryPassword = await getInMemoryPassword();
 
-  if (account.isHardware) {
-    actions.resetHardwareWalletConnect();
-    global = updateCurrentTransfer(getGlobal(), { state: TransferState.ConnectHardware });
+  global = getGlobal();
+  const { tokenSlug } = global.currentTransfer;
+  const chain = getChainBySlug(tokenSlug);
+
+  if (selectIsHardwareAccount(global)) {
+    global = resetHardware(global, chain);
+    global = updateCurrentTransfer(global, { state: TransferState.ConnectHardware });
+    setGlobal(global);
+  } else if (inMemoryPassword) {
+    global = updateCurrentTransfer(global, { isLoading: true });
+    setGlobal(global);
+    actions.submitTransfer({ password: inMemoryPassword });
   } else {
     global = updateCurrentTransfer(global, { state: TransferState.Password });
+    setGlobal(global);
   }
-
-  setGlobal(global);
 });
 
 addActionHandler('clearTransferError', (global) => {
   setGlobal(updateCurrentTransfer(global, { error: undefined }));
+});
+
+addActionHandler('dismissTransferScamWarning', (global) => {
+  global = updateCurrentTransfer(global, { scamWarningType: undefined });
+  setGlobal(global);
+});
+
+addActionHandler('showTransferScamWarning', (global, actions, { type }) => {
+  global = updateCurrentTransfer(global, { scamWarningType: type });
+  setGlobal(global);
 });

@@ -1,11 +1,11 @@
-import React, { memo, useMemo } from '../../lib/teact/teact';
+import React, { memo } from '../../lib/teact/teact';
 import { withGlobal } from '../../global';
 
 import type { Account, UserSwapToken } from '../../global/types';
 import { SwapType } from '../../global/types';
 
-import { getIsInternalSwap, getIsSupportedChain } from '../../global/helpers';
 import { selectCurrentAccount } from '../../global/selectors';
+import { getChainTitle, getIsSupportedChain } from '../../util/chain';
 import getChainNetworkName from '../../util/swap/getChainNetworkName';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
@@ -30,10 +30,12 @@ interface OwnProps {
   toAddress?: string;
   onFirstButtonClick?: NoneToVoidFunction;
   onSecondButtonClick?: NoneToVoidFunction;
+  isFirstButtonDisabled?: boolean;
 }
 
 interface StateProps {
-  addressByChain?: Account['addressByChain'];
+  accountChains?: Account['byChain'];
+  isSensitiveDataHidden?: true;
 }
 
 function SwapResult({
@@ -46,18 +48,12 @@ function SwapResult({
   secondButtonText,
   swapType,
   toAddress = '',
-  addressByChain,
+  isSensitiveDataHidden,
   onFirstButtonClick,
   onSecondButtonClick,
+  isFirstButtonDisabled,
 }: OwnProps & StateProps) {
   const lang = useLang();
-
-  const isInternalSwap = getIsInternalSwap({
-    from: tokenIn, to: tokenOut, toAddress, addressByChain,
-  });
-  const isToAddressInCurrentWallet = useMemo(() => {
-    return Boolean(toAddress && Object.values(addressByChain ?? {}).some((address) => address === toAddress));
-  }, [addressByChain, toAddress]);
 
   function renderButtons() {
     if (!firstButtonText && !secondButtonText) {
@@ -67,7 +63,13 @@ function SwapResult({
     return (
       <div className={styles.buttons}>
         {firstButtonText && (
-          <Button className={styles.button} onClick={onFirstButtonClick}>{firstButtonText}</Button>
+          <Button
+            className={styles.button}
+            onClick={onFirstButtonClick}
+            isDisabled={isFirstButtonDisabled}
+          >
+            {firstButtonText}
+          </Button>
         )}
         {secondButtonText && (
           <Button className={styles.button} onClick={onSecondButtonClick}>{secondButtonText}</Button>
@@ -77,7 +79,7 @@ function SwapResult({
   }
 
   function renderSticker() {
-    if (swapType === SwapType.CrosschainFromWallet && !isInternalSwap) return undefined;
+    if (swapType === SwapType.CrosschainFromWallet) return undefined;
 
     return (
       <AnimatedIconWithPreview
@@ -102,7 +104,7 @@ function SwapResult({
   }
 
   function renderChangellyInfo() {
-    if (swapType !== SwapType.CrosschainFromWallet || isToAddressInCurrentWallet) {
+    if (swapType !== SwapType.CrosschainFromWallet) {
       return undefined;
     }
     const chain = getIsSupportedChain(tokenOut?.chain) ? tokenOut.chain : undefined;
@@ -111,7 +113,7 @@ function SwapResult({
       <div className={styles.changellyInfoBlock}>
         <span className={styles.changellyDescription}>
           {
-            lang('$swap_changelly_from_ton_description', {
+            lang('$swap_changelly_from_wallet_description', {
               blockchain: (
                 <span className={styles.changellyDescriptionBold}>
                   {getChainNetworkName(tokenOut?.chain)}
@@ -123,7 +125,7 @@ function SwapResult({
         <InteractiveTextField
           chain={chain}
           address={toAddress}
-          copyNotification={lang('Address was copied!')}
+          copyNotification={lang('%chain% Address Copied', { chain: chain ? getChainTitle(chain) : '' }) as string}
           noSavedAddress
           noExplorer
           className={styles.changellyTextField}
@@ -137,6 +139,7 @@ function SwapResult({
       {renderSticker()}
 
       <SwapTokensInfo
+        isSensitiveDataHidden={isSensitiveDataHidden}
         tokenIn={tokenIn}
         amountIn={amountIn}
         tokenOut={tokenOut}
@@ -153,6 +156,7 @@ function SwapResult({
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
   return {
-    addressByChain: selectCurrentAccount(global)?.addressByChain,
+    accountChains: selectCurrentAccount(global)?.byChain,
+    isSensitiveDataHidden: global.settings.isSensitiveDataHidden,
   };
 })(SwapResult));

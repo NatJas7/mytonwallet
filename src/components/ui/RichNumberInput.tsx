@@ -1,12 +1,12 @@
-import type { TeactNode } from '../../lib/teact/teact';
+import type { RefObject, TeactNode } from '../../lib/teact/teact';
 import React, { memo, useLayoutEffect, useRef } from '../../lib/teact/teact';
 
-import { FRACTION_DIGITS, WHOLE_PART_DELIMITER } from '../../config';
-import { requestMutation } from '../../lib/fasterdom/fasterdom';
-import { getNumberParts, getNumberRegex } from '../../global/helpers/number';
+import { FRACTION_DIGITS } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { saveCaretPosition } from '../../util/saveCaretPosition';
+import { buildContentHtml } from './helpers/buildContentHtml';
 
+import { useCombinedRefs } from '../../hooks/useCombinedRef';
 import useFlag from '../../hooks/useFlag';
 import useFontScale from '../../hooks/useFontScale';
 import useLang from '../../hooks/useLang';
@@ -15,11 +15,13 @@ import useLastCallback from '../../hooks/useLastCallback';
 import styles from './Input.module.scss';
 
 type OwnProps = {
+  ref?: RefObject<HTMLInputElement | undefined>;
   id?: string;
-  labelText?: React.ReactNode;
+  labelText?: TeactNode;
   value?: string;
   hasError?: boolean;
   isLoading?: boolean;
+  prefix?: string;
   suffix?: string;
   className?: string;
   inputClassName?: string;
@@ -42,11 +44,13 @@ type OwnProps = {
 const MIN_LENGTH_FOR_SHRINK = 5;
 
 function RichNumberInput({
+  ref,
   id,
   labelText,
   hasError,
   isLoading = false,
-  suffix,
+  prefix = '',
+  suffix = '',
   value,
   children,
   className,
@@ -64,60 +68,62 @@ function RichNumberInput({
   isStatic = false,
   size = 'large',
 }: OwnProps) {
-  // eslint-disable-next-line no-null/no-null
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLInputElement>();
+  const placeholderRef = useRef<HTMLDivElement>();
   const lang = useLang();
+  const combinedRef = useCombinedRefs<HTMLDivElement>(inputRef, ref);
+
   const [hasFocus, markHasFocus, unmarkHasFocus] = useFlag(false);
   const { updateFontScale, isFontChangedRef } = useFontScale(inputRef);
 
-  const handleNumberHtml = useLastCallback((input: HTMLInputElement, parts?: RegExpMatchArray) => {
-    const newHtml = parts ? buildContentHtml({ values: parts, suffix, decimals }) : '';
-    const restoreCaretPosition = document.activeElement === inputRef.current
-      ? saveCaretPosition(input, decimals)
-      : undefined;
+  const textRef = useRef('');
 
-    input.innerHTML = newHtml;
-    restoreCaretPosition?.();
-
-    return newHtml;
-  });
-
-  const updateHtml = useLastCallback((parts?: RegExpMatchArray) => {
+  const updateHtml = useLastCallback((newText: string) => {
     const input = inputRef.current!;
-    const content = handleNumberHtml(input, parts);
-    const textContent = parts?.[0] || '';
+    const html = buildContentHtml(newText, prefix, suffix, decimals);
 
-    if (textContent.length > MIN_LENGTH_FOR_SHRINK || isFontChangedRef.current) {
-      updateFontScale(content);
+    // Don't use the :empty pseudo-class to hide the placeholder, because it's noticeable delayed on iOS
+    placeholderRef.current!.innerHTML = newText ? '' : buildContentHtml('0', prefix, suffix);
+
+    if (html !== input.innerHTML) {
+      const restoreCaretPosition = document.activeElement === input
+        ? saveCaretPosition(input, prefix.length, decimals)
+        : undefined;
+
+      input.innerHTML = html;
+      restoreCaretPosition?.();
     }
-    input.classList.toggle(styles.isEmpty, !content.length);
+
+    if (`${prefix}${newText}${suffix}`.length > MIN_LENGTH_FOR_SHRINK || isFontChangedRef.current) {
+      updateFontScale();
+    }
   });
 
   useLayoutEffect(() => {
-    if (value === undefined) {
-      updateHtml();
-    } else {
-      updateHtml(getNumberParts(value));
+    const newText = clearText(value);
+
+    if (!newText || !textRef.current.startsWith(newText)) {
+      updateHtml(newText);
+      textRef.current = newText;
     }
-  }, [updateHtml, value]);
+  }, [textRef, value]);
+
+  useLayoutEffect(() => {
+    updateHtml(textRef.current);
+  }, [prefix, suffix, decimals]);
 
   function handleChange(e: React.FormEvent<HTMLDivElement>) {
-    const inputValue = e.currentTarget.innerText.trim();
-    const newValue = clearValue(inputValue, decimals);
-    const parts = getNumberParts(newValue, decimals);
-    const isEmpty = inputValue === '';
+    const newText = clearText(e.currentTarget.textContent ?? undefined);
 
-    requestMutation(() => {
-      if (!parts && !isEmpty && value) {
-        updateHtml(getNumberParts(value, decimals));
-      } else {
-        updateHtml(parts);
-      }
+    updateHtml(newText);
 
-      if ((newValue || isEmpty) && newValue !== value) {
-        onChange?.(newValue);
+    if (newText !== textRef.current) {
+      textRef.current = newText;
+
+      if (onChange && isValidValue(newText)) {
+        onChange(newText);
       }
-    });
+    }
   }
 
   const handleFocus = useLastCallback(() => {
@@ -135,8 +141,8 @@ function RichNumberInput({
   });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Enter' && onPressEnter) {
-      onPressEnter(e);
+    if (e.key === 'Enter') {
+      onPressEnter?.(e);
     }
   };
 
@@ -149,9 +155,7 @@ function RichNumberInput({
   );
   const inputFullClass = buildClassName(
     styles.input,
-    styles.input_rich,
-    size === 'large' && styles.input_large,
-    !value && styles.isEmpty,
+    size === 'large' && styles.large,
     valueClassName,
     disabled && styles.disabled,
     isLoading && styles.isLoading,
@@ -180,24 +184,29 @@ function RichNumberInput({
         </label>
       )}
       <div className={inputWrapperFullClass}>
-        {/* eslint-disable-next-line jsx-a11y/control-has-associated-label */}
-        <div
-          ref={inputRef}
-          contentEditable={!disabled && !isLoading}
-          id={id}
-          role="textbox"
-          aria-required
-          aria-placeholder={lang('Amount value')}
-          aria-labelledby={labelText ? `${id}Label` : undefined}
-          tabIndex={0}
-          inputMode="decimal"
-          className={inputFullClass}
-          onKeyDown={handleKeyDown}
-          onChange={handleChange}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          onClick={onInputClick}
-        />
+        <div className={styles.rich}>
+          <div
+            ref={combinedRef}
+            contentEditable={!disabled && !isLoading}
+            id={id}
+            role="textbox"
+            aria-required
+            aria-placeholder={lang('Amount value')}
+            aria-labelledby={labelText ? `${id}Label` : undefined}
+            tabIndex={0}
+            inputMode="decimal"
+            className={buildClassName(inputFullClass, styles.rich__value)}
+            onKeyDown={handleKeyDown}
+            onChange={handleChange}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            onClick={onInputClick}
+          />
+          <div
+            ref={placeholderRef}
+            className={buildClassName(inputFullClass, styles.rich__placeholder)}
+          />
+        </div>
         {children}
       </div>
       {cornerClassName && <div className={cornerFullClass} />}
@@ -205,38 +214,36 @@ function RichNumberInput({
   );
 }
 
-function clearValue(value: string, decimals: number) {
-  return value
-    .replace(',', '.') // Replace comma to point
-    .replace(/[^\d.]/, '') // Remove incorrect symbols
-    .match(getNumberRegex(decimals))?.[0] // Trim extra decimal places
-    .replace(/^0+(?=([1-9]|0\.))/, '') // Trim extra zeros at beginning
-    .replace(/^0+$/, '0') // Trim extra zeros (if only zeros are entered)
-    ?? '';
+function clearText(text?: string) {
+  if (!text) return '';
+
+  return (
+    text
+      .trim()
+      .replace(',', '.') // Replace comma to point
+      .replace(/[^\d.]/g, '') // Remove incorrect symbols
+      .replace(/^0+(?=([1-9]|0\.))/, '') // Trim extra zeros at beginning
+      .replace(/^0+$/, '0') // Trim extra zeros (if only zeros are entered)
+      ?? ''
+  );
 }
 
-export function buildContentHtml({
-  values,
-  suffix,
-  decimals = FRACTION_DIGITS,
-  withRadix = false,
-}: {
-  values: RegExpMatchArray;
-  suffix?: string;
-  decimals?: number;
-  withRadix?: boolean;
-}) {
-  let [, wholePart] = values;
-  const [, , dotPart, fractionPart] = values;
-
-  const fractionStr = (fractionPart || dotPart) ? `.${(fractionPart || '').substring(0, decimals)}` : '';
-  const suffixStr = suffix ? `&thinsp;${suffix}` : '';
-
-  if (withRadix) {
-    wholePart = wholePart.replace(/\d(?=(\d{3})+($|\.))/g, `$&${WHOLE_PART_DELIMITER}`);
-  }
-
-  return `${wholePart}<span class="${styles.fractional}">${fractionStr}${suffixStr}</span>`;
+function isValidValue(text: string) {
+  return !Number.isNaN(Number(text));
 }
 
 export default memo(RichNumberInput);
+
+export function focusAtTheEnd(inputId: string) {
+  const input = document.getElementById(inputId);
+  const selection = window.getSelection();
+  if (!input || !selection) {
+    return;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(input);
+  range.collapse(false);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}

@@ -1,14 +1,15 @@
-import type { ApiCheckTransactionDraftResult } from '../../api/chains/ton/types';
+import type { ApiCheckTransactionDraftResult } from '../../api/types';
 import type { GlobalState } from '../types';
 
 import { pick } from '../../util/iteratees';
+import { replaceActivityId } from '../helpers/misc';
 import { INITIAL_STATE } from '../initialState';
-import { selectCurrentTransferMaxAmount } from '../selectors';
+import { selectCurrentTransferMaxAmount, selectTokenMatchingCurrentTransferAddressSlow } from '../selectors';
 
 export function updateCurrentTransferByCheckResult(global: GlobalState, result: ApiCheckTransactionDraftResult) {
   const nextGlobal = updateCurrentTransfer(global, {
     toAddressName: result.addressName,
-    ...pick(result, ['fee', 'realFee', 'isScam', 'isMemoRequired', 'diesel']),
+    ...pick(result, ['fee', 'realFee', 'isScam', 'isMemoRequired', 'diesel', 'isToAddressNew', 'resolvedAddress']),
   });
   return preserveMaxTransferAmount(global, nextGlobal);
 }
@@ -52,4 +53,24 @@ export function updateCurrentTransferLoading(global: GlobalState, isLoading: boo
       isLoading,
     },
   };
+}
+
+export function setCurrentTransferAddress(global: GlobalState, toAddress: string | undefined) {
+  global = updateCurrentTransfer(global, { toAddress });
+
+  // Unless the user has filled the amount, the token should change to match the "to" address
+  if (!global.currentTransfer.amount) {
+    global = updateCurrentTransfer(global, {
+      tokenSlug: selectTokenMatchingCurrentTransferAddressSlow(global),
+    });
+  }
+
+  return global;
+}
+
+/** replaceMap: keys - old (removed) activity ids, value - new (added) activity ids */
+export function replaceCurrentTransferId(global: GlobalState, replaceMap: Record<string, string>) {
+  return updateCurrentTransfer(global, {
+    txId: replaceActivityId(global.currentTransfer.txId, replaceMap),
+  });
 }

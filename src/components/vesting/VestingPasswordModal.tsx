@@ -2,23 +2,22 @@ import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiTokenWithPrice, ApiVestingInfo } from '../../api/types';
-import type { HardwareConnectState, UserToken } from '../../global/types';
+import type { UserToken } from '../../global/types';
 import { VestingUnfreezeState } from '../../global/types';
 
-import {
-  CLAIM_AMOUNT,
-  IS_CAPACITOR,
-  TONCOIN,
-} from '../../config';
+import { CLAIM_AMOUNT, TONCOIN } from '../../config';
 import renderText from '../../global/helpers/renderText';
 import {
   selectAccount,
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
+  selectIsCurrentAccountViewMode,
   selectIsHardwareAccount,
   selectIsMultichainAccount,
   selectMycoin,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import { toBig } from '../../util/decimals';
 import { formatCurrency } from '../../util/formatNumber';
@@ -49,12 +48,11 @@ interface StateProps {
   error?: string;
   state?: VestingUnfreezeState;
   mycoin?: ApiTokenWithPrice;
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
   isHardwareAccount?: boolean;
   isMultichainAccount: boolean;
+  isViewMode?: boolean;
 }
+
 function VestingPasswordModal({
   isOpen,
   vesting,
@@ -64,18 +62,11 @@ function VestingPasswordModal({
   error,
   mycoin,
   state = VestingUnfreezeState.Password,
-  hardwareState,
-  isLedgerConnected,
-  isTonAppConnected,
   isHardwareAccount,
   isMultichainAccount,
+  isViewMode,
 }: StateProps) {
-  const {
-    submitClaimingVesting,
-    submitClaimingVestingHardware,
-    cancelClaimingVesting,
-    clearVestingError,
-  } = getActions();
+  const { submitClaimingVesting, cancelClaimingVesting, clearVestingError } = getActions();
 
   const lang = useLang();
   const {
@@ -84,7 +75,7 @@ function VestingPasswordModal({
   const claimAmount = toBig(CLAIM_AMOUNT);
   const hasAmountError = !balance || balance < CLAIM_AMOUNT;
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, Boolean(isOpen));
-  const withModalHeader = !isHardwareAccount && !IS_CAPACITOR;
+  const withModalHeader = !isHardwareAccount && !getDoesUsePinPad();
 
   const currentlyReadyToUnfreezeAmount = useMemo(() => {
     if (!vesting) return '0';
@@ -93,13 +84,13 @@ function VestingPasswordModal({
   }, [vesting]);
 
   const handleSubmit = useLastCallback((password: string) => {
-    if (hasAmountError) return;
+    if (isViewMode || hasAmountError) return;
     submitClaimingVesting({ password });
   });
 
   const handleHardwareSubmit = useLastCallback(() => {
-    if (hasAmountError) return;
-    submitClaimingVestingHardware();
+    if (isViewMode || hasAmountError) return;
+    submitClaimingVesting();
   });
 
   if (!mycoin) {
@@ -107,32 +98,33 @@ function VestingPasswordModal({
   }
 
   function renderInfo() {
+    const feeClassName = buildClassName(
+      styles.operationInfoFee,
+      !getDoesUsePinPad() && styles.operationInfoFeeWithGap,
+    );
+
     return (
       <>
         <TransactionBanner
           tokenIn={mycoin}
           withChainIcon={isMultichainAccount}
           text={formatCurrency(currentlyReadyToUnfreezeAmount, mycoin!.symbol, mycoin!.decimals)}
-          className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
-          secondText={shortenAddress(address!)}
+          className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
+          secondText={address && shortenAddress(address)}
         />
-        <div className={buildClassName(styles.operationInfoFee, !IS_CAPACITOR && styles.operationInfoFeeWithGap)}>
+        <div className={feeClassName}>
           {renderText(lang('$fee_value_bold', { fee: formatCurrency(claimAmount, TONCOIN.symbol) }))}
         </div>
       </>
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: VestingUnfreezeState) {
     switch (currentKey) {
       case VestingUnfreezeState.ConnectHardware:
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isLedgerConnected={isLedgerConnected}
-            isTonAppConnected={isTonAppConnected}
             onConnected={handleHardwareSubmit}
             onClose={cancelClaimingVesting}
           />
@@ -141,7 +133,7 @@ function VestingPasswordModal({
       case VestingUnfreezeState.ConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm transaction on your Ledger')}
+            text={lang('Please confirm action on your Ledger')}
             error={error}
             onClose={cancelClaimingVesting}
             onTryAgain={handleHardwareSubmit}
@@ -157,6 +149,7 @@ function VestingPasswordModal({
             operationType="unfreeze"
             error={hasAmountError ? lang('Insufficient Balance for Fee') : error}
             submitLabel={lang('Confirm')}
+            noAutoConfirm
             onSubmit={handleSubmit}
             onCancel={cancelClaimingVesting}
             onUpdate={clearVestingError}
@@ -172,8 +165,6 @@ function VestingPasswordModal({
       isOpen={isOpen}
       title={withModalHeader ? lang('Confirm Unfreezing') : undefined}
       hasCloseButton={withModalHeader}
-      forceFullNative
-      nativeBottomSheetKey="vesting-confirm"
       contentClassName={styles.passwordModalDialog}
       onClose={cancelClaimingVesting}
     >
@@ -192,7 +183,8 @@ function VestingPasswordModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const { addressByChain } = selectAccount(global, global.currentAccountId!) || {};
+  const currentAccountId = selectCurrentAccountId(global)!;
+  const { byChain } = selectAccount(global, currentAccountId) || {};
   const accountState = selectCurrentAccountState(global);
   const isHardwareAccount = selectIsHardwareAccount(global);
 
@@ -205,25 +197,17 @@ export default memo(withGlobal((global): StateProps => {
   } = accountState?.vesting || {};
   const tokens = selectCurrentAccountTokens(global);
 
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
-
   return {
     isOpen,
     vesting,
     tokens,
     isLoading,
     error,
-    address: addressByChain?.ton,
+    address: byChain?.ton?.address,
     state: unfreezeState,
     mycoin: selectMycoin(global),
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
     isHardwareAccount,
-    isMultichainAccount: selectIsMultichainAccount(global, global.currentAccountId!),
+    isMultichainAccount: selectIsMultichainAccount(global, currentAccountId),
+    isViewMode: selectIsCurrentAccountViewMode(global),
   };
 })(VestingPasswordModal));

@@ -1,5 +1,5 @@
 import React, {
-  memo, useEffect, useMemo, useRef, useState,
+  memo, useEffect, useMemo, useRef,
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
@@ -8,158 +8,122 @@ import type { ApiSite, ApiSiteCategory } from '../../api/types';
 import { ANIMATED_STICKER_BIG_SIZE_PX } from '../../config';
 import { selectCurrentAccountState } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
-import { vibrate } from '../../util/capacitor';
 import captureEscKeyListener from '../../util/captureEscKeyListener';
-import { openUrl } from '../../util/openUrl';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
-import stopEvent from '../../util/stopEvent';
 import { captureControlledSwipe } from '../../util/swipeController';
-import { getHostnameFromUrl, isValidUrl } from '../../util/url';
-import {
-  IS_ANDROID, IS_ANDROID_APP, IS_IOS_APP, IS_TOUCH_ENV,
-} from '../../util/windowEnvironment';
+import useTelegramMiniAppSwipeToClose from '../../util/telegram/hooks/useTelegramMiniAppSwipeToClose';
+import { IS_ANDROID_APP, IS_IOS_APP, IS_TOUCH_ENV } from '../../util/windowEnvironment';
+import { SEC } from '../../api/constants';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
+import {
+  filterSites,
+  processSites,
+} from './helpers/utils';
 
+import useAutoScroll from '../../hooks/useAutoScroll';
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
-import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
-import useFlag from '../../hooks/useFlag';
-import useHorizontalScroll from '../../hooks/useHorizontalScroll';
 import useLang from '../../hooks/useLang';
-import useLastCallback from '../../hooks/useLastCallback';
+import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
 import usePrevious2 from '../../hooks/usePrevious2';
 import useScrolledState from '../../hooks/useScrolledState';
 import { useStateRef } from '../../hooks/useStateRef';
 
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
-import Menu from '../ui/Menu';
-import MenuItem from '../ui/MenuItem';
 import Spinner from '../ui/Spinner';
 import Transition from '../ui/Transition';
 import Category from './Category';
 import DappFeed from './DappFeed';
-import Site from './Site';
+import ExploreSearch from './ExploreSearch';
+import SiteFeatured from './SiteFeatured';
 import SiteList from './SiteList';
 
 import styles from './Explore.module.scss';
 
 interface OwnProps {
   isActive?: boolean;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
 }
 
 interface StateProps {
   categories?: ApiSiteCategory[];
   sites?: ApiSite[];
+  featuredTitle?: string;
   shouldRestrict: boolean;
-  browserHistory?: string[];
   currentSiteCategoryId?: number;
 }
 
-interface SearchSuggestions {
-  history?: string[];
-  sites?: ApiSite[];
-  isEmpty: boolean;
-}
-
-const SUGGESTIONS_OPEN_DELAY = 300;
-const GOOGLE_SEARCH_URL = 'https://www.google.com/search?q=';
 const enum SLIDES {
   main,
   category,
 }
 
+const SLIDE_DURATION = 4 * SEC;
+
 function Explore({
-  isActive, categories, sites: originalSites, shouldRestrict, browserHistory, currentSiteCategoryId,
+  isActive,
+  categories,
+  sites: originalSites,
+  featuredTitle,
+  shouldRestrict,
+  currentSiteCategoryId,
+  onScroll,
 }: OwnProps & StateProps) {
   const {
     loadExploreSites,
     getDapps,
-    addSiteToBrowserHistory,
-    removeSiteFromBrowserHistory,
     openSiteCategory,
     closeSiteCategory,
   } = getActions();
 
-  // eslint-disable-next-line no-null/no-null
-  const inputRef = useRef<HTMLInputElement>(null);
-  const suggestionsTimeoutRef = useRef<number | undefined>(undefined);
-  // eslint-disable-next-line no-null/no-null
-  const transitionRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const trendingContainerRef = useRef<HTMLDivElement>(null);
+  const transitionRef = useRef<HTMLDivElement>();
+  const featuredContainerRef = useRef<HTMLDivElement>();
+
   const lang = useLang();
   const { isLandscape, isPortrait } = useDeviceScreen();
-  const [searchValue, setSearchValue] = useState<string>('');
-  const [isSearchFocused, markSearchFocused, unmarkSearchFocused] = useFlag(false);
-  const [isSuggestionsVisible, showSuggestions, hideSuggestions] = useFlag(false);
-  const prevSiteCategoryIdRef = useStateRef(usePrevious2(currentSiteCategoryId));
 
+  const { renderingKey } = useModalTransitionKeys(currentSiteCategoryId || 0, !!isActive);
+  const prevSiteCategoryIdRef = useStateRef(usePrevious2(renderingKey));
+  const { disableSwipeToClose, enableSwipeToClose } = useTelegramMiniAppSwipeToClose(isActive);
+
+  // On desktop should be used external scroll detection via `onScroll` prop
   const {
     handleScroll: handleContentScroll,
     isScrolled,
   } = useScrolledState();
 
   useEffect(
-    () => (currentSiteCategoryId ? captureEscKeyListener(closeSiteCategory) : undefined),
-    [closeSiteCategory, currentSiteCategoryId],
+    () => (renderingKey ? captureEscKeyListener(closeSiteCategory) : undefined),
+    [closeSiteCategory, renderingKey],
   );
 
-  const filteredSites = useMemo(() => {
-    return shouldRestrict
-      ? originalSites?.filter((site) => !site.canBeRestricted)
-      : originalSites;
-  }, [originalSites, shouldRestrict]);
+  const filteredSites = useMemo(() => filterSites(originalSites, shouldRestrict), [originalSites, shouldRestrict]);
 
-  const searchSuggestions = useMemo<SearchSuggestions>(() => {
-    const search = searchValue.toLowerCase();
-    const historyResult = browserHistory?.filter((url) => url.toLowerCase().includes(search));
-    const sitesResult = search.length && filteredSites
-      ? filteredSites.filter(({ url, name, description }) => {
-        return url.toLowerCase().includes(search)
-          || name.toLowerCase().includes(search)
-          || description.toLowerCase().includes(search);
-      })
-      : undefined;
-
-    return {
-      history: historyResult,
-      sites: sitesResult,
-      isEmpty: (historyResult?.length || 0) + (sitesResult?.length || 0) === 0,
-    };
-  }, [browserHistory, searchValue, filteredSites]);
-
-  const { trendingSites, allSites } = useMemo(() => {
-    return (filteredSites || []).reduce((acc, site) => {
-      if (site.isFeatured) {
-        acc.trendingSites.push(site);
-      }
-
-      if (!acc.allSites[site.categoryId!]) {
-        acc.allSites[site.categoryId!] = [];
-      }
-      acc.allSites[site.categoryId!].push(site);
-
-      return acc;
-    }, { trendingSites: [] as ApiSite[], allSites: {} as Record<number, ApiSite[]> });
-  }, [filteredSites]);
+  const { featuredSites, allSites } = useMemo(() => processSites(filteredSites), [filteredSites]);
 
   useEffect(() => {
-    if (!IS_TOUCH_ENV || !filteredSites?.length || !currentSiteCategoryId) {
+    if (!IS_TOUCH_ENV || !filteredSites?.length) {
       return undefined;
     }
 
     return captureControlledSwipe(transitionRef.current!, {
-      onSwipeRightStart: closeSiteCategory,
+      onSwipeRightStart: () => {
+        closeSiteCategory();
+
+        disableSwipeToClose();
+      },
       onCancel: () => {
         openSiteCategory({ id: prevSiteCategoryIdRef.current! });
+
+        enableSwipeToClose();
       },
     });
-  }, [currentSiteCategoryId, filteredSites?.length, prevSiteCategoryIdRef]);
+  }, [disableSwipeToClose, enableSwipeToClose, filteredSites?.length, prevSiteCategoryIdRef]);
 
-  useHorizontalScroll({
-    containerRef: trendingContainerRef,
-    isDisabled: IS_TOUCH_ENV || trendingSites.length === 0,
-    shouldPreventDefault: true,
-    contentSelector: `.${styles.trendingList}`,
+  useAutoScroll({
+    containerRef: featuredContainerRef,
+    itemSelector: `.${styles.featuredItem}`,
+    interval: SLIDE_DURATION,
+    isDisabled: !isActive || featuredSites.length <= 1,
   });
 
   const filteredCategories = useMemo(() => {
@@ -170,173 +134,43 @@ function Explore({
     if (!isActive) return;
 
     getDapps();
-    loadExploreSites({ isLandscape });
-  }, [isActive, isLandscape]);
+    loadExploreSites({ isLandscape, langCode: lang.code });
+  }, [isActive, isLandscape, lang.code]);
 
-  const safeShowSuggestions = useLastCallback(() => {
-    if (searchSuggestions.isEmpty) return;
-
-    // Simultaneous opening of the virtual keyboard and display of Saved Addresses causes animation degradation
-    if (IS_ANDROID) {
-      suggestionsTimeoutRef.current = window.setTimeout(showSuggestions, SUGGESTIONS_OPEN_DELAY);
-    } else {
-      showSuggestions();
-    }
-  });
-
-  const safeHideSuggestions = useLastCallback(() => {
-    if (isSuggestionsVisible) {
-      hideSuggestions();
-    }
-    window.clearTimeout(suggestionsTimeoutRef.current);
-  });
-
-  useEffectWithPrevDeps(([prevIsSearchFocused]) => {
-    if ((prevIsSearchFocused && !isSearchFocused) || searchSuggestions.isEmpty) {
-      safeHideSuggestions();
-    }
-    if (isSearchFocused && !searchSuggestions.isEmpty) {
-      safeShowSuggestions();
-    }
-  }, [isSearchFocused, searchSuggestions.isEmpty]);
-
-  function openSite(originalUrl: string, isExternal?: boolean, title?: string) {
-    let url = originalUrl;
-    if (!url.startsWith('http:') && !url.startsWith('https:')) {
-      url = `https://${url}`;
-    }
-    if (!isValidUrl(url)) {
-      url = `${GOOGLE_SEARCH_URL}${encodeURIComponent(originalUrl)}`;
-    } else {
-      addSiteToBrowserHistory({ url });
-    }
-
-    void openUrl(url, isExternal, title, getHostnameFromUrl(url));
-  }
-
-  const handleSiteClick = useLastCallback((
-    e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>,
-    url: string,
-  ) => {
-    vibrate();
-    hideSuggestions();
-    const site = originalSites?.find(({ url: currentUrl }) => currentUrl === url);
-    openSite(url, site?.isExternal, site?.name);
-  });
-
-  function handleSiteClear(e: React.MouseEvent, url: string) {
-    stopEvent(e);
-
-    removeSiteFromBrowserHistory({ url });
-  }
-
-  function handleSearchValueChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setSearchValue(e.target.value);
-  }
-
-  const handleMenuClose = useLastCallback(() => {
-    inputRef.current?.blur();
-  });
-
-  function handleSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
-    stopEvent(e);
-
-    handleMenuClose();
-    openSite(searchValue);
-    setSearchValue('');
-  }
-
-  function renderSearch() {
+  function renderFeatured() {
     return (
-      <form action="#" onSubmit={handleSearchSubmit} className={styles.searchContainer} autoComplete="off">
-        <i className={buildClassName(styles.searchIcon, 'icon-search')} aria-hidden />
-        <input
-          name="explore-search"
-          className={styles.searchInput}
-          placeholder={lang('Search or enter address')}
-          value={searchValue}
-          autoCapitalize="none"
-          type="url"
-          autoCorrect="off"
-          onChange={handleSearchValueChange}
-          onFocus={markSearchFocused}
-          onBlur={unmarkSearchFocused}
-        />
-      </form>
-    );
-  }
-
-  function renderSearchSuggestions() {
-    return (
-      <Menu
-        type="suggestion"
-        noBackdrop
-        isOpen={Boolean(isSuggestionsVisible && !searchSuggestions.isEmpty)}
-        className={styles.suggestions}
-        bubbleClassName={styles.suggestionsMenu}
-        onClose={handleMenuClose}
-      >
-        {searchSuggestions?.history?.map((url) => (
-          <MenuItem key={`history-${url}`} className={styles.suggestion} onClick={handleSiteClick} clickArg={url}>
-            <i
-              className={buildClassName(styles.suggestionIcon, searchValue.length ? 'icon-search' : 'icon-globe')}
-              aria-hidden
-            />
-            <span className={styles.suggestionAddress}>{getHostnameFromUrl(url)}</span>
-
-            <button
-              className={styles.clearSuggestion}
-              type="button"
-              aria-label={lang('Clear')}
-              title={lang('Clear')}
-              onMouseDown={(e) => handleSiteClear(e, url)}
-              onClick={stopEvent}
-            >
-              <i className="icon-close" aria-hidden />
-            </button>
-          </MenuItem>
-        ))}
-        {searchSuggestions?.sites?.map((site) => (
-          <Site key={`site-${site.url}-${site.name}`} className={styles.suggestion} site={site} />
-        ))}
-      </Menu>
-    );
-  }
-
-  function renderTrending() {
-    return (
-      <div ref={trendingContainerRef} className={styles.trendingSection}>
-        <h2 className={styles.sectionHeader}>{lang('Trending')}</h2>
-        <div className={styles.trendingList}>
-          {trendingSites.map((site) => (
-            <Site key={`${site.url}-${site.name}`} site={site} isTrending />
+      <div className={styles.featuredSection}>
+        <h2 className={buildClassName(styles.sectionHeader, styles.sectionHeaderFeatured)}>
+          {lang(featuredTitle || 'Trending')}
+        </h2>
+        <div className={styles.featuredList} ref={featuredContainerRef}>
+          {featuredSites.map((site) => (
+            <SiteFeatured key={`${site.url}-${site.name}`} site={site} className={styles.featuredItem} />
           ))}
         </div>
       </div>
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isContentActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isContentActive: boolean, isFrom: boolean, currentKey: SLIDES) {
     switch (currentKey) {
       case SLIDES.main:
         return (
           <div
             className={buildClassName(styles.slide, 'custom-scroll')}
-            onScroll={isPortrait ? handleContentScroll : undefined}
+            onScroll={isPortrait ? handleContentScroll : onScroll}
           >
-            <div className={buildClassName(styles.searchWrapper, 'with-notch-on-scroll', isScrolled && 'is-scrolled')}>
-              {renderSearch()}
-              {renderSearchSuggestions()}
-            </div>
-
+            <ExploreSearch
+              shouldShowNotch={isScrolled}
+              sites={filteredSites}
+            />
             <DappFeed />
 
-            {Boolean(trendingSites.length) && renderTrending()}
+            {Boolean(featuredSites.length) && renderFeatured()}
 
             {Boolean(filteredCategories?.length) && (
               <>
-                <h2 className={styles.sectionHeader}>{lang('All Dapps')}</h2>
+                <h2 className={styles.sectionHeader}>{lang('Popular Apps')}</h2>
                 <div className={buildClassName(styles.list, isLandscape && styles.landscapeList)}>
                   {filteredCategories.map((category) => (
                     <Category key={category.id} category={category} sites={allSites[category.id]} />
@@ -348,14 +182,14 @@ function Explore({
         );
 
       case SLIDES.category: {
-        const currentSiteCategory = allSites[currentSiteCategoryId!];
+        const currentSiteCategory = allSites[renderingKey];
         if (!currentSiteCategory) return undefined;
 
         return (
           <SiteList
-            key={currentSiteCategoryId}
+            key={renderingKey}
             isActive={isContentActive}
-            categoryId={currentSiteCategoryId!}
+            categoryId={renderingKey}
             sites={currentSiteCategory}
           />
         );
@@ -392,7 +226,8 @@ function Explore({
     <Transition
       ref={transitionRef}
       name={resolveSlideTransitionName()}
-      activeKey={currentSiteCategoryId ? SLIDES.category : SLIDES.main}
+      activeKey={renderingKey ? SLIDES.category : SLIDES.main}
+      withSwipeControl
       className={styles.rootSlide}
     >
       {renderContent}
@@ -401,14 +236,14 @@ function Explore({
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const { browserHistory, currentSiteCategoryId } = selectCurrentAccountState(global) || {};
-  const { categories, sites } = global.exploreData || {};
+  const { currentSiteCategoryId } = selectCurrentAccountState(global) || {};
+  const { categories, sites, featuredTitle } = global.exploreData || {};
 
   return {
     sites,
     categories,
+    featuredTitle,
     shouldRestrict: global.restrictions.isLimitedRegion && (IS_IOS_APP || IS_ANDROID_APP),
-    browserHistory,
     currentSiteCategoryId,
   };
 })(Explore));

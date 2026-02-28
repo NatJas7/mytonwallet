@@ -1,22 +1,20 @@
-import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import React, { memo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiNetwork } from '../../api/types';
-import type { Account } from '../../global/types';
+import type { Account, DeveloperSettingsOverrides } from '../../global/types';
+import type { Log } from '../../util/logs';
+import type { DropdownItem } from '../ui/Dropdown';
 
-import {
-  APP_ENV,
-  APP_VERSION,
-  IS_CAPACITOR,
-  IS_EXTENSION,
-} from '../../config';
+import { APP_COMMIT_HASH, APP_ENV, APP_VERSION, IS_CORE_WALLET, IS_EXTENSION, IS_TELEGRAM_APP } from '../../config';
+import { selectCurrentAccountId, selectIsMultichainAccount, selectSeasonalThemeOverride } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { copyTextToClipboard } from '../../util/clipboard';
 import { getBuildPlatform, getFlagsValue } from '../../util/getBuildPlatform';
 import { getPlatform } from '../../util/getPlatform';
+import { mapValues } from '../../util/iteratees';
 import { getLogs } from '../../util/logs';
+import { shareFile } from '../../util/share';
 import { IS_IOS } from '../../util/windowEnvironment';
 import { callApi } from '../../api';
 
@@ -31,17 +29,22 @@ import styles from './Settings.module.scss';
 
 interface OwnProps {
   isOpen: boolean;
-  onClose: () => void;
   isTestnet?: boolean;
   isCopyStorageEnabled?: boolean;
+  onShowAllWalletVersions: () => void;
+  onClose: () => void;
 }
 
 interface StateProps {
   currentAccountId?: string;
   accountsById?: Record<string, Account>;
+  canViewAllWalletVersions: boolean;
+  seasonalThemeOverride?: DeveloperSettingsOverrides['seasonalTheme'];
 }
 
-const NETWORK_OPTIONS = [{
+type SeasonalThemeOverrideOption = NonNullable<DeveloperSettingsOverrides['seasonalTheme']> | 'default';
+
+const NETWORK_OPTIONS: DropdownItem<ApiNetwork>[] = [{
   value: 'mainnet',
   name: 'Mainnet',
 }, {
@@ -49,31 +52,76 @@ const NETWORK_OPTIONS = [{
   name: 'Testnet',
 }];
 
+const SEASONAL_THEME_OVERRIDE_OPTIONS: DropdownItem<SeasonalThemeOverrideOption>[] = [{
+  value: 'default',
+  name: 'Auto',
+}, {
+  value: '__undefined',
+  name: 'None',
+}, {
+  value: 'newYear',
+  name: 'New Year',
+}, {
+  value: 'valentine',
+  name: 'Valentine',
+}];
+
+// iOS allows downloading files even in TMA, however, in other platforms,
+// downloading files from `blob:https://` schemes is limited by Telegram itself.
+// Also, file downloading is limited in extensions.
+const CAN_DOWNLOAD_LOGS = IS_IOS || !(IS_EXTENSION || IS_TELEGRAM_APP);
+
 function SettingsDeveloperOptions({
   isOpen,
-  onClose,
   isTestnet,
   isCopyStorageEnabled,
+  onShowAllWalletVersions,
+  onClose,
   currentAccountId,
   accountsById,
+  canViewAllWalletVersions,
+  seasonalThemeOverride,
 }: OwnProps & StateProps) {
   const {
     startChangingNetwork,
+    setDeveloperSettingsOverride,
+    closeSettings,
+    openAddAccountModal,
     copyStorageData,
-    showNotification,
+    showToast,
   } = getActions();
   const lang = useLang();
   const currentNetwork = NETWORK_OPTIONS[isTestnet ? 1 : 0].value;
 
-  const handleNetworkChange = useLastCallback((newNetwork: string) => {
-    startChangingNetwork({ network: newNetwork as ApiNetwork });
+  const handleNetworkChange = useLastCallback((newNetwork: ApiNetwork) => {
+    startChangingNetwork({ network: newNetwork });
     onClose();
   });
 
-  const handleExtensionClick = useLastCallback((logsString: string) => {
-    showNotification({ message: lang('Logs were copied!') as string, icon: 'icon-copy' });
-    void copyTextToClipboard(logsString);
+  const handleAddTonOnlyWallet = useLastCallback(() => {
     onClose();
+    closeSettings();
+    openAddAccountModal({ forceAddingTonOnlyAccount: true });
+  });
+
+  const handleSeasonalThemeOverrideChange = useLastCallback((newValue: SeasonalThemeOverrideOption) => {
+    setDeveloperSettingsOverride({
+      key: 'seasonalTheme',
+      value: newValue === 'default' ? undefined : newValue,
+    });
+  });
+
+  const handleDownloadLogs = useLastCallback(async () => {
+    const logsString = await getLogsString({ currentAccountId, accountsById });
+
+    if (!CAN_DOWNLOAD_LOGS) {
+      await copyTextToClipboard(logsString);
+      showToast({ message: lang('Logs Copied'), icon: 'icon-copy' });
+      onClose();
+    } else {
+      const filename = `${IS_CORE_WALLET ? 'tonwallet' : 'mytonwallet'}_logs_${new Date().toISOString()}.json`;
+      await shareFile(filename, logsString, 'application/json');
+    }
   });
 
   return (
@@ -82,11 +130,8 @@ function SettingsDeveloperOptions({
       onClose={onClose}
       noBackdropClose
       isCompact
+      title={lang('Developer Options')}
     >
-      <div className={styles.developerTitle}>
-        {lang('Developer Options')}
-      </div>
-
       <div className={styles.settingsBlock}>
         <Dropdown
           label={lang('Network')}
@@ -96,6 +141,44 @@ function SettingsDeveloperOptions({
           arrow="chevron"
           className={buildClassName(styles.item, styles.item_small)}
           onChange={handleNetworkChange}
+        />
+
+        <div className={buildClassName(styles.item, styles.item_small)} onClick={handleAddTonOnlyWallet}>
+          {lang('Create TON-Only Wallet')}
+
+          <i className={buildClassName(styles.iconChevronRight, 'icon-plus')} aria-hidden />
+        </div>
+
+        <div
+          className={buildClassName(styles.item, styles.item_small, !canViewAllWalletVersions && styles.item_disabled)}
+          onClick={onShowAllWalletVersions}
+        >
+          {lang('All Wallet Versions')}
+
+          <div className={styles.itemInfo}>
+            {canViewAllWalletVersions ? (
+              <i className={buildClassName(styles.iconChevronRight, 'icon-chevron-right')} aria-hidden />
+
+            ) : (
+              <>
+                <span className={styles.small}>{lang('Multichain')}</span>
+                <i className={buildClassName(styles.iconChevronRight, 'icon-lock')} aria-hidden />
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <p className={styles.blockTitle}>{lang('Overrides')}</p>
+      <div className={styles.settingsBlock}>
+        <Dropdown
+          label={lang('Seasonal Theme Override')}
+          items={SEASONAL_THEME_OVERRIDE_OPTIONS}
+          selectedValue={seasonalThemeOverride ?? 'default'}
+          theme="light"
+          arrow="chevron"
+          className={buildClassName(styles.item, styles.item_small)}
+          onChange={handleSeasonalThemeOverrideChange}
         />
       </div>
 
@@ -112,17 +195,10 @@ function SettingsDeveloperOptions({
         </>
       )}
 
-      <div
-        className={buildClassName(styles.settingsBlock, styles.logBlock)}
-        onClick={() => downloadLogs({
-          currentAccountId,
-          accountsById,
-          onExtensionClick: handleExtensionClick,
-        })}
-      >
-        <div className={buildClassName(styles.item, styles.item_small)}>
+      <div className={buildClassName(styles.settingsBlock)}>
+        <div className={buildClassName(styles.item, styles.item_small)} onClick={handleDownloadLogs}>
           {
-            IS_EXTENSION
+            !CAN_DOWNLOAD_LOGS
               ? (
                 <>
                   {lang('Copy Logs')}
@@ -145,38 +221,42 @@ function SettingsDeveloperOptions({
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const currentAccountId = global.currentAccountId;
-
+  const currentAccountId = selectCurrentAccountId(global);
   const accountsById = global.accounts?.byId;
+  const canViewAllWalletVersions = !selectIsMultichainAccount(global, currentAccountId!);
 
   return {
     currentAccountId,
     accountsById,
+    canViewAllWalletVersions,
+    seasonalThemeOverride: selectSeasonalThemeOverride(global),
   };
 })(SettingsDeveloperOptions));
 
-async function downloadLogs(
-  {
-    currentAccountId,
-    accountsById,
-    onExtensionClick,
-  }: StateProps & { onExtensionClick: (logsString: string) => void },
-) {
-  const accountsInfo = accountsById && Object.keys(accountsById).reduce((acc, accountId) => {
-    const { addressByChain, isHardware } = accountsById[accountId];
-    acc[accountId] = {
-      addressByChain,
-      isHardware,
-    };
-    return acc;
-  }, {} as any);
+async function getLogsString({
+  currentAccountId,
+  accountsById,
+}: Partial<StateProps>) {
+  const accountsInfo = accountsById && mapValues(accountsById, (account) => ({
+    type: account.type,
+    addressByChain: mapValues(account.byChain, (accountChain) => accountChain.address),
+  }));
 
-  const workerLogs = await callApi('getLogs') || [];
-  const uiLogs = getLogs();
-  const logsString = JSON.stringify(
-    [...workerLogs, ...uiLogs].sort((a, b) => a.timestamp - b.timestamp).concat({
+  const [mainLogs, apiLogs = []] = await Promise.all([
+    getLogs(),
+    callApi('getLogs'),
+  ]);
+
+  const time = new Date();
+  const timezoneOffset = -time.getTimezoneOffset();
+
+  return JSON.stringify(
+    {
+      time,
+      timezone: `UTC${timezoneOffset < 0 ? '-' : '+'}${Math.abs(timezoneOffset) / 60}`,
       environment: APP_ENV,
       version: APP_VERSION,
+      commit: APP_COMMIT_HASH,
       platform: getPlatform(),
       navigatorPlatform: navigator.platform,
       userAgent: navigator.userAgent,
@@ -184,46 +264,14 @@ async function downloadLogs(
       flags: getFlagsValue(),
       currentAccountId,
       accountsInfo,
-    } as any),
+      logs: [
+        ...mainLogs.map((log: Log) => ({ ...log, context: 'main' })),
+        ...apiLogs.map((log: Log) => ({ ...log, context: 'api' })),
+      ]
+        .sort((a, b) => a.time - b.time)
+        .map((log) => ({ ...log, time: new Date(log.time).toISOString() })),
+    },
     undefined,
     2,
   );
-
-  if (IS_EXTENSION) {
-    onExtensionClick(logsString);
-    return;
-  }
-
-  const blob = new Blob([logsString], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  const filename = `mytonwallet_logs_${Date.now()}.json`;
-
-  if (IS_CAPACITOR) {
-    const logFile = await Filesystem.writeFile({
-      path: filename,
-      data: logsString,
-      directory: Directory.Cache,
-      encoding: Encoding.UTF8,
-    });
-
-    await Share.share({
-      url: logFile.uri,
-    });
-  } else if (navigator.share) {
-    const file = new File([blob], filename, { type: blob.type });
-
-    navigator.share({
-      files: [file],
-    });
-  } else if (IS_IOS) {
-    window.open(url, '_blank', 'noreferrer');
-  } else {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-  }
-
-  URL.revokeObjectURL(url);
 }

@@ -1,5 +1,4 @@
-import type { RefObject } from 'react';
-import type { FC } from '../../lib/teact/teact';
+import type { ElementRef, FC } from '../../lib/teact/teact';
 import React, {
   getIsHeavyAnimating, memo, useEffect, useRef, useState,
 } from '../../lib/teact/teact';
@@ -25,7 +24,7 @@ import useThrottledCallback from '../../hooks/useThrottledCallback';
 import useUniqueId from '../../hooks/useUniqueId';
 
 export type OwnProps = {
-  ref?: RefObject<HTMLDivElement>;
+  ref?: ElementRef<HTMLDivElement>;
   renderId?: string;
   className?: string;
   style?: string;
@@ -75,8 +74,7 @@ const AnimatedSticker: FC<OwnProps> = ({
   onEnded,
   onLoop,
 }) => {
-  // eslint-disable-next-line no-null/no-null
-  let containerRef = useRef<HTMLDivElement>(null);
+  let containerRef = useRef<HTMLDivElement>();
   if (ref) {
     containerRef = ref;
   }
@@ -155,7 +153,7 @@ const AnimatedSticker: FC<OwnProps> = ({
     if (getRLottie()) {
       init();
     } else {
-      ensureRLottie().then(init);
+      void ensureRLottie().then(init);
     }
   }, [init, tgsUrl, sharedCanvas, sharedCanvasCoords]);
 
@@ -208,7 +206,7 @@ const AnimatedSticker: FC<OwnProps> = ({
 
   useEffectWithPrevDeps(([prevSharedCanvasCoords]) => {
     if (prevSharedCanvasCoords !== undefined && sharedCanvasCoords !== prevSharedCanvasCoords) {
-      animation?.setSharedCanvasCoords(viewId, sharedCanvasCoords);
+      void animation?.setSharedCanvasCoords(viewId, sharedCanvasCoords);
     }
   }, [sharedCanvasCoords, viewId, animation]);
 

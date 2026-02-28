@@ -1,207 +1,108 @@
-import type {
-  ApiActivity, ApiChain, ApiTransaction, ApiTransactionActivity,
-} from '../../api/types';
-import type { GlobalState } from '../types';
+import type { ApiActivity, ApiChain } from '../../api/types';
+import type { AccountState, GlobalState } from '../types';
 
-import { compareActivities } from '../../util/compareActivities';
 import {
-  buildCollectionByKey, extractKey, groupBy, mapValues, unique,
-} from '../../util/iteratees';
-import { getIsTxIdLocal } from '../helpers';
-import { selectAccountState } from '../selectors';
+  getActivityTokenSlugs,
+  getIsActivityPending,
+  getIsActivitySuitableForFetchingTimestamp,
+  getIsTxIdLocal,
+} from '../../util/activities';
+import { mergeSortedActivityIds, mergeSortedActivityIdsToMaxTime } from '../../util/activities/order';
+import { buildCollectionByKey, extractKey, mapValues, swapKeysAndValues, unique } from '../../util/iteratees';
+import { replaceActivityId } from '../helpers/misc';
+import { selectAccountOrAuthAccount, selectAccountState } from '../selectors';
 import { updateAccountState } from './misc';
 
-export function updateActivity(global: GlobalState, accountId: string, activity: ApiActivity): GlobalState {
+/**
+ * Handles the `initialActivities` update, which delivers the latest activity history after the account is added.
+ * The given activity lists must be sorted and contain no pending or local activities.
+ */
+export function addInitialActivities(
+  global: GlobalState,
+  accountId: string,
+  mainActivities: ApiActivity[],
+  bySlug: Record<string, ApiActivity[]>,
+  chain: ApiChain,
+) {
   const { activities } = selectAccountState(global, accountId) || {};
-  const idsBySlug = activities?.idsBySlug || {};
+  let { byId, idsMain, areInitialActivitiesLoaded } = activities || {};
 
-  const { id, timestamp, kind } = activity;
+  byId = { ...byId, ...buildCollectionByKey(mainActivities, 'id') };
 
-  const idsMain = [id].concat(activities?.idsMain ?? []);
+  areInitialActivitiesLoaded = {
+    ...areInitialActivitiesLoaded,
+    [chain]: true,
+  };
 
-  if (kind === 'swap') {
-    const { from, to } = activity;
+  // Activities from different blockchains arrive separately, which causes the order to be disrupted
+  idsMain = mergeSortedActivityIdsToMaxTime(byId, extractKey(mainActivities, 'id'), idsMain ?? []);
 
-    let fromTokenIds = idsBySlug[from] || [];
-    let toTokenIds = idsBySlug[to] || [];
-
-    if (!fromTokenIds.includes(id)) {
-      fromTokenIds = [id].concat(fromTokenIds);
-    }
-    if (!toTokenIds.includes(id)) {
-      toTokenIds = [id].concat(toTokenIds);
-    }
-
-    return updateAccountState(global, accountId, {
-      activities: {
-        ...activities,
-        byId: { ...activities?.byId, [id]: activity },
-        idsBySlug: { ...idsBySlug, [from]: fromTokenIds, [to]: toTokenIds },
-        idsMain,
-      },
-    });
+  // Enforcing the requirement to have the id list undefined if it hasn't loaded yet
+  if (idsMain.length === 0 && !areAllInitialActivitiesLoaded(global, accountId, areInitialActivitiesLoaded)) {
+    idsMain = undefined;
   }
 
-  const { slug } = activity;
-  const isLocal = getIsTxIdLocal(id);
-  let newestTransactionsBySlug = activities?.newestTransactionsBySlug || {};
-
-  if (!isLocal) {
-    const newestTx = newestTransactionsBySlug[slug];
-    if (!newestTx || newestTx.timestamp < timestamp || (newestTx.timestamp === timestamp && newestTx.txId < id)) {
-      newestTransactionsBySlug = { ...newestTransactionsBySlug, [slug]: activity };
-    }
-  }
-
-  let tokenTxIds = idsBySlug[slug] || [];
-
-  if (!tokenTxIds.includes(id)) {
-    tokenTxIds = [id].concat(tokenTxIds);
-  }
-
-  return updateAccountState(global, accountId, {
+  global = updateAccountState(global, accountId, {
     activities: {
       ...activities,
       idsMain,
-      byId: { ...activities?.byId, [id]: activity },
-      idsBySlug: { ...idsBySlug, [slug]: tokenTxIds },
-      newestTransactionsBySlug,
+      byId,
+      areInitialActivitiesLoaded,
     },
   });
-}
 
-export function addNewActivities(global: GlobalState, accountId: string, newActivities: ApiActivity[]) {
-  let { activities } = selectAccountState(global, accountId) || {};
-
-  const newById = buildCollectionByKey(newActivities, 'id');
-  const byId = { ...activities?.byId, ...newById };
-
-  const newIdsMain = extractKey(newActivities, 'id');
-  const idsMain = unique(newIdsMain.concat(activities?.idsMain ?? []));
-
-  // Activities from different blockchains arrive separately, which causes the order to be disrupted
-  idsMain.sort((a, b) => compareActivities(byId[a], byId[b]));
-
-  const newIdsBySlug = buildActivityIdsBySlug(newActivities);
-  const replacedIdsBySlug = mapValues(newIdsBySlug, (newIds, slug) => {
-    const currentActivityIds = activities?.idsBySlug?.[slug];
-
-    return currentActivityIds ? unique(newIds.concat(currentActivityIds)) : newIds;
-  });
-
-  const newTxs = newActivities.filter(({ kind }) => kind === 'transaction') as ApiTransactionActivity[];
-  const newNewestTxsBySlug: Record<string, ApiTransaction> = { ...activities?.newestTransactionsBySlug };
-
-  // The transaction that replaced the local one may be newer
-  for (const [slug, txs] of Object.entries(groupBy(newTxs, 'slug'))) {
-    const newTx = txs[0];
-    if (!(slug in newNewestTxsBySlug) || newTx.timestamp > newNewestTxsBySlug[slug].timestamp) {
-      newNewestTxsBySlug[slug] = newTx;
-    }
+  for (const [slug, activities] of Object.entries(bySlug)) {
+    global = addPastActivities(global, accountId, slug, activities, activities.length === 0);
   }
 
-  activities = {
-    ...activities,
-    idsMain,
-    byId,
-    idsBySlug: { ...activities?.idsBySlug, ...replacedIdsBySlug },
-    newestTransactionsBySlug: newNewestTxsBySlug,
-  };
-
-  return updateAccountState(global, accountId, { activities });
+  return global;
 }
 
-function buildActivityIdsBySlug(activities: ApiActivity[]) {
-  return activities.reduce<Record<string, string[]>>((acc, activity) => {
-    const { id } = activity;
-
-    if ('slug' in activity) {
-      if (!acc[activity.slug]) {
-        acc[activity.slug] = [id];
-      } else {
-        acc[activity.slug].push(id);
-      }
-    }
-
-    if ('from' in activity) {
-      if (!acc[activity.from]) {
-        acc[activity.from] = [id];
-      } else {
-        acc[activity.from].push(id);
-      }
-    }
-
-    if ('to' in activity) {
-      if (!acc[activity.to]) {
-        acc[activity.to] = [id];
-      } else {
-        acc[activity.to].push(id);
-      }
-    }
-
-    return acc;
-  }, {});
-}
-
-export function replaceLocalTransaction(
+/**
+ * Should be used to add only newly created activities. Otherwise, there can occur gaps in the history, because the
+ * given activities are added to all the matching token histories.
+ */
+export function addNewActivities(
   global: GlobalState,
   accountId: string,
-  localTxId: string,
-  activity: ApiTransactionActivity,
+  newActivities: readonly ApiActivity[], // Must be sorted
+  chain?: ApiChain, // Necessary when adding pending activities
 ) {
-  const { activities } = selectAccountState(global, accountId) || {};
-  const { byId, idsBySlug } = activities || { byId: {}, idsBySlug: {} };
-  const replacedActivity: ApiActivity | undefined = byId[localTxId];
-
-  if (!replacedActivity || replacedActivity.kind !== 'transaction') return global;
-
-  const {
-    slug, amount, timestamp, txId, shouldHide, fee,
-  } = activity;
-  const updatedIdsBySlug = { ...idsBySlug };
-  let { idsMain = [], newestTransactionsBySlug = {} } = activities ?? {};
-
-  if (slug in updatedIdsBySlug) {
-    const indexOfTxId = updatedIdsBySlug[slug].indexOf(localTxId);
-    if (indexOfTxId === -1) return global;
-
-    updatedIdsBySlug[slug] = [
-      ...updatedIdsBySlug[slug].slice(0, indexOfTxId),
-      txId,
-      ...updatedIdsBySlug[slug].slice(indexOfTxId + 1),
-    ];
-
-    const indexOfTxIdMain = idsMain.indexOf(localTxId);
-    if (indexOfTxIdMain === -1) return global;
-
-    idsMain = [
-      ...idsMain.slice(0, indexOfTxIdMain),
-      txId,
-      ...idsMain.slice(indexOfTxIdMain + 1),
-    ];
+  if (newActivities.length === 0) {
+    return global;
   }
 
-  const updatedByTxId = {
-    ...byId,
-    [txId]: {
-      ...replacedActivity,
-      id: txId,
-      txId,
-      amount,
-      shouldHide,
-      timestamp,
-      fee,
-    },
-  };
+  const { activities } = selectAccountState(global, accountId) || {};
+  let { byId, idsBySlug, idsMain, newestActivitiesBySlug, localActivityIds, pendingActivityIds } = activities || {};
 
-  delete updatedByTxId[localTxId];
+  byId = { ...byId, ...buildCollectionByKey(newActivities, 'id') };
 
-  const newestTransaction = newestTransactionsBySlug[slug];
+  // Activities from different blockchains arrive separately, which causes the order to be disrupted
+  idsMain = mergeSortedActivityIds(byId, idsMain ?? [], extractKey(newActivities, 'id'));
 
-  if (!newestTransaction || timestamp > newestTransaction.timestamp) {
-    newestTransactionsBySlug = {
-      ...newestTransactionsBySlug,
-      [slug]: activity,
+  const newIdsBySlug = buildActivityIdsBySlug(newActivities);
+  idsBySlug = mergeIdsBySlug(idsBySlug, newIdsBySlug, byId);
+
+  newestActivitiesBySlug = getNewestActivitiesBySlug(
+    { byId, idsBySlug, newestActivitiesBySlug },
+    Object.keys(newIdsBySlug),
+  );
+
+  localActivityIds = unique([
+    ...(localActivityIds ?? []),
+    ...extractKey(newActivities, 'id').filter(getIsTxIdLocal)],
+  );
+
+  if (chain) {
+    pendingActivityIds = {
+      ...pendingActivityIds,
+      [chain]: unique([
+        ...(pendingActivityIds?.[chain] ?? []),
+        ...extractKey(
+          newActivities.filter((activity) => getIsActivityPending(activity) && !getIsTxIdLocal(activity.id)),
+          'id',
+        ),
+      ]),
     };
   }
 
@@ -209,53 +110,287 @@ export function replaceLocalTransaction(
     activities: {
       ...activities,
       idsMain,
-      byId: updatedByTxId,
-      idsBySlug: updatedIdsBySlug,
-      newestTransactionsBySlug,
+      byId,
+      idsBySlug,
+      newestActivitiesBySlug,
+      localActivityIds,
+      pendingActivityIds,
     },
   });
 }
 
-export function addLocalTransaction(global: GlobalState, accountId: string, transaction: ApiTransactionActivity) {
+export function addPastActivities(
+  global: GlobalState,
+  accountId: string,
+  tokenSlug: string | undefined, // undefined for main activities
+  pastActivities: ApiActivity[], // Must be sorted and contain no pending or local activities
+  isEndReached?: boolean,
+) {
   const { activities } = selectAccountState(global, accountId) || {};
-  const localTransactions = (activities?.localTransactions ?? []).concat(transaction);
+  let {
+    byId, idsBySlug, idsMain, newestActivitiesBySlug, isMainHistoryEndReached, isHistoryEndReachedBySlug,
+  } = activities || {};
+
+  byId = { ...byId, ...buildCollectionByKey(pastActivities, 'id') };
+
+  if (tokenSlug) {
+    idsBySlug = mergeIdsBySlug(idsBySlug, { [tokenSlug]: extractKey(pastActivities, 'id') }, byId);
+    newestActivitiesBySlug = getNewestActivitiesBySlug({ byId, idsBySlug, newestActivitiesBySlug }, [tokenSlug]);
+
+    if (isEndReached) {
+      isHistoryEndReachedBySlug = {
+        ...isHistoryEndReachedBySlug,
+        [tokenSlug]: true,
+      };
+    }
+  } else {
+    idsMain = mergeSortedActivityIds(byId, idsMain ?? [], extractKey(pastActivities, 'id'));
+
+    if (isEndReached) {
+      isMainHistoryEndReached = true;
+    }
+  }
 
   return updateAccountState(global, accountId, {
     activities: {
       ...activities,
-      byId: activities?.byId ?? {},
-      localTransactions,
+      idsMain,
+      byId,
+      idsBySlug,
+      newestActivitiesBySlug,
+      isMainHistoryEndReached,
+      isHistoryEndReachedBySlug,
     },
   });
 }
 
-export function removeLocalTransaction(global: GlobalState, accountId: string, txId: string) {
+function buildActivityIdsBySlug(activities: readonly ApiActivity[]) {
+  return activities.reduce<Record<string, string[]>>((acc, activity) => {
+    for (const slug of getActivityTokenSlugs(activity)) {
+      acc[slug] ??= [];
+      acc[slug].push(activity.id);
+    }
+
+    return acc;
+  }, {});
+}
+
+export function removeActivities(
+  global: GlobalState,
+  accountId: string,
+  _ids: Iterable<string>,
+) {
   const { activities } = selectAccountState(global, accountId) || {};
-  const localTransactions = (activities?.localTransactions ?? []).filter(({ id }) => id !== txId);
+  if (!activities) {
+    return global;
+  }
+
+  const ids = new Set(_ids); // Don't use `_ids` again, because the iterable may be disposable
+  if (ids.size === 0) {
+    return global;
+  }
+
+  let { byId, idsBySlug, idsMain, newestActivitiesBySlug, localActivityIds, pendingActivityIds } = activities;
+  const affectedTokenSlugs = getActivityListTokenSlugs(ids, byId);
+
+  idsBySlug = { ...idsBySlug };
+  for (const tokenSlug of affectedTokenSlugs) {
+    if (tokenSlug in idsBySlug) {
+      idsBySlug[tokenSlug] = idsBySlug[tokenSlug].filter((id) => !ids.has(id));
+
+      if (!idsBySlug[tokenSlug].length) {
+        delete idsBySlug[tokenSlug];
+      }
+    }
+  }
+
+  newestActivitiesBySlug = getNewestActivitiesBySlug({ byId, idsBySlug, newestActivitiesBySlug }, affectedTokenSlugs);
+
+  idsMain = idsMain?.filter((id) => !ids.has(id));
+
+  byId = { ...byId };
+  for (const id of ids) {
+    delete byId[id];
+  }
+
+  localActivityIds = localActivityIds?.filter((id) => !ids.has(id));
+
+  pendingActivityIds = pendingActivityIds
+    && mapValues(pendingActivityIds, (pendingIds) => pendingIds.filter((id) => !ids.has(id)));
 
   return updateAccountState(global, accountId, {
     activities: {
       ...activities,
-      byId: activities?.byId ?? {},
-      localTransactions,
+      byId,
+      idsBySlug,
+      idsMain,
+      newestActivitiesBySlug,
+      localActivityIds,
+      pendingActivityIds,
     },
   });
 }
 
-export function setIsFirstActivitiesLoadedTrue(global: GlobalState, accountId: string, chain: ApiChain) {
-  const { byChain } = selectAccountState(global, accountId) ?? {};
+export function updateActivity(global: GlobalState, accountId: string, activity: ApiActivity) {
+  const { id } = activity;
 
-  if (byChain && byChain[chain]?.isFirstTransactionsLoaded) {
+  const { activities } = selectAccountState(global, accountId) || {};
+  const { byId } = activities ?? {};
+
+  if (!byId || !(id in byId)) {
     return global;
   }
 
   return updateAccountState(global, accountId, {
-    byChain: {
-      ...byChain,
-      [chain]: {
-        ...byChain?.[chain],
-        isFirstTransactionsLoaded: true,
+    activities: {
+      ...activities,
+      byId: {
+        ...byId,
+        [id]: activity,
       },
     },
   });
+}
+
+/** Replaces all pending activities in the given account and chain */
+export function replacePendingActivities(
+  global: GlobalState,
+  accountId: string,
+  chain: ApiChain,
+  pendingActivities: readonly ApiActivity[],
+) {
+  const { pendingActivityIds } = selectAccountState(global, accountId)?.activities || {};
+  global = removeActivities(global, accountId, pendingActivityIds?.[chain] ?? []);
+  global = addNewActivities(global, accountId, pendingActivities, chain);
+  return global;
+}
+
+function getNewestActivitiesBySlug(
+  {
+    byId, idsBySlug, newestActivitiesBySlug,
+  }: Pick<Exclude<AccountState['activities'], undefined>, 'byId' | 'idsBySlug' | 'newestActivitiesBySlug'>,
+  tokenSlugs: Iterable<string>,
+) {
+  newestActivitiesBySlug = { ...newestActivitiesBySlug };
+
+  for (const tokenSlug of tokenSlugs) {
+    // The `idsBySlug` arrays must be sorted from the newest to the oldest
+    const ids = idsBySlug?.[tokenSlug] ?? [];
+    const newestActivityId = ids.find((id) => getIsActivitySuitableForFetchingTimestamp(byId[id]));
+    if (newestActivityId) {
+      newestActivitiesBySlug[tokenSlug] = byId[newestActivityId];
+    } else {
+      delete newestActivitiesBySlug[tokenSlug];
+    }
+  }
+
+  return newestActivitiesBySlug;
+}
+
+function getActivityListTokenSlugs(activityIds: Iterable<string>, byId: Record<string, ApiActivity>) {
+  const tokenSlugs = new Set<string>();
+
+  for (const id of activityIds) {
+    const activity = byId[id];
+    if (activity) {
+      for (const tokenSlug of getActivityTokenSlugs(activity)) {
+        tokenSlugs.add(tokenSlug);
+      }
+    }
+  }
+
+  return tokenSlugs;
+}
+
+/** replaceMap: keys - old (removed) activity ids, value - new (added) activity ids */
+export function replaceCurrentActivityId(global: GlobalState, accountId: string, replaceMap: Record<string, string>) {
+  return updateAccountState(global, accountId, {
+    currentActivityId: replaceActivityId(selectAccountState(global, accountId)?.currentActivityId, replaceMap),
+  });
+}
+
+function mergeIdsBySlug(
+  oldIdsBySlug: Record<string, string[]> | undefined,
+  newIdsBySlug: Record<string, string[]>,
+  activityById: Record<string, ApiActivity>,
+) {
+  return {
+    ...oldIdsBySlug,
+    ...mapValues(newIdsBySlug, (newIds, slug) => {
+      // There may be newer local transactions in `idsBySlug`, so a sorting is needed
+      return mergeSortedActivityIds(activityById, newIds, oldIdsBySlug?.[slug] ?? []);
+    }),
+  };
+}
+
+function areAllInitialActivitiesLoaded(
+  global: GlobalState,
+  accountId: string,
+  newAreInitialActivitiesLoaded: Partial<Record<ApiChain, boolean>>,
+) {
+  // The initial activities may be loaded and added before the authentication completes
+  const byChain = selectAccountOrAuthAccount(global, accountId)?.byChain ?? {};
+  const chains = Object.keys(byChain) as (keyof typeof byChain)[];
+
+  return chains.every((chain) => newAreInitialActivitiesLoaded[chain]);
+}
+
+export function updatePendingActivitiesToTrustedByReplacements(
+  global: GlobalState,
+  accountId: string,
+  localActivities: ApiActivity[],
+  replacedIds: Record<string, string>,
+): GlobalState {
+  const accountState = selectAccountState(global, accountId);
+  const activitiesState = accountState?.activities;
+
+  if (!activitiesState?.byId) return global;
+
+  const newById = { ...activitiesState.byId } as Record<string, ApiActivity>;
+
+  for (const localActivity of localActivities) {
+    const chainActivityId = replacedIds[localActivity.id];
+
+    if (chainActivityId && localActivity.status === 'pendingTrusted') {
+      const chainActivity = activitiesState.byId[chainActivityId];
+
+      if (chainActivity?.status === 'pending') {
+        newById[chainActivityId] = { ...chainActivity, status: 'pendingTrusted' };
+      }
+    }
+  }
+
+  return updateAccountState(global, accountId, {
+    activities: { ...activitiesState, byId: newById },
+  });
+}
+
+export function updatePendingActivitiesWithTrustedStatus(
+  global: GlobalState,
+  accountId: string,
+  chain: ApiChain | undefined,
+  pendingActivities: readonly ApiActivity[] | undefined,
+  replacedIds: Record<string, string>,
+  prevActivitiesForReplacement: ApiActivity[],
+): GlobalState {
+  if (!chain || pendingActivities === undefined) return global;
+
+  const reversedReplacedIds: Record<string, string> = swapKeysAndValues(replacedIds);
+  const prevById = buildCollectionByKey(prevActivitiesForReplacement, 'id');
+
+  // For pending activities, we need to check the status of the corresponding local activity
+  // Only convert 'pending' status to 'pendingTrusted', not 'confirmed' status
+  const adjustedPendingActivities = pendingActivities.map((a) => {
+    const oldId = reversedReplacedIds[a.id];
+    const oldActivity = oldId ? prevById[oldId] : undefined;
+    if (oldActivity && oldActivity.status === 'pendingTrusted' && a.status === 'pending') {
+      return { ...a, status: 'pendingTrusted' } as ApiActivity;
+    }
+
+    return a;
+  });
+
+  global = replacePendingActivities(global, accountId, chain, adjustedPendingActivities);
+
+  return global;
 }

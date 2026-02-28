@@ -1,4 +1,4 @@
-import React, { memo, type TeactNode, useMemo } from '../../lib/teact/teact';
+import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, getGlobal } from '../../global';
 
 import { MediaType, type NftTransfer } from '../../global/types';
@@ -21,26 +21,34 @@ interface OwnProps {
   nft?: NftTransfer;
   isStatic?: boolean;
   withTonExplorer?: boolean;
+  // Currently, MediaViewer can only display NFTs that are owned by the user
+  withMediaViewer?: boolean;
 }
 
 function NftInfo({
-  nft, isStatic, withTonExplorer,
+  nft, isStatic, withTonExplorer, withMediaViewer,
 }: OwnProps) {
   const { openMediaViewer } = getActions();
   const lang = useLang();
 
   const tonExplorerTitle = useMemo(() => {
-    return (lang('Open on %ton_explorer_name%', {
-      ton_explorer_name: getExplorerName('ton'),
-    }) as TeactNode[]
+    return (lang('Open on %explorer_name%', {
+      explorer_name: getExplorerName(),
+    }) as string[]
     ).join('');
   }, [lang]);
 
   const handleClickInfo = (event: React.MouseEvent) => {
     event.stopPropagation();
-    const url = getExplorerNftUrl(nft!.address, getGlobal().settings.isTestnet)!;
+    const global = getGlobal();
+    const url = getExplorerNftUrl(
+      undefined,
+      nft!.address,
+      global.settings.isTestnet,
+      global.settings.selectedExplorerIds?.ton,
+    )!;
 
-    openUrl(url);
+    void openUrl(url);
   };
 
   const handleClick = useLastCallback(() => {
@@ -99,12 +107,20 @@ function NftInfo({
     );
   }
 
+  if (!withMediaViewer) {
+    return (
+      <div className={buildClassName(styles.root, isStatic && styles.rootStatic)}>
+        {renderContent()}
+      </div>
+    );
+  }
+
   return (
     <div
       role="button"
       tabIndex={0}
       aria-label={lang('NFT')}
-      className={buildClassName(styles.root, isStatic && styles.rootStatic)}
+      className={buildClassName(styles.root, styles.interactive, isStatic && styles.rootStatic)}
       onClick={handleClick}
     >
       {renderContent()}

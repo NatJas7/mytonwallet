@@ -32,9 +32,10 @@ interface StateProps {
 function UpdateAvailable({ isAppUpdateAvailable, newAppVersion, isAppUpdateRequired }: StateProps) {
   const lang = useLang();
 
-  const { shouldRender, transitionClassNames } = useShowTransition(
-    (IS_ANDROID_DIRECT && isAppUpdateAvailable) || isAppUpdateRequired,
-  );
+  const { shouldRender, ref } = useShowTransition<HTMLButtonElement>({
+    isOpen: (IS_ANDROID_DIRECT && isAppUpdateAvailable) || isAppUpdateRequired,
+    withShouldRender: true,
+  });
 
   const handleClick = () => {
     if (IS_WEB) {
@@ -42,7 +43,7 @@ function UpdateAvailable({ isAppUpdateAvailable, newAppVersion, isAppUpdateRequi
       return;
     }
 
-    void openUrl(getUrl(newAppVersion), true);
+    void openUrl(getUrl(newAppVersion), { isExternal: true });
   };
 
   if (!shouldRender) {
@@ -50,9 +51,9 @@ function UpdateAvailable({ isAppUpdateAvailable, newAppVersion, isAppUpdateRequi
   }
 
   return (
-    <button type="button" className={buildClassName(styles.wrapper, transitionClassNames)} onClick={handleClick}>
+    <button ref={ref} type="button" className={styles.wrapper} onClick={handleClick}>
       <i className={buildClassName('icon icon-download-filled', styles.icon)} aria-hidden />
-      {lang('Update MyTonWallet')}
+      {lang('Update %app_name%', { app_name: APP_NAME })}
     </button>
   );
 }
@@ -67,7 +68,7 @@ function getUrl(appVersion?: string) {
   if (IS_ANDROID_DIRECT) {
     return appVersion
       ? `${APP_REPO_URL}/releases/download/v${encodeURIComponent(appVersion || '')}/${encodeURIComponent(APP_NAME)}.apk`
-      : 'https://github.com/mytonwalletorg/mytonwallet/releases/latest';
+      : 'https://github.com/mytonwallet-org/mytonwallet/releases/latest';
   }
 
   if (IS_ANDROID_APP) {

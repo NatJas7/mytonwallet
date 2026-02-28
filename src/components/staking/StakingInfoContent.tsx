@@ -1,25 +1,35 @@
 import React, {
-  memo, useEffect, useMemo,
+  memo, type TeactNode, useEffect, useMemo,
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiStakingHistory, ApiStakingState, ApiTokenWithPrice } from '../../api/types';
+import type {
+  ApiBaseCurrency, ApiCurrencyRates, ApiStakingHistory, ApiStakingState, ApiTokenWithPrice,
+} from '../../api/types';
 import type { Theme, UserToken } from '../../global/types';
 
-import { ANIMATED_STICKER_TINY_ICON_PX, SHORT_FRACTION_DIGITS, TONCOIN } from '../../config';
-import { buildStakingDropdownItems } from '../../global/helpers/staking';
+import {
+  ANIMATED_STICKER_TINY_ICON_PX,
+  ETHENA_ELIGIBILITY_CHECK_URL,
+  SHORT_FRACTION_DIGITS,
+  TONCOIN,
+} from '../../config';
 import {
   selectAccountStakingHistory,
   selectAccountStakingState,
   selectAccountStakingStates,
   selectAccountStakingTotalProfit,
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
+  selectIsCurrentAccountViewMode,
 } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
 import { formatRelativeHumanDateTime } from '../../util/dateFormat';
 import { toBig, toDecimal } from '../../util/decimals';
 import { formatCurrency } from '../../util/formatNumber';
+import { openUrl } from '../../util/openUrl';
+import { getStakingStateStatus, getUnstakeTime } from '../../util/staking';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import useAppTheme from '../../hooks/useAppTheme';
@@ -30,13 +40,14 @@ import useLastCallback from '../../hooks/useLastCallback';
 import useShowTransition from '../../hooks/useShowTransition';
 import { useTransitionActiveKey } from '../../hooks/useTransitionActiveKey';
 import useWindowSize from '../../hooks/useWindowSize';
+import { useTokenDropdown } from './hooks/useTokenDropdown';
 
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
 import Button from '../ui/Button';
-import Dropdown from '../ui/Dropdown';
 import ModalHeader from '../ui/ModalHeader';
 import RichNumberField from '../ui/RichNumberField';
 import Spinner from '../ui/Spinner';
+import TokenDropdown from '../ui/TokenDropdown';
 import Transition from '../ui/Transition';
 import StakingProfitItem from './StakingProfitItem';
 
@@ -49,19 +60,23 @@ interface OwnProps {
 }
 
 interface StateProps {
+  isViewMode: boolean;
   states?: ApiStakingState[];
   stakingState?: ApiStakingState;
   totalProfit: bigint;
   stakingHistory?: ApiStakingHistory;
   tokens?: UserToken[];
   tokenBySlug?: Record<string, ApiTokenWithPrice>;
-  endOfStakingCycle?: number;
+  baseCurrency: ApiBaseCurrency;
+  currencyRates: ApiCurrencyRates;
   theme: Theme;
   shouldUseNominators?: boolean;
+  isSensitiveDataHidden?: true;
 }
 
 const UPDATE_UNSTAKE_DATE_INTERVAL_MS = 30000; // 30 sec
 const HISTORY_SCROLL_APPEARANCE_HEIGHT_PX = 640;
+const FRACTION_DIGITS = 2;
 
 function StakingInfoContent({
   states,
@@ -72,10 +87,13 @@ function StakingInfoContent({
   stakingHistory,
   tokens,
   tokenBySlug,
-  endOfStakingCycle,
+  baseCurrency,
+  currencyRates,
   theme,
-  onClose,
   shouldUseNominators,
+  isViewMode,
+  isSensitiveDataHidden,
+  onClose,
 }: OwnProps & StateProps) {
   const {
     startStaking,
@@ -88,10 +106,15 @@ function StakingInfoContent({
   const {
     id: stakingId,
     tokenSlug,
-    balance: amount = 0n,
+    balance: amount,
     annualYield = 0,
-    isUnstakeRequested,
+    unstakeRequestAmount,
+    type: stakingType,
   } = stakingState ?? {};
+  const isEthenaBoostAvailable = stakingState?.type === 'ethena' && stakingState.isBoostAvailable;
+
+  const unstakeTime = getUnstakeTime(stakingState);
+  const canBeClaimed = stakingState ? getStakingStateStatus(stakingState) === 'readyToClaim' : undefined;
 
   const token = useMemo(() => {
     return tokenSlug ? tokens?.find(({ slug }) => tokenSlug === slug) : undefined;
@@ -100,23 +123,33 @@ function StakingInfoContent({
   const { decimals, symbol } = token ?? {};
 
   const lang = useLang();
-  const isLoading = !amount;
+  const isLoading = amount === undefined;
   const hasHistory = Boolean(stakingHistory?.length);
   const {
     shouldRender: shouldRenderSpinner,
-    transitionClassNames: spinnerClassNames,
-  } = useShowTransition(isLoading && isActive);
-  const tonToken = useMemo(() => tokens?.find(({ slug }) => slug === TONCOIN.slug)!, [tokens]);
+    ref: spinnerRef,
+  } = useShowTransition({
+    isOpen: isLoading && isActive,
+    withShouldRender: true,
+  });
+  const tonToken = useMemo(() => tokens?.find(({ slug }) => slug === TONCOIN.slug), [tokens])!;
   const forceUpdate = useForceUpdate();
   const { height } = useWindowSize();
   const appTheme = useAppTheme(theme);
+  const {
+    shouldRender: shouldRenderTotalAmount,
+    ref: totalAmountRef,
+  } = useShowTransition({
+    isOpen: !isSensitiveDataHidden,
+    withShouldRender: true,
+  });
 
   const unclaimedRewards = stakingState?.type === 'jetton'
     ? stakingState.unclaimedRewards
     : undefined;
 
   // Updates the unstaking countdown
-  useInterval(forceUpdate, isUnstakeRequested ? UPDATE_UNSTAKE_DATE_INTERVAL_MS : undefined);
+  useInterval(forceUpdate, unstakeRequestAmount ? UPDATE_UNSTAKE_DATE_INTERVAL_MS : undefined);
 
   useEffect(() => {
     if (isActive) {
@@ -139,18 +172,53 @@ function StakingInfoContent({
     startStakingClaim();
   });
 
-  const stakingResult = toBig(amount).round(SHORT_FRACTION_DIGITS).toString();
-  const balanceResult = toBig(amount).mul((annualYield / 100) + 1).round(SHORT_FRACTION_DIGITS).toString();
+  let stakingResult = '0';
+  let balanceResult = '0';
+  if (amount) {
+    stakingResult = toBig(amount, decimals).round(SHORT_FRACTION_DIGITS).toString();
+    balanceResult = toBig(amount, decimals).mul((annualYield / 100) + 1).round(SHORT_FRACTION_DIGITS).toString();
+  }
 
-  const dropDownItems = useMemo(() => {
-    if (!tokenBySlug || !states) {
-      return [];
-    }
+  const handleCheckEligibility = useLastCallback(() => {
+    void openUrl(ETHENA_ELIGIBILITY_CHECK_URL);
+  });
 
-    return buildStakingDropdownItems({ tokenBySlug, states, shouldUseNominators });
-  }, [tokenBySlug, states, shouldUseNominators]);
+  const [selectedToken, selectableTokens] = useTokenDropdown({
+    tokenBySlug,
+    states,
+    shouldUseNominators,
+    selectedStakingId: stakingId,
+    isViewMode,
+    baseCurrency,
+    currencyRates,
+  });
 
   function renderUnstakeDescription() {
+    let text: string | TeactNode[] | undefined;
+
+    if (unstakeTime) {
+      let textKey = '$unstaking_when_receive_with_amount';
+
+      if (stakingType === 'ethena') {
+        textKey = '$unstaking_when_receive_with_amount_ethena';
+      } else if (stakingType === 'nominators') {
+        textKey = '$unstaking_when_receive';
+      }
+
+      text = lang(textKey, {
+        time: (
+          <strong>
+            {formatRelativeHumanDateTime(lang.code, unstakeTime)}
+          </strong>
+        ),
+        amount: (
+          <strong>
+            {formatCurrency(toDecimal(unstakeRequestAmount ?? 0n, decimals), symbol!).replace(' ', '\u00A0')}
+          </strong>
+        ),
+      });
+    }
+
     return (
       <div className={buildClassName(styles.unstakeTime, styles.unstakeTime_purple)}>
         <AnimatedIconWithPreview
@@ -163,13 +231,7 @@ function StakingInfoContent({
           previewUrl={ANIMATED_STICKERS_PATHS[appTheme].preview.iconClockPurple}
         />
         <div>
-          {Boolean(endOfStakingCycle) && lang('$unstaking_when_receive', {
-            time: (
-              <strong>
-                {formatRelativeHumanDateTime(lang.code, endOfStakingCycle)}
-              </strong>
-            ),
-          })}
+          {text}
         </div>
       </div>
     );
@@ -178,15 +240,17 @@ function StakingInfoContent({
   function renderHistory() {
     return (
       <div className={buildClassName(styles.history, isStatic && styles.history_static)}>
-        <div className={styles.historyTotal}>
-          {lang('$total', {
-            value: (
-              <span className={styles.historyTotalValue}>
-                {formatCurrency(toDecimal(totalProfit), TONCOIN.symbol)}
-              </span>
-            ),
-          })}
-        </div>
+        {shouldRenderTotalAmount && (
+          <div ref={totalAmountRef} className={styles.historyTotal}>
+            {lang('$total', {
+              value: (
+                <span className={styles.historyTotalValue}>
+                  {formatCurrency(toDecimal(totalProfit), TONCOIN.symbol)}
+                </span>
+              ),
+            })}
+          </div>
+        )}
         <div className={styles.historyTitle}>{lang('Earning History')}</div>
         <div className={buildClassName(
           styles.historyList,
@@ -201,6 +265,7 @@ function StakingInfoContent({
               profit={record.profit}
               timestamp={record.timestamp}
               tonToken={tonToken}
+              isSensitiveDataHidden={isSensitiveDataHidden}
             />
           ))}
         </div>
@@ -227,24 +292,28 @@ function StakingInfoContent({
     return (
       <>
         <RichNumberField
+          isSensitiveData
+          isSensitiveDataHidden={isSensitiveDataHidden}
+          sensitiveDataMaskSkin="purple"
           labelText={lang('Accumulated Rewards')}
           zeroValue="..."
           value={rewardString}
           decimals={decimals}
           suffix={symbol}
-          inputClassName={styles.balanceResultInput}
           labelClassName={styles.balanceStakedLabel}
           valueClassName={styles.balanceResult}
         />
-        <div className={styles.stakingInfoButtons}>
-          <Button
-            className={styles.stakingInfoButton}
-            isDisabled={isLoading}
-            onClick={handleClaimClick}
-          >
-            {lang('Claim')}
-          </Button>
-        </div>
+        {!isViewMode && (
+          <div className={styles.stakingInfoButtons}>
+            <Button
+              className={styles.stakingInfoButton}
+              isDisabled={isLoading}
+              onClick={handleClaimClick}
+            >
+              {lang('Claim')}
+            </Button>
+          </div>
+        )}
       </>
     );
   }
@@ -262,6 +331,9 @@ function StakingInfoContent({
           )}
 
           <RichNumberField
+            isSensitiveData
+            isSensitiveDataHidden={isSensitiveDataHidden}
+            sensitiveDataMaskSkin="purple"
             labelText={lang('Currently Staked')}
             zeroValue="..."
             value={stakingResult}
@@ -272,55 +344,80 @@ function StakingInfoContent({
           >
             <div className={styles.stakingInfoLoading}>
               {shouldRenderSpinner && (
-                <Spinner className={buildClassName(styles.stakingInfoLoadingAnimation, spinnerClassNames)} />
+                <Spinner ref={spinnerRef} className={styles.stakingInfoLoadingAnimation} />
               )}
             </div>
 
-            <Dropdown
-              items={dropDownItems}
-              selectedValue={stakingId}
-              className={styles.tokenDropdown}
-              itemClassName={styles.tokenDropdownItem}
-              menuClassName={styles.tokenDropdownMenu}
+            <TokenDropdown
+              selectedToken={selectedToken}
+              allTokens={selectableTokens}
+              theme="purple"
               onChange={handleChangeStaking}
             />
 
           </RichNumberField>
-          {isUnstakeRequested
+          {unstakeRequestAmount && unstakeRequestAmount > 0n && stakingType !== 'ethena'
             ? renderUnstakeDescription()
             : (
               <>
                 <RichNumberField
+                  isSensitiveData
+                  isSensitiveDataHidden={isSensitiveDataHidden}
+                  sensitiveDataMaskSkin="purple"
                   labelText={lang('Est. balance in a year')}
                   zeroValue="..."
                   value={balanceResult}
                   decimals={decimals}
                   suffix={symbol}
-                  inputClassName={styles.balanceResultInput}
                   labelClassName={styles.balanceStakedLabel}
                   valueClassName={styles.balanceResult}
                 />
-                <div
-                  className={
-                    buildClassName(styles.stakingInfoButtons, !!unclaimedRewards && styles.stakingInfoButtonsWithMargin)
-                  }
-                >
-                  <Button
-                    className={styles.stakingInfoButton}
-                    isPrimary
-                    isDisabled={isLoading}
-                    onClick={handleStakeClick}
+                {stakingType === 'ethena' && !canBeClaimed && !!unstakeRequestAmount && renderUnstakeDescription()}
+                {!isViewMode && (
+                  <div
+                    className={buildClassName(
+                      styles.stakingInfoButtons,
+                      stakingType === 'ethena' && styles.stakingInfoButtonsAdaptiveWidth,
+                      !!unclaimedRewards && styles.stakingInfoButtonsWithMargin,
+                    )}
                   >
-                    {lang('Stake More')}
+                    <Button
+                      className={styles.stakingInfoButton}
+                      isPrimary
+                      isDisabled={isLoading}
+                      onClick={handleStakeClick}
+                    >
+                      {lang('Stake More')}
+                    </Button>
+                    {(stakingType !== 'ethena' || !canBeClaimed) && (
+                      <Button
+                        className={styles.stakingInfoButton}
+                        isDisabled={isLoading}
+                        onClick={handleUnstakeClick}
+                      >
+                        {lang(stakingType === 'ethena' ? 'Request Unstaking' : 'Unstake')}
+                      </Button>
+                    )}
+                    {canBeClaimed && (
+                      <Button
+                        className={styles.stakingInfoButton}
+                        isDisabled={isLoading}
+                        onClick={handleClaimClick}
+                      >
+                        {lang('Unstake %amount%', {
+                          amount: isSensitiveDataHidden
+                            ? `*** ${symbol}`
+                            : formatCurrency(toDecimal(unstakeRequestAmount!, decimals), symbol!, FRACTION_DIGITS),
+                        })}
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {!isViewMode && isEthenaBoostAvailable && (
+                  <Button isText className={styles.checkEligibilityButton} onClick={handleCheckEligibility}>
+                    {lang('Check eligibility for max APY')}
                   </Button>
-                  <Button
-                    className={styles.stakingInfoButton}
-                    isDisabled={isLoading}
-                    onClick={handleUnstakeClick}
-                  >
-                    {lang('Unstake')}
-                  </Button>
-                </div>
+                )}
                 {!!unclaimedRewards && renderRewards()}
               </>
             )}
@@ -348,15 +445,15 @@ function StakingInfoContent({
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const accountId = global.currentAccountId;
+  const accountId = selectCurrentAccountId(global);
+  const {
+    settings: { theme, isSensitiveDataHidden },
+    tokenInfo: { bySlug: tokenBySlug },
+  } = global;
   const accountState = selectCurrentAccountState(global);
 
   const states = accountId ? selectAccountStakingStates(global, accountId) : undefined;
   const stakingState = accountId ? selectAccountStakingState(global, accountId) : undefined;
-
-  const endOfStakingCycle = stakingState?.type === 'nominators'
-    ? stakingState.end
-    : global.stakingInfo?.round.end;
 
   const stakingHistory = accountId ? selectAccountStakingHistory(global, accountId) : undefined;
   const totalProfit = accountId ? selectAccountStakingTotalProfit(global, accountId) : 0n;
@@ -367,9 +464,12 @@ export default memo(withGlobal<OwnProps>((global): StateProps => {
     totalProfit,
     stakingHistory,
     tokens: selectCurrentAccountTokens(global),
-    tokenBySlug: global.tokenInfo.bySlug,
-    endOfStakingCycle,
-    theme: global.settings.theme,
+    tokenBySlug,
+    baseCurrency: global.settings.baseCurrency,
+    currencyRates: global.currencyRates,
+    theme,
     shouldUseNominators: accountState?.staking?.shouldUseNominators,
+    isSensitiveDataHidden,
+    isViewMode: selectIsCurrentAccountViewMode(global),
   };
 })(StakingInfoContent));

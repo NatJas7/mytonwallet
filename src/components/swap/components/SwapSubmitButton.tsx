@@ -1,4 +1,3 @@
-import type { TeactNode } from '../../../lib/teact/teact';
 import React, { memo, useRef } from '../../../lib/teact/teact';
 
 import type { DieselStatus, UserSwapToken } from '../../../global/types';
@@ -81,22 +80,18 @@ function SwapSubmitButton({
 
   const isTouched = Boolean(amountIn || amountOut);
 
-  let text: string | TeactNode[] = '$swap_from_to';
+  let text: string | string[] = '$swap_from_to';
 
   if (isTouched) {
     if (isErrorExist) {
-      text = errorMsgByType[errorType];
-    } else if (nativeToken) {
-      if (isNotEnoughNative && tokenIn?.chain === 'ton' && tokenIn?.tokenAddress) {
-        if (dieselStatus === 'not-available') {
-          text = lang('Not Enough %symbol%', { symbol: 'TON' });
-        } else if (dieselStatus === 'pending-previous') {
-          text = lang('Awaiting Previous Fee');
-        } else if (dieselStatus === 'not-authorized') {
-          text = lang('Authorize %token% Fee', { token: tokenIn?.symbol });
-        }
-      } else if (isNotEnoughNative) {
-        text = lang('Not Enough %symbol%', { symbol: nativeToken?.symbol });
+      text = errorMsgByType[errorType] as string;
+    } else if (tokenIn?.tokenAddress && isNotEnoughNative) {
+      if (dieselStatus === 'not-available') {
+        text = lang('Not Enough %symbol%', { symbol: nativeToken?.symbol }) as string;
+      } else if (dieselStatus === 'pending-previous') {
+        text = lang('Awaiting Previous Fee');
+      } else if (dieselStatus === 'not-authorized') {
+        text = lang('Authorize %token% Fee', { token: tokenIn?.symbol }) as string;
       }
     }
   }
@@ -120,7 +115,7 @@ function SwapSubmitButton({
     const renderedText = textStr === '$swap_from_to'
       ? lang('$swap_from_to', {
         from: tokenIn?.symbol,
-        icon: <i className={buildClassName('icon-arrow-right', styles.swapArrowIcon)} aria-hidden />,
+        icon: <i className={buildClassName('icon-chevron-right', styles.swapArrowIcon)} aria-hidden />,
         to: tokenOut?.symbol,
       })
       : textStr;
@@ -132,18 +127,20 @@ function SwapSubmitButton({
         activeKey={transitionKeyRef.current++}
       >
         <Button
-          className={styles.footerButton}
-          isDisabled={isDisabled}
           isPrimary
           isSubmit
+          className={styles.footerButton}
+          isDisabled={isDisabled}
           isLoading={isLoading}
           isDestructive={isDestructive}
         >
-          {renderedText}
+          {/* The <span> is to have inline content positioning to align the icon properly */}
+          <span className={styles.footerButtonInner}>{renderedText}</span>
         </Button>
       </Transition>
     );
   }, [isDestructive, isDisabled, isLoading, lang, textStr, tokenIn?.symbol, tokenOut?.symbol]);
+
   const renderThrottled = useThrottledSignal(render, BUTTON_ANIMATION_DURATION);
   const rendered = useDerivedState(renderThrottled);
 

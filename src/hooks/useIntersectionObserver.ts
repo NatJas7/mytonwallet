@@ -1,11 +1,9 @@
-import type { RefObject } from 'react';
-import { useEffect, useRef, useState } from '../lib/teact/teact';
+import { type ElementRef, useEffect, useRef, useSignal } from '../lib/teact/teact';
 
 import type { Scheduler } from '../util/schedulers';
 
-import {
-  debounce, throttle, throttleWith,
-} from '../util/schedulers';
+import { debounce, throttle, throttleWith } from '../util/schedulers';
+import useDerivedState from './useDerivedState';
 import useHeavyAnimation from './useHeavyAnimation';
 import useLastCallback from './useLastCallback';
 
@@ -35,7 +33,7 @@ export function useIntersectionObserver({
   threshold,
   isDisabled,
 }: {
-  rootRef?: RefObject<HTMLDivElement>;
+  rootRef?: ElementRef<HTMLDivElement>;
   throttleMs?: number;
   throttleScheduler?: Scheduler;
   debounceMs?: number;
@@ -168,7 +166,7 @@ export function useIntersectionObserver({
 }
 
 export function useOnIntersect(
-  targetRef: RefObject<HTMLDivElement>, observe?: ObserveFn, callback?: TargetCallback,
+  targetRef: ElementRef<HTMLElement>, observe?: ObserveFn, callback?: TargetCallback,
 ) {
   const lastCallback = useLastCallback(callback);
 
@@ -177,10 +175,10 @@ export function useOnIntersect(
   }, [lastCallback, observe, targetRef]);
 }
 
-export function useIsIntersecting(
-  targetRef: RefObject<HTMLDivElement>, observe?: ObserveFn, callback?: TargetCallback,
+export function useGetIsIntersecting(
+  targetRef: ElementRef<HTMLElement>, observe?: ObserveFn, callback?: TargetCallback,
 ) {
-  const [isIntersecting, setIsIntersecting] = useState(!observe);
+  const [getIsIntersecting, setIsIntersecting] = useSignal(!observe);
 
   useOnIntersect(targetRef, observe, (entry) => {
     setIsIntersecting(entry.isIntersecting);
@@ -190,5 +188,11 @@ export function useIsIntersecting(
     }
   });
 
-  return isIntersecting;
+  return getIsIntersecting;
+}
+
+export function useIsIntersecting(
+  targetRef: ElementRef<HTMLElement>, observe?: ObserveFn, callback?: TargetCallback,
+) {
+  return useDerivedState(useGetIsIntersecting(targetRef, observe, callback));
 }

@@ -1,88 +1,112 @@
+import type { ChainSdk } from '../../types/chains';
+import { DappProtocolType } from '../../dappProtocols/types';
+
+import { decryptComment, fetchActivityDetails, fetchActivitySlice } from './activities';
+import { normalizeAddress } from './address';
+import {
+  fetchPrivateKeyString,
+  getWalletFromAddress,
+  getWalletFromBip39Mnemonic,
+  getWalletFromPrivateKey,
+  getWalletsFromLedgerAndLoadBalance,
+} from './auth';
+import { signConnectionProof, signDappData, signDappTransfers } from './dapp';
+import {
+  checkNftOwnership,
+  checkNftTransferDraft,
+  getAccountNfts,
+  streamAllAccountNfts,
+  submitNftTransfers,
+} from './nfts';
+import { getIsLedgerAppOpen } from './other';
+import { setupActivePolling, setupInactivePolling } from './polling';
+import { fetchToken, importToken } from './tokens';
+import { fetchTransactionById } from './transactionInfo';
+import {
+  checkToAddress,
+  checkTransactionDraft,
+  fetchEstimateDiesel,
+  submitGasfullTransfer,
+  submitGaslessTransfer,
+} from './transfer';
+import { verifyLedgerWalletAddress } from './wallet';
+
+const tonSdk: ChainSdk<'ton'> = {
+  fetchActivitySlice,
+  fetchActivityDetails,
+  decryptComment,
+  normalizeAddress,
+  getWalletFromBip39Mnemonic,
+  getWalletFromPrivateKey,
+  getWalletFromAddress,
+  getWalletsFromLedgerAndLoadBalance,
+  setupActivePolling,
+  setupInactivePolling,
+  fetchToken,
+  importToken,
+  checkTransactionDraft,
+  fetchEstimateDiesel,
+  submitGasfullTransfer,
+  submitGaslessTransfer,
+  getAddressInfo: checkToAddress,
+  verifyLedgerWalletAddress,
+  fetchPrivateKeyString,
+  getIsLedgerAppOpen,
+  fetchTransactionById,
+  dapp: {
+    supportedProtocols: [DappProtocolType.TonConnect],
+    signConnectionProof,
+    signDappTransfers,
+    signDappData,
+  },
+  getAccountNfts,
+  streamAllAccountNfts,
+  checkNftTransferDraft,
+  submitNftTransfers,
+  checkNftOwnership,
+};
+
+export default tonSdk;
+
+// The chain methods that haven't been multichain-refactored yet:
+
 export {
   generateMnemonic,
   rawSign,
   validateMnemonic,
-  fetchPrivateKey,
-  getWalletFromBip39Mnemonic,
   getWalletFromMnemonic,
-  getWalletFromPrivateKey,
-  importNewWalletVersion,
+  getOtherVersionWallet,
 } from './auth';
 export {
-  getAccountNfts,
-  getNftUpdates,
-  checkNftTransferDraft,
-  submitNftTransfers,
-  checkNftOwnership,
-} from './nfts';
-export { oneCellFromBoc } from './util/tonCore';
+  submitDnsRenewal,
+  checkDnsRenewalDraft,
+  checkDnsChangeWalletDraft,
+  submitDnsChangeWallet,
+} from './domains';
 export {
   checkTransactionDraft,
-  getAccountNewestTxId,
-  fetchAccountTransactionSlice,
-  fetchTokenTransactionSlice,
-  submitTransfer,
+  submitGasfullTransfer,
   checkMultiTransactionDraft,
   submitMultiTransfer,
-  getAllTransactionSlice,
-  sendSignedMessage,
-  sendSignedMessages,
-  decryptComment,
-  waitUntilTransactionAppears,
-  fixTokenActivitiesAddressForm,
-  submitTransferWithDiesel,
-  fetchEstimateDiesel,
-} from './transactions';
+  signTransfers,
+} from './transfer';
 export {
-  getAccountBalance,
-  getTonWallet,
-  pickBestWallet,
-  publicKeyToAddress,
-  resolveWalletVersion,
-  getWalletStateInit,
   getWalletBalance,
-  getWalletSeqno,
-  isAddressInitialized,
-  isActiveSmartContract,
-  getWalletInfo,
   pickWalletByAddress,
-  getWalletVersions,
-  getWalletVersionInfos,
-  getContractInfo,
-  buildWallet,
 } from './wallet';
 export {
   checkStakeDraft,
   checkUnstakeDraft,
-  submitStakingClaim,
+  submitTokenStakingClaim,
   submitStake,
   submitUnstake,
   getStakingStates,
   getBackendStakingState,
+  submitUnstakeEthenaLocked,
 } from './staking';
 export {
-  packPayloadToBoc,
-  checkApiAvailability,
-} from './other';
-export {
-  getAccountTokenBalances,
-  getTokenBalances,
-  fetchToken,
   insertMintlessPayload,
 } from './tokens';
 export {
-  resolveTokenWalletAddress,
-  resolveTokenAddress,
-} from './util/tonCore';
-export {
-  parsePayloadBase64,
-} from './util/metadata';
-export {
-  normalizeAddress,
-} from './address';
-export {
   validateDexSwapTransfers,
-  swapReplaceTransactions,
 } from './swap';
-export { Workchain } from './constants';
-export { setupPolling, setupInactiveAccountsBalancePolling } from './polling';

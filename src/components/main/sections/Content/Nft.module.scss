@@ -1,58 +1,79 @@
-@import "../../../../styles/mixins";
+@use "../../../../styles/mixins";
+
+$gapSize: 0.5rem;
 
 .emptyList {
   display: flex;
-  flex-direction: column;
   align-items: center;
-
-  height: 100%;
-  padding-top: 1.875rem;
-  padding-bottom: 2rem;
-
+  padding: 1.5rem 1.5rem 2rem;
   color: var(--color-gray-2);
 
-  @include respond-above(xs) {
+  @include mixins.respond-below(xs) {
+    gap: 1rem;
+  }
+
+  @include mixins.respond-above(xs) {
+    flex-direction: column;
     justify-content: center;
+    height: 100%;
+    padding: 1.875rem 1rem 2rem;
+  }
+}
+
+.emptyListContent {
+  @include mixins.respond-above(xs) {
+    text-align: center;
   }
 }
 
 .emptyListTitle {
-  margin: 1.25rem 0 0;
-
-  font-size: 1.0625rem;
+  margin: 0;
+  font-size: 0.9375rem;
   font-weight: 700;
   color: var(--color-black);
+
+  @include mixins.respond-above(xs) {
+    margin: 1.25rem 0 0;
+    font-size: 1.0625rem;
+  }
 }
 
 .emptyListText {
-  margin: 1.0625rem 0 1.125rem;
+  margin: 0.625rem 0;
+  font-size: 0.8125rem;
 
-  font-size: 0.9375rem;
-  text-align: center;
+  @include mixins.respond-above(xs) {
+    margin: 1.0625rem 0 1.125rem;
+    font-size: 0.9375rem;
+    text-align: center;
+  }
 }
 
 .emptyListLoading {
+  justify-content: center;
   padding-top: 8rem;
 
-  @include respond-above(xs) {
+  @include mixins.respond-above(xs) {
     padding-bottom: 8rem;
   }
 }
 
 .emptyListButton {
+  cursor: var(--custom-cursor, pointer);
+
   display: inline-block;
 
-  margin: 0 auto;
-  padding: 0.5rem 1rem;
+  padding: 0.375rem 0.5rem;
+  border: none;
+  border-radius: var(--border-radius-tiny);
 
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1rem;
   color: var(--color-accent-button-text);
   text-decoration: none;
 
   background-color: var(--color-accent-button-background);
-  border-radius: var(--border-radius-tiny);
 
   transition: background-color 150ms, color 150ms;
 
@@ -60,17 +81,21 @@
   &:focus-visible {
     color: var(--color-accent-button-text-hover);
     text-decoration: none;
-
     background-color: var(--color-accent-button-background-hover);
   }
 
   &:active {
-    // @optimization
     transition: none !important;
   }
 
   :global(html.animation-level-0) & {
     transition: none !important;
+  }
+
+  @include mixins.respond-above(xs) {
+    margin: 0 auto;
+    padding: 0.5rem 1rem;
+    font-size: 0.9375rem;
   }
 }
 
@@ -79,29 +104,83 @@
   height: 9.75rem;
 }
 
-.list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  align-content: start;
+@include mixins.respond-above(xs) {
+  .listContainer {
+    scrollbar-gutter: stable;
 
-  padding: 0.5rem;
+    overflow: hidden;
+    overflow-y: scroll;
 
-  &.landscapeList {
-    grid-template-columns: 1fr 1fr 1fr;
+    width: 100%;
+    height: 100%;
+
+    &::before {
+      content: '';
+
+      position: sticky;
+      top: 0.0625rem;
+      left: 0;
+
+      display: block;
+
+      width: 100%;
+      height: 0.0625rem;
+
+      opacity: 0;
+      box-shadow: inset 0 -0.03rem 0 0 var(--color-separator);
+
+      @include mixins.transition(opacity 200ms);
+    }
+
+    &Scrolled::before {
+      opacity: 1;
+    }
   }
+}
+
+.list {
+  position: relative;
+  top: 0.5rem;
+  left: 0.5rem;
+  width: calc(100% - max(0rem, 0.5rem - var(--scrollbar-width)));
 }
 
 .item {
   cursor: var(--custom-cursor, pointer);
 
-  position: relative;
+  position: absolute;
   z-index: 0;
+  top: calc(var(--row) * (var(--cell-height) + var(--row-gap-size)));
 
+  width: var(--cell-width);
+  min-width: 0;
+  height: var(--cell-height);
   padding-bottom: 0.125rem;
 
   font-size: 0.9375rem;
   font-weight: 600;
+
+  &:nth-child(2n+1) {
+    left: 0;
+  }
+
+  &:nth-child(2n) {
+    left: calc(var(--cell-width) + #{$gapSize});
+  }
+
+  @include mixins.respond-above(xs) {
+    &:nth-child(3n + 1) {
+      left: 0 !important;
+    }
+
+    &:nth-child(3n + 2) {
+      left: calc(var(--cell-width) + #{$gapSize}) !important;
+    }
+
+    &:nth-child(3n) {
+      left: calc((var(--cell-width) + #{$gapSize}) * 2) !important;
+    }
+  }
 
   &,
   &:hover,
@@ -139,20 +218,29 @@
   }
 
   &_onSale {
-    position: relative;
-
     &::before {
       opacity: 1;
     }
 
     &:global(.ghost-target)::before {
       transform: translateY(-15%) scale(0.8);
-
       opacity: 0;
-
       transition: none;
     }
   }
+}
+
+.loadingWrapper {
+  position: absolute;
+  z-index: 0;
+  top: calc(var(--row) * (var(--cell-height) + var(--row-gap-size)));
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 100%;
+  height: 3rem;
 }
 
 .nonInteractive {
@@ -170,13 +258,13 @@
   aspect-ratio: 1;
   width: 100%;
   max-width: 100%;
-
   border-radius: var(--border-radius-normal);
 }
 
 .imageWrapper {
   /* Fix for border-radius missing during transform on Safari. See https://stackoverflow.com/a/58283449 */
   isolation: isolate;
+  position: relative;
 
   display: block !important;
 
@@ -190,6 +278,33 @@
   }
 }
 
+.imageWrapperNoData {
+  display: flex !important;
+  flex-direction: column;
+  gap: 0.625rem;
+  align-items: center;
+  justify-content: center;
+
+  color: var(--color-gray-4);
+
+  background-color: var(--color-background-second);
+
+  :global(html.theme-dark) & {
+    background-color: #131314;
+  }
+}
+
+.noImage {
+  width: min(5.4375rem, var(--cell-width) * 0.6);
+}
+
+.noImageText {
+  font-size: min(1.25rem, var(--cell-width) * 0.1);
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
 .image {
   transform-origin: center;
 
@@ -197,11 +312,12 @@
 
   width: 100%;
   height: 100%;
-
-  object-fit: cover;
   border-radius: var(--border-radius-normal);
 
-  transition: transform 300ms;
+  object-fit: cover;
+  filter: brightness(1);
+
+  transition: filter 300ms, transform 300ms, opacity 300ms !important;
 
   :global(html.animation-level-0) & {
     transition: none !important;
@@ -235,27 +351,57 @@
   background: var(--color-tint);
 }
 
+.warningBlock {
+  cursor: var(--custom-cursor, pointer);
+
+  position: absolute;
+  bottom: 0;
+  left: 0;
+
+  width: 100%;
+  padding: 0.3125rem 0.5rem;
+  border: none;
+
+  font-size: 0.75rem;
+  font-weight: 800;
+  line-height: 0.875rem;
+  color: var(--color-red-button-text);
+  text-align: center;
+  overflow-wrap: break-word;
+
+  background: var(--color-red-button-background);
+
+  &:first-letter {
+    text-transform: uppercase;
+  }
+}
+
 .infoWrapper {
   padding: 0 0.25rem;
-
   line-height: 1.0625rem;
 }
 
 .title {
   font-weight: 700;
   color: var(--color-black);
-  word-break: break-word;
+
+  .chainIcon + & {
+    margin-inline-start: 0.25rem;
+  }
 }
 
 .collection {
-  overflow: hidden;
-
   padding: 0.125rem 0.25rem 0;
-
   font-size: 0.75rem;
   line-height: 1;
   color: var(--color-gray-1);
+}
+
+.infoWrapper,
+.collection {
+  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .radio {
@@ -267,9 +413,7 @@
 
 .notcoinVoucherButton {
   margin: 0.75rem auto;
-
   background-color: black !important;
-
   transition: opacity 250ms ease;
 
   &:hover {
@@ -279,4 +423,8 @@
 
 .notcoinVoucherIcon {
   margin-right: 0.5rem;
+}
+
+.chainIcon {
+  vertical-align: -0.125rem;
 }

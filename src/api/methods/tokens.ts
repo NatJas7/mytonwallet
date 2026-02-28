@@ -1,37 +1,23 @@
-import type { ApiNetwork } from '../types';
+import type { ApiChain, OnApiUpdate } from '../types';
 
 import { parseAccountId } from '../../util/account';
 import chains from '../chains';
+import { sendUpdateTokens } from '../common/tokens';
 
-const { ton } = chains;
+export { buildTokenSlug } from '../common/tokens';
 
-export { getTokenBySlug, buildTokenSlug } from '../common/tokens';
-
-export function fetchToken(accountId: string, address: string) {
+export function fetchToken(accountId: string, chain: ApiChain, tokenAddress: string) {
   const { network } = parseAccountId(accountId);
-  return ton.fetchToken(network, address);
+  return chains[chain].fetchToken(network, tokenAddress);
 }
 
-export function resolveTokenWalletAddress(network: ApiNetwork, address: string, tokenAddress: string) {
-  const chain = chains.ton;
+let onUpdate: OnApiUpdate | undefined;
 
-  return chain.resolveTokenWalletAddress(network, address, tokenAddress);
+export function initTokens(_onUpdate: OnApiUpdate) {
+  onUpdate = _onUpdate;
 }
 
-export function resolveTokenAddress(network: ApiNetwork, tokenWalletAddress: string) {
-  const chain = chains.ton;
-
-  return chain.resolveTokenAddress(network, tokenWalletAddress);
-}
-
-export function fetchTokenBalances(accountId: string) {
-  const chain = chains.ton;
-
-  return chain.getAccountTokenBalances(accountId);
-}
-
-export function fetchTokenBalancesByAddress(address: string, network: ApiNetwork) {
-  const chain = chains.ton;
-
-  return chain.getTokenBalances(network, address);
+export async function importToken(accountId: string, chain: ApiChain, tokenAddress: string) {
+  const { network } = parseAccountId(accountId);
+  await chains[chain].importToken(network, tokenAddress, () => onUpdate && sendUpdateTokens(onUpdate));
 }

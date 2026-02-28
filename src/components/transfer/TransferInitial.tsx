@@ -1,142 +1,127 @@
 import type { TeactNode } from '../../lib/teact/teact';
-import React, {
-  memo, useEffect, useMemo, useRef, useState,
-} from '../../lib/teact/teact';
+import React, { memo, useCallback, useEffect, useMemo, useRef } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiFetchEstimateDieselResult } from '../../api/chains/ton/types';
-import type { ApiBaseCurrency, ApiChain, ApiNft } from '../../api/types';
-import type { Account, SavedAddress, UserToken } from '../../global/types';
+import type { ApiBaseCurrency, ApiFetchEstimateDieselResult, ApiNft } from '../../api/types';
+import type { SavedAddress, UserToken } from '../../global/types';
+import type { LangFn } from '../../hooks/useLang';
 import type { ExplainedTransferFee } from '../../util/fee/transferFee';
 import type { FeePrecision, FeeTerms } from '../../util/fee/types';
-import type { DropdownItem } from '../ui/Dropdown';
-import { TransferState } from '../../global/types';
+import { ScamWarningType, TransferState } from '../../global/types';
 
+import { DEFAULT_PRICE_CURRENCY, UNKNOWN_TOKEN } from '../../config';
+import { getHelpCenterUrl } from '../../global/helpers/getHelpCenterUrl';
 import {
-  CHAIN_CONFIG, IS_FIREFOX_EXTENSION, PRICELESS_TOKEN_HASHES, STAKED_TOKEN_SLUGS, TONCOIN,
-} from '../../config';
-import { Big } from '../../lib/big.js';
-import renderText from '../../global/helpers/renderText';
-import {
+  selectCurrentAccountId,
   selectCurrentAccountState,
+  selectCurrentAccountTokenBalance,
   selectCurrentAccountTokens,
+  selectIsAllowSuspiciousActions,
   selectIsHardwareAccount,
   selectIsMultichainAccount,
-  selectNetworkAccounts,
+  selectIsMultisigWallet,
 } from '../../global/selectors';
 import buildClassName from '../../util/buildClassName';
-import { vibrate } from '../../util/capacitor';
-import { readClipboardContent } from '../../util/clipboard';
+import { getChainConfig } from '../../util/chain';
 import { SECOND } from '../../util/dateFormat';
-import { fromDecimal, toBig, toDecimal } from '../../util/decimals';
-import dns from '../../util/dns';
+import { stopEvent } from '../../util/domEvents';
 import {
-  explainApiTransferFee, getMaxTransferAmount, isBalanceSufficientForTransfer,
+  explainApiTransferFee,
+  getMaxTransferAmount,
+  isBalanceSufficientForTransfer,
 } from '../../util/fee/transferFee';
-import { formatCurrency, getShortCurrencySymbol } from '../../util/formatNumber';
-import { isValidAddressOrDomain } from '../../util/isValidAddressOrDomain';
+import { vibrate } from '../../util/haptics';
+import { isValidAddressOrDomain } from '../../util/isValidAddress';
 import { debounce } from '../../util/schedulers';
-import { shortenAddress } from '../../util/shortenAddress';
-import stopEvent from '../../util/stopEvent';
-import getChainNetworkIcon from '../../util/swap/getChainNetworkIcon';
-import { IS_ANDROID, IS_FIREFOX, IS_TOUCH_ENV } from '../../util/windowEnvironment';
-import { ASSET_LOGO_PATHS } from '../ui/helpers/assetLogos';
+import { trimStringByMaxBytes } from '../../util/text';
+import { getChainBySlug, getIsNativeToken, getIsServiceToken, getNativeToken } from '../../util/tokens';
 
 import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useFlag from '../../hooks/useFlag';
 import useInterval from '../../hooks/useInterval';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
-import useQrScannerSupport from '../../hooks/useQrScannerSupport';
-import useShowTransition from '../../hooks/useShowTransition';
+import { useTransitionActiveKey } from '../../hooks/useTransitionActiveKey';
+import { useAmountInputState } from '../ui/hooks/useAmountInputState';
 
 import FeeDetailsModal from '../common/FeeDetailsModal';
-import DeleteSavedAddressModal from '../main/modals/DeleteSavedAddressModal';
+import AddressInput from '../ui/AddressInput';
+import AmountInput from '../ui/AmountInput';
 import Button from '../ui/Button';
-import Dropdown from '../ui/Dropdown';
 import FeeLine from '../ui/FeeLine';
-import Input from '../ui/Input';
-import InteractiveTextField from '../ui/InteractiveTextField';
-import Menu from '../ui/Menu';
-import RichNumberInput from '../ui/RichNumberInput';
+import Modal from '../ui/Modal';
 import Transition from '../ui/Transition';
+import CommentSection from './CommentSection';
 import NftChips from './NftChips';
 import NftInfo from './NftInfo';
+import SentTabs from './SentTabs';
 
 import modalStyles from '../ui/Modal.module.scss';
 import styles from './Transfer.module.scss';
 
 interface OwnProps {
   isStatic?: boolean;
+  slideClassName?: string;
 }
 
 interface StateProps {
   toAddress?: string;
+  resolvedAddress?: string;
+  toAddressName?: string;
   amount?: bigint;
   comment?: string;
   shouldEncrypt?: boolean;
+  isActive: boolean;
   isLoading?: boolean;
-  fee?: bigint;
-  realFee?: bigint;
+  isComplete?: boolean;
+  nativeFee?: bigint;
+  realNativeFee?: bigint;
   tokenSlug: string;
   tokens?: UserToken[];
   savedAddresses?: SavedAddress[];
-  currentAccountId?: string;
-  accounts?: Record<string, Account>;
+  nativeTokenBalance: bigint;
   isEncryptedCommentSupported: boolean;
   isMemoRequired?: boolean;
-  baseCurrency?: ApiBaseCurrency;
+  baseCurrency: ApiBaseCurrency;
   nfts?: ApiNft[];
   binPayload?: string;
   stateInit?: string;
   diesel?: ApiFetchEstimateDieselResult;
   isDieselAuthorizationStarted?: boolean;
   isMultichainAccount: boolean;
+  isMultisig: boolean;
+  isSensitiveDataHidden?: true;
+  scamWarningType?: ScamWarningType;
+  isAllowSuspiciousActions: boolean;
+  isTransferReadonly?: boolean;
 }
 
-const SAVED_ADDRESS_OPEN_DELAY = 300;
 const COMMENT_MAX_SIZE_BYTES = 5000;
-const SHORT_ADDRESS_SHIFT = 11;
-const MIN_ADDRESS_LENGTH_TO_SHORTEN = SHORT_ADDRESS_SHIFT * 2;
-const COMMENT_DROPDOWN_ITEMS = [
-  { value: 'raw', name: 'Comment or Memo' },
-  { value: 'encrypted', name: 'Encrypted Message' },
-];
 const ACTIVE_STATES = new Set([TransferState.Initial, TransferState.None]);
 const AUTHORIZE_DIESEL_INTERVAL_MS = SECOND;
-const TRON_ADDRESS_REGEX = /^T[1-9A-HJ-NP-Za-km-z]{1,33}$/;
-
-const INPUT_CLEAR_BUTTON_ID = 'input-clear-button';
 
 const runDebounce = debounce((cb) => cb(), 500, false);
 
-function doesSavedAddressFitSearch(savedAddress: SavedAddress, search: string) {
-  const searchQuery = search.toLowerCase();
-  const { address, name } = savedAddress;
-
-  return (
-    address.toLowerCase().startsWith(searchQuery)
-    || address.toLowerCase().endsWith(searchQuery)
-    || name.toLowerCase().split(/\s+/).some((part) => part.startsWith(searchQuery))
-  );
-}
-
 function TransferInitial({
   isStatic,
+  slideClassName,
   tokenSlug,
   toAddress = '',
+  resolvedAddress,
+  toAddressName = '',
   amount,
   comment = '',
   shouldEncrypt,
   tokens,
-  fee,
-  realFee,
+  nativeFee,
+  realNativeFee,
   savedAddresses,
-  accounts,
-  currentAccountId,
+  nativeTokenBalance,
   isEncryptedCommentSupported,
   isMemoRequired,
+  isActive,
   isLoading,
+  isComplete,
   baseCurrency,
   nfts,
   binPayload,
@@ -144,10 +129,14 @@ function TransferInitial({
   diesel,
   isDieselAuthorizationStarted,
   isMultichainAccount,
+  isMultisig,
+  isSensitiveDataHidden,
+  scamWarningType,
+  isAllowSuspiciousActions,
+  isTransferReadonly,
 }: OwnProps & StateProps) {
   const {
     submitTransferInitial,
-    showNotification,
     fetchTransferFee,
     fetchNftFee,
     changeTransferToken,
@@ -156,90 +145,71 @@ function TransferInitial({
     setTransferComment,
     setTransferShouldEncrypt,
     cancelTransfer,
-    requestOpenQrScanner,
     showDialog,
     authorizeDiesel,
     fetchTransferDieselState,
+    checkTransferAddress,
+    dismissTransferScamWarning,
   } = getActions();
 
   const isNftTransfer = Boolean(nfts?.length);
   if (isNftTransfer) {
+    const nftChain = nfts[0].chain;
     // Token and amount can't be selected in the NFT transfer form, so they are overwritten once for convenience
-    tokenSlug = TONCOIN.slug;
+    tokenSlug = getChainConfig(nftChain).nativeToken.slug;
     amount = undefined;
   }
-
-  // eslint-disable-next-line no-null/no-null
-  const toAddressRef = useRef<HTMLInputElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const addressBookTimeoutRef = useRef<number>(null);
 
   const lang = useLang();
 
   const transferToken = useMemo(() => tokens?.find((token) => token.slug === tokenSlug), [tokenSlug, tokens]);
-  const {
-    amount: balance,
-    decimals,
-    price,
-    symbol,
-    chain,
-  } = transferToken || {};
+  const { amount: balance, symbol, chain } = transferToken || {};
 
-  // Note: As of 27-11-2023, Firefox does not support readText()
-  const [shouldRenderPasteButton, setShouldRenderPasteButton] = useState(!(IS_FIREFOX || IS_FIREFOX_EXTENSION));
-  const [isAddressFocused, markAddressFocused, unmarkAddressFocused] = useFlag();
-  const [isAddressBookOpen, openAddressBook, closeAddressBook] = useFlag();
-  const [savedAddressForDeletion, setSavedAddressForDeletion] = useState<string | undefined>();
-  const [savedChainForDeletion, setSavedChainForDeletion] = useState<ApiChain | undefined>();
-  const toAddressShort = toAddress.length > MIN_ADDRESS_LENGTH_TO_SHORTEN
-    ? shortenAddress(toAddress, SHORT_ADDRESS_SHIFT) || ''
-    : toAddress;
+  const renderedScamWarningType = useCurrentOrPrev(scamWarningType, true);
+  const amountInputRef = useRef<HTMLInputElement>();
+  const isDisabledDebounce = useRef<boolean>(false);
   const isAddressValid = chain ? isValidAddressOrDomain(toAddress, chain) : undefined;
-  const otherAccountIds = useMemo(() => {
-    return accounts ? Object.keys(accounts).filter((accountId) => accountId !== currentAccountId) : [];
-  }, [currentAccountId, accounts]);
-  const shouldUseAddressBook = useMemo(() => {
-    return otherAccountIds.length > 0 || (savedAddresses && savedAddresses.length > 0);
-  }, [otherAccountIds.length, savedAddresses]);
+  const doesSupportComment = chain && getChainConfig(chain).isTransferPayloadSupported;
+  const doesSupportCommentEncryption = !!chain
+    && getChainConfig(chain).isEncryptedCommentSupported
+    && isEncryptedCommentSupported;
+  const transitionKey = useTransitionActiveKey(nfts?.length ? nfts : [tokenSlug]);
 
-  const nativeToken = useMemo(() => {
-    return tokens?.find((token) => !token.tokenAddress && token.chain === chain);
-  }, [tokens, chain])!;
+  const handleAddressInput = useLastCallback((newToAddress?: string, isValueReplaced?: boolean) => {
+    // If value is replaced, callbacks must be executed immediately, without debounce
+    if (isValueReplaced) {
+      isDisabledDebounce.current = true;
+    }
 
-  const isToncoin = tokenSlug === TONCOIN.slug;
+    setTransferToAddress({ toAddress: newToAddress });
+  });
+
+  const handleAddressPaste = useLastCallback(() => {
+    requestAnimationFrame(() => {
+      amountInputRef.current?.focus();
+    });
+  });
 
   const shouldDisableClearButton = !toAddress && !(comment || binPayload) && !shouldEncrypt
     && !(isNftTransfer ? isStatic : amount !== undefined);
 
-  const isQrScannerSupported = useQrScannerSupport();
-
-  const amountInCurrency = price && amount
-    ? toBig(amount, decimals).mul(price).round(decimals, Big.roundHalfUp).toString()
-    : undefined;
-  const renderingAmountInCurrency = useCurrentOrPrev(amountInCurrency, true);
-  const withPasteButton = shouldRenderPasteButton && toAddress === '';
-  const withAddressClearButton = !!toAddress.length;
-  const shortBaseSymbol = getShortCurrencySymbol(baseCurrency);
-
   const explainedFee = useMemo(
     () => explainApiTransferFee({
-      fee, realFee, diesel, tokenSlug,
+      fee: nativeFee, realFee: realNativeFee, diesel, tokenSlug,
     }),
-    [fee, realFee, diesel, tokenSlug],
+    [nativeFee, realNativeFee, diesel, tokenSlug],
   );
 
   // Note: this constant has 3 distinct meaningful values
   const isEnoughBalance = isBalanceSufficientForTransfer({
     tokenBalance: balance,
-    nativeTokenBalance: nativeToken.amount,
+    nativeTokenBalance,
     transferAmount: isNftTransfer ? 0n : amount,
     fullFee: explainedFee.fullFee?.terms,
     canTransferFullBalance: explainedFee.canTransferFullBalance,
   });
 
   const isAmountMissing = !isNftTransfer && !amount;
-
-  const isDisabledDebounce = useRef(false);
 
   const maxAmount = getMaxTransferAmount({
     tokenBalance: balance,
@@ -253,46 +223,26 @@ function TransferInitial({
     ? AUTHORIZE_DIESEL_INTERVAL_MS
     : undefined;
 
-  const { shouldRender: shouldRenderCurrency, transitionClassNames: currencyClassNames } = useShowTransition(
-    Boolean(amountInCurrency),
-  );
-
   const updateDieselState = useLastCallback(() => {
     fetchTransferDieselState({ tokenSlug });
   });
 
   useInterval(updateDieselState, authorizeDieselInterval);
 
-  const dropDownItems = useMemo(() => {
-    if (!tokens) {
-      return [];
-    }
-
-    return tokens.reduce<DropdownItem[]>((acc, token) => {
-      if ((token.amount > 0 && !token.isDisabled) || token.slug === tokenSlug) {
-        acc.push({
-          value: token.slug,
-          icon: ASSET_LOGO_PATHS[token.symbol.toLowerCase() as keyof typeof ASSET_LOGO_PATHS] || token.image,
-          overlayIcon: isMultichainAccount ? getChainNetworkIcon(token.chain) : undefined,
-          name: token.symbol,
-        });
-      }
-
-      return acc;
-    }, []);
-  }, [isMultichainAccount, tokenSlug, tokens]);
+  const fullFee = useMemo(() => {
+    return getFullFee(explainedFee.fullFee?.terms, tokenSlug);
+  }, [explainedFee.fullFee, tokenSlug]);
 
   useEffect(() => {
     if (
-      isToncoin
-      && balance && amount && fee
+      balance && amount && fullFee !== undefined
       && amount < balance
-      && fee < balance
-      && amount + fee >= balance
+      && fullFee < balance
+      && amount + fullFee >= balance
     ) {
-      setTransferAmount({ amount: balance - fee });
+      setTransferAmount({ amount: balance - fullFee });
     }
-  }, [isToncoin, amount, balance, fee]);
+  }, [amount, balance, fullFee]);
 
   // Note: this effect doesn't watch amount changes mainly because it's tricky to program a fee recalculation avoidance
   // when the amount changes due to a fee change. And it's not needed because the fee doesn't depend on the amount.
@@ -312,6 +262,7 @@ function TransferInitial({
         fetchTransferFee({
           tokenSlug,
           toAddress,
+          amount,
           comment,
           shouldEncrypt,
           binPayload,
@@ -328,172 +279,75 @@ function TransferInitial({
     }
   }, [
     isAmountMissing, binPayload, comment, shouldEncrypt, isAddressValid, isNftTransfer, nfts, stateInit, toAddress,
-    tokenSlug,
+    tokenSlug, amount,
   ]);
 
-  const handleTokenChange = useLastCallback((slug: string) => {
-    changeTransferToken({ tokenSlug: slug });
-    const token = tokens?.find((t) => t.slug === slug);
-    if (STAKED_TOKEN_SLUGS.has(slug) || PRICELESS_TOKEN_HASHES.has(token?.codeHash!)) {
+  useEffect(() => {
+    if (getIsServiceToken(transferToken)) {
       showDialog({
         title: lang('Warning!'),
         message: lang('$service_token_transfer_warning'),
+        noBackdropClose: true,
       });
     }
+  }, [lang, transferToken]);
+
+  useEffect(() => {
+    if (isComplete) clearForm();
+  }, [isComplete]);
+
+  const handleTokenChange = useLastCallback((slug: string) => {
+    changeTransferToken({ tokenSlug: slug });
   });
 
-  const handleAddressBookClose = useLastCallback(() => {
-    if (!shouldUseAddressBook || !isAddressBookOpen) return;
-
-    closeAddressBook();
-
-    if (addressBookTimeoutRef.current) {
-      window.clearTimeout(addressBookTimeoutRef.current);
-    }
-  });
-
-  const handleAddressFocus = useLastCallback(() => {
-    const el = toAddressRef.current!;
-
-    // `selectionStart` is only updated in the next frame after `focus` event
-    requestAnimationFrame(() => {
-      const caretPosition = el.selectionStart!;
-      markAddressFocused();
-
-      // Restore caret position after input field value has been focused and expanded
-      requestAnimationFrame(() => {
-        const newCaretPosition = caretPosition <= SHORT_ADDRESS_SHIFT + 3
-          ? caretPosition
-          : Math.max(0, el.value.length - (toAddressShort.length - caretPosition));
-
-        el.setSelectionRange(newCaretPosition, newCaretPosition);
-        if (newCaretPosition > SHORT_ADDRESS_SHIFT * 2) {
-          el.scrollLeft = el.scrollWidth - el.clientWidth;
-        }
-      });
-    });
-
-    if (shouldUseAddressBook) {
-      // Simultaneous opening of the virtual keyboard and display of Saved Addresses causes animation degradation
-      if (IS_ANDROID) {
-        addressBookTimeoutRef.current = window.setTimeout(openAddressBook, SAVED_ADDRESS_OPEN_DELAY);
-      } else {
-        openAddressBook();
-      }
-    }
-  });
-
-  const handleAddressBlur = useLastCallback((e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    unmarkAddressFocused();
-
-    if (e.relatedTarget?.id === INPUT_CLEAR_BUTTON_ID) {
-      handleAddressBookClose();
-
-      return;
-    }
-
-    if (dns.isDnsDomain(toAddress) && toAddress !== toAddress.toLowerCase()) {
-      setTransferToAddress({ toAddress: toAddress.toLowerCase().trim() });
-    } else if (toAddress !== toAddress.trim()) {
-      setTransferToAddress({ toAddress: toAddress.trim() });
-      parseAddressAndUpdateToken(toAddress.trim());
-    }
-
-    requestAnimationFrame(() => {
-      handleAddressBookClose();
-    });
-  });
-
-  const handleAddressInput = useLastCallback((newToAddress: string) => {
-    setTransferToAddress({ toAddress: newToAddress });
-    parseAddressAndUpdateToken(newToAddress);
-  });
-
-  const handleAddressClearClick = useLastCallback(() => {
-    setTransferToAddress({ toAddress: undefined });
-  });
-
-  const handleQrScanClick = useLastCallback(() => {
-    requestOpenQrScanner();
-    cancelTransfer();
-  });
+  function clearForm() {
+    handleAddressInput('');
+    checkTransferAddress({});
+    setTransferAmount({ amount: undefined });
+    setTransferComment({ comment: undefined });
+    setTransferShouldEncrypt({ shouldEncrypt: false });
+  }
 
   const handleClear = useLastCallback(() => {
     if (isStatic) {
       cancelTransfer({ shouldReset: true });
     } else {
-      handleAddressClearClick();
-      setTransferAmount({ amount: undefined });
-      setTransferComment({ comment: undefined });
-      setTransferShouldEncrypt({ shouldEncrypt: false });
+      clearForm();
     }
   });
 
-  function parseAddressAndUpdateToken(address: string) {
-    if (!address || amount || !isMultichainAccount || !tokens) return;
-    const chainFromAddress = getChainFromAddress(address);
-    if (chainFromAddress === chain) return;
+  const handleCloseClick = useLastCallback(() => {
+    cancelTransfer({ shouldReset: true });
+  });
 
-    const newTokenSlug = findTokenSlugWithMaxBalance(tokens, chainFromAddress)
-      || CHAIN_CONFIG[chainFromAddress].nativeToken.slug;
-    handleTokenChange(newTokenSlug);
-  }
+  const handleScamWarningModalClose = useLastCallback(() => {
+    dismissTransferScamWarning();
 
-  const handlePasteClick = useLastCallback(async () => {
-    try {
-      const { type, text } = await readClipboardContent();
-
-      if (type === 'text/plain') {
-        isDisabledDebounce.current = true;
-        setTransferToAddress({ toAddress: text.trim() });
-        parseAddressAndUpdateToken(text.trim());
-      }
-    } catch (err: any) {
-      showNotification({ message: lang('Error reading clipboard') });
-      setShouldRenderPasteButton(false);
+    if (isStatic) {
+      clearForm();
+    } else {
+      cancelTransfer({ shouldReset: true });
     }
   });
 
-  const handleAddressBookItemClick = useLastCallback(
-    (address: string) => {
-      isDisabledDebounce.current = true;
-      setTransferToAddress({ toAddress: address });
-      parseAddressAndUpdateToken(address);
-      closeAddressBook();
-    },
-  );
-
-  const handleDeleteSavedAddressClick = useLastCallback(
-    (address: string) => {
-      setSavedAddressForDeletion(address);
-      setSavedChainForDeletion(chain);
-      closeAddressBook();
-    },
-  );
-
-  const closeDeleteSavedAddressModal = useLastCallback(() => {
-    setSavedAddressForDeletion(undefined);
-    setSavedChainForDeletion(undefined);
-  });
-
-  const handleAmountChange = useLastCallback((stringValue?: string) => {
-    const value = stringValue ? fromDecimal(stringValue, decimals) : undefined;
-    if (value === undefined || value >= 0) {
-      setTransferAmount({ amount: value });
-    }
-  });
-
-  const handleMaxAmountClick = useLastCallback((e: React.MouseEvent<HTMLElement>) => {
-    e.preventDefault();
-
-    if (!balance) {
+  const handleAmountChange = (amount?: bigint, isValueReplaced?: boolean) => {
+    // The amount input may change the amount when it's in the base currency mode and the token price changes.
+    // Meanwhile, the amount in the global state must not change after the transfer form is submitted.
+    if (!isActive) {
       return;
     }
 
-    vibrate();
-    isDisabledDebounce.current = true;
-    setTransferAmount({ amount: maxAmount });
-  });
+    if (amount !== undefined && amount < 0) {
+      return;
+    }
+
+    // If the value is replaced, callbacks must be executed immediately, without debounce
+    if (isValueReplaced) {
+      isDisabledDebounce.current = true;
+    }
+
+    setTransferAmount({ amount });
+  };
 
   const handlePaste = useLastCallback(() => {
     isDisabledDebounce.current = true;
@@ -503,24 +357,31 @@ function TransferInitial({
     setTransferComment({ comment: trimStringByMaxBytes(value, COMMENT_MAX_SIZE_BYTES) });
   });
 
-  const hasToAddressError = toAddress.length > 0 && !isAddressValid;
   const isAmountGreaterThanBalance = !isNftTransfer && balance !== undefined && amount !== undefined
     && amount > balance;
-  const isInsufficientFee = isEnoughBalance === false && !isAmountGreaterThanBalance;
+  const hasInsufficientFeeError = isEnoughBalance === false && !isAmountGreaterThanBalance
+    && diesel?.status !== 'not-authorized' && diesel?.status !== 'pending-previous';
   const hasAmountError = !isNftTransfer && amount !== undefined && (
     (maxAmount !== undefined && amount > maxAmount)
-    || isInsufficientFee // Ideally, the insufficient fee error message should be displayed somewhere else
+    || hasInsufficientFeeError // Ideally, the insufficient fee error message should be displayed somewhere else
   );
   const isCommentRequired = Boolean(toAddress) && isMemoRequired;
   const hasCommentError = isCommentRequired && !comment;
 
   const canSubmit = isDieselNotAuthorized || Boolean(
-    isAddressValid && !isAmountMissing && !hasAmountError && isEnoughBalance && !hasCommentError
+    isAddressValid
+    && !isAmountMissing && !hasAmountError
+    && isEnoughBalance
+    && !hasCommentError
+    && !isMultisig
+    && (!explainedFee.isGasless || diesel?.status === 'available' || diesel?.status === 'stars-fee')
     && !(isNftTransfer && !nfts?.length),
   );
 
-  const handleSubmit = useLastCallback((e) => {
-    e.preventDefault();
+  const handleSubmit = useLastCallback((e?: React.FormEvent | React.UIEvent) => {
+    if (e) stopEvent(e);
+
+    if (scamWarningType) return;
 
     if (isDieselNotAuthorized) {
       authorizeDiesel();
@@ -531,7 +392,7 @@ function TransferInitial({
       return;
     }
 
-    vibrate();
+    void vibrate();
 
     submitTransferInitial({
       tokenSlug,
@@ -541,296 +402,73 @@ function TransferInitial({
       binPayload,
       shouldEncrypt,
       nfts,
-      withDiesel: explainedFee.isGasless,
+      isGasless: explainedFee.isGasless,
       isGaslessWithStars: diesel?.status === 'stars-fee',
       stateInit,
     });
   });
 
-  const handleCommentOptionsChange = useLastCallback((option: string) => {
-    setTransferShouldEncrypt({ shouldEncrypt: option === 'encrypted' });
-  });
-
   const [isFeeModalOpen, openFeeModal, closeFeeModal] = useFeeModal(explainedFee);
 
-  const renderedSavedAddresses = useMemo(() => {
-    if (!savedAddresses || savedAddresses.length === 0) {
-      return undefined;
-    }
+  const tokensToSelect = useMemo(
+    () => (tokens ?? []).filter((token) => isSelectableToken(token, tokenSlug)),
+    [tokens, tokenSlug],
+  );
 
-    return savedAddresses
-      .filter((item) => {
-        // NFT transfer is only available on the TON blockchain
-        return (!isNftTransfer || item.chain === 'ton') && doesSavedAddressFitSearch(item, toAddress);
-      })
-      .map((item) => renderAddressItem({
-        key: `saved-${item.address}-${item.chain}`,
-        address: item.address,
-        name: item.name,
-        chain: isMultichainAccount ? item.chain : undefined,
-        deleteLabel: lang('Delete'),
-        onClick: handleAddressBookItemClick,
-        onDeleteClick: handleDeleteSavedAddressClick,
-      }));
-  }, [savedAddresses, isNftTransfer, toAddress, isMultichainAccount, lang]);
+  const amountInputProps = useAmountInputState({
+    amount,
+    token: transferToken,
+    baseCurrency,
+    isAmountReadonly: isTransferReadonly,
+    onAmountChange: handleAmountChange,
+    onTokenChange: handleTokenChange,
+  });
 
-  const renderedOtherAccounts = useMemo(() => {
-    if (otherAccountIds.length === 0) return undefined;
-
-    const addressesToBeIgnored = savedAddresses?.map((item) => `${item.chain}:${item.address}`) ?? [];
-    const uniqueAddresses = new Set<string>();
-    const otherAccounts = otherAccountIds
-      .reduce((acc, accountId) => {
-        const account = accounts![accountId];
-
-        Object.keys(account.addressByChain).forEach((currentChain) => {
-          const currentAddress = account.addressByChain[currentChain as ApiChain];
-          const key = `${currentChain}:${currentAddress}`;
-          if (
-            !uniqueAddresses.has(key)
-            // NFT transfer is only available on the TON blockchain
-            && (!isNftTransfer || currentChain === 'ton')
-            && (isMultichainAccount || currentChain === TONCOIN.chain)
-            && !addressesToBeIgnored.includes(`${currentChain}:${currentAddress}`)
-          ) {
-            uniqueAddresses.add(key);
-            acc.push({
-              name: account.title || shortenAddress(currentAddress)!,
-              address: currentAddress,
-              chain: currentChain as ApiChain,
-              isHardware: account.isHardware,
-            });
-          }
-        });
-
-        return acc;
-      }, [] as (SavedAddress & { isHardware?: boolean })[]);
-
-    return otherAccounts.filter(
-      (item) => doesSavedAddressFitSearch(item, toAddress),
-    ).map(({
-      address, name, chain: addressChain, isHardware,
-    }) => renderAddressItem({
-      key: `address-${address}-${addressChain}`,
-      address,
-      name,
-      chain: isMultichainAccount ? addressChain : undefined,
-      isHardware,
-      onClick: handleAddressBookItemClick,
-    }));
-  }, [otherAccountIds, savedAddresses, accounts, isMultichainAccount, isNftTransfer, toAddress]);
-
-  const shouldRenderSuggestions = !!renderedSavedAddresses?.length || !!renderedOtherAccounts?.length;
-
-  function renderAddressBook() {
-    if (!shouldRenderSuggestions) return undefined;
-
-    return (
-      <Menu
-        positionX="right"
-        type="suggestion"
-        noBackdrop
-        bubbleClassName={styles.savedAddressBubble}
-        isOpen={isAddressBookOpen}
-        onClose={closeAddressBook}
-      >
-        {renderedSavedAddresses}
-        {renderedOtherAccounts}
-      </Menu>
-    );
-  }
-
-  function renderBottomRight() {
+  // It is necessary to use useCallback instead of useLastCallback here
+  const renderBottomRight = useCallback((className?: string) => {
     let transitionKey = 0;
     let content: TeactNode = ' ';
 
-    if (amount) {
+    if (isMultisig) {
+      transitionKey = 1;
+      content = <span className={styles.balanceError}>{lang('Multisig sending disabled')}</span>;
+    } else if (amount) {
       if (isAmountGreaterThanBalance) {
-        transitionKey = 1;
-        content = <span className={styles.balanceError}>{lang('Insufficient balance')}</span>;
-      } else if (isInsufficientFee) {
         transitionKey = 2;
+        content = <span className={styles.balanceError}>{lang('Insufficient balance')}</span>;
+      } else if (hasInsufficientFeeError) {
+        transitionKey = 3;
         content = <span className={styles.balanceError}>{lang('Insufficient fee')}</span>;
       }
     }
 
     return (
       <Transition
-        className={buildClassName(styles.amountBottomRight, isStatic && styles.amountBottomRight_static)}
-        slideClassName={styles.amountBottomRight_slide}
+        className={className}
         name="fade"
         activeKey={transitionKey}
       >
         {content}
       </Transition>
     );
-  }
-
-  function renderInputActions() {
-    return (
-      <Transition className={styles.inputButtonTransition} activeKey={toAddress.length ? 0 : 1} name="fade">
-        {toAddress.length ? (
-          <Button
-            isSimple
-            id={INPUT_CLEAR_BUTTON_ID}
-            className={buildClassName(styles.inputButton, styles.inputButtonClear)}
-            onClick={handleAddressClearClick}
-            ariaLabel={lang('Clear')}
-          >
-            <i className="icon-close-filled" aria-hidden />
-          </Button>
-        ) : (
-          <>
-            {isQrScannerSupported && (
-              <Button
-                isSimple
-                className={buildClassName(styles.inputButton, withPasteButton && styles.inputButtonShifted)}
-                onClick={handleQrScanClick}
-                ariaLabel={lang('Scan QR Code')}
-              >
-                <i className="icon-qr-scanner-alt" aria-hidden />
-              </Button>
-            )}
-            {withPasteButton && (
-              <Button isSimple className={styles.inputButton} onClick={handlePasteClick} ariaLabel={lang('Paste')}>
-                <i className="icon-paste" aria-hidden />
-              </Button>
-            )}
-          </>
-        )}
-      </Transition>
-    );
-  }
-
-  function renderBalance() {
-    if (!symbol || isNftTransfer) {
-      return undefined;
-    }
-
-    return (
-      <div className={styles.balanceContainer}>
-        <span className={styles.balance}>
-          {lang('$max_balance', {
-            balance: (
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={handleMaxAmountClick}
-                className={styles.balanceLink}
-              >
-                {maxAmount !== undefined ? formatCurrency(toDecimal(maxAmount, decimals), symbol) : lang('Loading...')}
-              </div>
-            ),
-          })}
-        </span>
-      </div>
-    );
-  }
-
-  function renderTokens() {
-    return (
-      <Dropdown
-        items={dropDownItems}
-        selectedValue={tokenSlug}
-        className={styles.tokenDropdown}
-        itemClassName={styles.tokenDropdownItem}
-        onChange={handleTokenChange}
-      />
-    );
-  }
-
-  function renderCurrencyValue() {
-    return (
-      <span className={buildClassName(styles.amountInCurrency, currencyClassNames)}>
-        ≈&thinsp;{formatCurrency(renderingAmountInCurrency || '0', shortBaseSymbol, undefined, true)}
-      </span>
-    );
-  }
-
-  function renderCommentLabel() {
-    return (
-      <Dropdown
-        items={isEncryptedCommentSupported ? COMMENT_DROPDOWN_ITEMS : [COMMENT_DROPDOWN_ITEMS[0]]}
-        selectedValue={COMMENT_DROPDOWN_ITEMS[shouldEncrypt ? 1 : 0].value}
-        theme="light"
-        disabled={chain === 'tron'}
-        menuPositionHorizontal="left"
-        shouldTranslateOptions
-        className={styles.commentLabel}
-        onChange={handleCommentOptionsChange}
-      />
-    );
-  }
-
-  function renderCommentField() {
-    if (binPayload || stateInit) {
-      return (
-        <>
-          {binPayload && (
-            <>
-              <div className={styles.label}>{lang('Signing Data')}</div>
-              <InteractiveTextField
-                text={binPayload}
-                copyNotification={lang('Data was copied!')}
-                className={styles.addressWidget}
-              />
-            </>
-          )}
-
-          {stateInit && (
-            <>
-              <div className={styles.label}>{lang('Contract Initialization Data')}</div>
-              <InteractiveTextField
-                text={stateInit}
-                copyNotification={lang('Data was copied!')}
-                className={styles.addressWidget}
-              />
-            </>
-          )}
-
-          <div className={styles.error}>
-            {renderText(lang('$signature_warning'))}
-          </div>
-        </>
-      );
-    }
-
-    return (
-      <Input
-        wrapperClassName={styles.commentInputWrapper}
-        className={isStatic ? styles.inputStatic : undefined}
-        label={renderCommentLabel()}
-        placeholder={isCommentRequired ? lang('Required') : lang('Optional')}
-        value={comment}
-        isControlled
-        isMultiline
-        isDisabled={chain === 'tron'}
-        onInput={handleCommentChange}
-        isRequired={isCommentRequired}
-      />
-    );
-  }
-
-  const withButton = isQrScannerSupported || withPasteButton || withAddressClearButton;
+  }, [amount, hasInsufficientFeeError, isAmountGreaterThanBalance, isMultisig, lang]);
 
   function renderButtonText() {
     if (diesel?.status === 'not-authorized') {
       return lang('Authorize %token% Fee', { token: symbol! });
     }
-    if (diesel?.status === 'pending-previous' && isInsufficientFee) {
+    if (diesel?.status === 'pending-previous') {
       return lang('Awaiting Previous Fee');
     }
-    return lang('$send_token_symbol', isNftTransfer ? 'NFT' : symbol || 'TON');
+    return lang('$send_token_symbol', isNftTransfer ? 'NFT' : symbol || UNKNOWN_TOKEN.symbol);
   }
-
-  const shouldIgnoreErrors = isAddressBookOpen && shouldRenderSuggestions;
 
   function renderFee() {
     let terms: FeeTerms | undefined;
     let precision: FeePrecision = 'exact';
 
     if (!isAmountMissing) {
-      const actualFee = isInsufficientFee ? explainedFee.fullFee : explainedFee.realFee;
+      const actualFee = hasInsufficientFeeError ? explainedFee.fullFee : explainedFee.realFee;
       if (actualFee) {
         ({ terms, precision } = actualFee);
       }
@@ -854,84 +492,101 @@ function TransferInitial({
         onSubmit={handleSubmit}
         onPaste={handlePaste}
       >
-        {nfts?.length === 1 && <NftInfo nft={nfts[0]} isStatic={isStatic} />}
-        {Boolean(nfts?.length) && nfts!.length > 1 && <NftChips nfts={nfts!} isStatic={isStatic} />}
-
-        <Input
-          ref={toAddressRef}
-          className={buildClassName(isStatic && styles.inputStatic, withButton && styles.inputWithIcon)}
-          isRequired
-          label={lang('Recipient Address')}
-          placeholder={lang('Wallet address or domain')}
-          value={isAddressFocused ? toAddress : toAddressShort}
-          error={hasToAddressError && !shouldIgnoreErrors ? (lang('Incorrect address') as string) : undefined}
-          onInput={handleAddressInput}
-          onFocus={handleAddressFocus}
-          onBlur={handleAddressBlur}
+        <Transition
+          activeKey={transitionKey}
+          name="semiFade"
+          direction={isStatic && !doesSupportComment ? 'inverse' : undefined}
+          shouldCleanup
+          slideClassName={buildClassName(styles.formSlide, isStatic && styles.formSlide_static, slideClassName)}
         >
-          {renderInputActions()}
-        </Input>
+          {!isStatic && (
+            <Button
+              isRound
+              className={buildClassName(modalStyles.closeButton, styles.closeButton)}
+              ariaLabel={lang('Close')}
+              onClick={handleCloseClick}
+            >
+              <i className={buildClassName(modalStyles.closeIcon, 'icon-close')} aria-hidden />
+            </Button>
+          )}
+          <SentTabs isInsideModal={!isStatic} />
+          {nfts?.length === 1 && <NftInfo nft={nfts[0]} isStatic={isStatic} withMediaViewer />}
+          {Boolean(nfts?.length) && nfts.length > 1 && <NftChips nfts={nfts} isStatic={isStatic} />}
 
-        {shouldUseAddressBook && renderAddressBook()}
+          <AddressInput
+            label={lang('Recipient Address')}
+            value={toAddress}
+            chain={chain}
+            // NFT transfers are available only on the TON blockchain on this moment
+            addressBookChain={chain}
+            savedAddresses={savedAddresses}
+            validateAddress={checkTransferAddress}
+            isStatic={isStatic}
+            isReadonly={isTransferReadonly}
+            withQrScan
+            address={resolvedAddress || toAddress}
+            addressName={toAddressName}
+            onInput={handleAddressInput}
+            onPaste={handleAddressPaste}
+            onClose={cancelTransfer}
+          />
 
-        {renderBalance()}
-        {!isNftTransfer && (
-          <>
-            <RichNumberInput
-              key="amount"
-              id="amount"
+          {!isNftTransfer && (
+            <AmountInput
+              {...amountInputProps}
+              ref={amountInputRef}
+              maxAmount={maxAmount}
+              token={transferToken}
+              allTokens={tokensToSelect}
+              isStatic={isStatic}
               hasError={hasAmountError}
-              value={amount === undefined ? undefined : toDecimal(amount, decimals)}
-              labelText={lang('Amount')}
-              onChange={handleAmountChange}
+              isMultichainAccount={isMultichainAccount}
+              isMaxAmountLoading={maxAmount === undefined}
+              isSensitiveDataHidden={isSensitiveDataHidden}
+              renderBottomRight={renderBottomRight}
               onPressEnter={handleSubmit}
-              decimals={decimals}
-              className={styles.amountInput}
-              inputClassName={isStatic ? styles.inputRichStatic : undefined}
-            >
-              {renderTokens()}
-            </RichNumberInput>
+            />
+          )}
 
-            <div className={styles.amountBottomWrapper}>
-              <div className={styles.amountBottom}>
-                {shouldRenderCurrency && renderCurrencyValue()}
-                {renderBottomRight()}
-              </div>
+          {doesSupportComment && (
+            <CommentSection
+              comment={comment}
+              shouldEncrypt={shouldEncrypt}
+              binPayload={binPayload}
+              stateInit={stateInit}
+              chain={chain}
+              isStatic={isStatic}
+              isReadonly={isTransferReadonly}
+              isCommentRequired={isCommentRequired}
+              isEncryptedCommentSupported={doesSupportCommentEncryption}
+              onCommentChange={handleCommentChange}
+            />
+          )}
+
+          <div className={buildClassName(styles.footer, isStatic && !doesSupportComment && styles.footer_shifted)}>
+            {renderFee()}
+
+            <div className={styles.buttons}>
+              <Button
+                isDisabled={shouldDisableClearButton || isLoading}
+                className={styles.button}
+                onClick={handleClear}
+              >
+                {lang('Clear')}
+              </Button>
+              <Button
+                isPrimary
+                isSubmit
+                isDisabled={!canSubmit}
+                isLoading={isLoading}
+                className={styles.button}
+              >
+                {renderButtonText()}
+              </Button>
             </div>
-          </>
-        )}
-
-        {chain === 'ton' && renderCommentField()}
-
-        <div className={buildClassName(styles.footer, isStatic && chain !== 'ton' && styles.footer_shifted)}>
-          {renderFee()}
-
-          <div className={styles.buttons}>
-            <Button
-              isDisabled={shouldDisableClearButton || isLoading}
-              className={styles.button}
-              onClick={handleClear}
-            >
-              {lang('Clear')}
-            </Button>
-            <Button
-              isPrimary
-              isSubmit
-              isDisabled={!canSubmit}
-              isLoading={isLoading}
-              className={styles.button}
-            >
-              {renderButtonText()}
-            </Button>
           </div>
-        </div>
+        </Transition>
       </form>
-      <DeleteSavedAddressModal
-        isOpen={Boolean(savedAddressForDeletion)}
-        address={savedAddressForDeletion}
-        chain={savedChainForDeletion}
-        onClose={closeDeleteSavedAddressModal}
-      />
       <FeeDetailsModal
         isOpen={isFeeModalOpen}
         onClose={closeFeeModal}
@@ -942,6 +597,39 @@ function TransferInitial({
         excessFeePrecision="approximate"
         token={transferToken}
       />
+      <Modal
+        isOpen={Boolean(scamWarningType)}
+        isCompact
+        title={lang('Warning!')}
+        noBackdropClose
+        onClose={handleScamWarningModalClose}
+      >
+        <div>
+          {getScamWarning(lang, renderedScamWarningType)}
+        </div>
+        <div className={modalStyles.footerButtons}>
+          {isAllowSuspiciousActions ? (
+            <>
+              <Button
+                className={modalStyles.button}
+                onClick={handleScamWarningModalClose}
+              >
+                {lang('Close')}
+              </Button>
+              <Button
+                isPrimary
+                isDestructive
+                className={modalStyles.button}
+                onClick={dismissTransferScamWarning}
+              >
+                {lang('Continue')}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={handleScamWarningModalClose}>{lang('Close')}</Button>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
@@ -951,6 +639,8 @@ export default memo(
     (global): StateProps => {
       const {
         toAddress,
+        resolvedAddress,
+        toAddressName,
         amount,
         comment,
         shouldEncrypt,
@@ -964,19 +654,26 @@ export default memo(
         isMemoRequired,
         diesel,
         stateInit,
+        scamWarningType,
+        isTransferReadonly,
       } = global.currentTransfer;
 
       const isLedger = selectIsHardwareAccount(global);
+      const currentAccountId = selectCurrentAccountId(global)!;
       const accountState = selectCurrentAccountState(global);
-      const baseCurrency = global.settings.baseCurrency;
+      const { baseCurrency = DEFAULT_PRICE_CURRENCY, isSensitiveDataHidden } = global.settings;
+      const isActive = ACTIVE_STATES.has(state);
 
+      const chain = getChainBySlug(tokenSlug);
       return {
         toAddress,
+        resolvedAddress,
+        toAddressName,
         amount,
         comment,
         shouldEncrypt,
-        fee,
-        realFee,
+        nativeFee: fee,
+        realNativeFee: realFee,
         nfts,
         tokenSlug,
         binPayload,
@@ -985,134 +682,60 @@ export default memo(
         savedAddresses: accountState?.savedAddresses,
         isEncryptedCommentSupported: !isLedger && !nfts?.length && !isMemoRequired,
         isMemoRequired,
-        isLoading: isLoading && ACTIVE_STATES.has(state),
+        isActive,
+        isLoading: isLoading && isActive,
+        isComplete: state === TransferState.Complete,
         baseCurrency,
-        currentAccountId: global.currentAccountId,
-        accounts: selectNetworkAccounts(global),
+        nativeTokenBalance: selectCurrentAccountTokenBalance(global, getNativeToken(chain).slug),
         diesel,
         isDieselAuthorizationStarted: accountState?.isDieselAuthorizationStarted,
-        isMultichainAccount: selectIsMultichainAccount(global, global.currentAccountId!),
+        isMultichainAccount: selectIsMultichainAccount(global, currentAccountId),
+        isMultisig: selectIsMultisigWallet(global, currentAccountId, chain),
+        isSensitiveDataHidden,
+        scamWarningType,
+        isAllowSuspiciousActions: selectIsAllowSuspiciousActions(global, currentAccountId),
+        isTransferReadonly,
       };
     },
-    (global, { isStatic }, stickToFirst) => {
-      if (!isStatic) {
-        return stickToFirst(global.currentAccountId);
-      }
-
-      const { nfts, tokenSlug = TONCOIN.slug } = global.currentTransfer;
-      const key = nfts?.length ? `${nfts[0].address}_${nfts.length}` : tokenSlug;
-
-      return stickToFirst(`${global.currentAccountId}_${key}`);
-    },
+    (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)),
   )(TransferInitial),
 );
-
-function trimStringByMaxBytes(str: string, maxBytes: number) {
-  const decoder = new TextDecoder('utf-8');
-  const encoded = new TextEncoder().encode(str);
-
-  return decoder.decode(encoded.slice(0, maxBytes)).replace(/\uFFFD/g, '');
-}
-
-function renderAddressItem({
-  key,
-  address,
-  name,
-  chain,
-  isHardware,
-  deleteLabel,
-  onClick,
-  onDeleteClick,
-}: {
-  key: string;
-  address: string;
-  name?: string;
-  chain?: ApiChain;
-  isHardware?: boolean;
-  deleteLabel?: string;
-  onClick: (address: string) => void;
-  onDeleteClick?: (address: string) => void;
-}) {
-  const isSavedAddress = !!onDeleteClick;
-  const handleDeleteClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    onDeleteClick!(address);
-  };
-
-  return (
-    <div
-      key={key}
-      tabIndex={-1}
-      role="button"
-      onMouseDown={IS_TOUCH_ENV ? undefined : () => onClick(address)}
-      onClick={IS_TOUCH_ENV ? () => onClick(address) : undefined}
-      className={styles.savedAddressItem}
-    >
-      <span className={styles.savedAddressName}>
-        <span className={styles.savedAddressNameText}>
-          {name || shortenAddress(address)}
-        </span>
-        {isHardware && <i className={buildClassName(styles.iconLedger, 'icon-ledger')} aria-hidden />}
-      </span>
-      {isSavedAddress && (
-        <span className={styles.savedAddressDelete}>
-          <span tabIndex={-1} role="button" className={styles.savedAddressDeleteInner} onMouseDown={handleDeleteClick}>
-            {deleteLabel}
-          </span>
-        </span>
-      )}
-      {name && (
-        <span className={styles.savedAddressAddress}>
-          {chain && <i className={buildClassName(styles.chainIcon, `icon-chain-${chain}`)} aria-hidden />}
-          {shortenAddress(address)}
-        </span>
-      )}
-      {isSavedAddress && (
-        <span
-          className={styles.savedAddressDeleteIcon}
-          role="button"
-          tabIndex={-1}
-          onMouseDown={handleDeleteClick}
-          onClick={stopEvent}
-          aria-label={deleteLabel}
-        >
-          <i className="icon-trash" aria-hidden />
-        </span>
-      )}
-    </div>
-  );
-}
-
-function findTokenSlugWithMaxBalance(tokens: UserToken[], chain: ApiChain) {
-  const resultToken = tokens
-    .filter((token) => token.chain === chain)
-    .reduce((maxToken, currentToken) => {
-      const currentBalance = currentToken.priceUsd * Number(currentToken.amount);
-      const maxBalance = maxToken ? maxToken.priceUsd * Number(maxToken.amount) : 0;
-
-      return currentBalance > maxBalance ? currentToken : maxToken;
-    });
-
-  return resultToken?.slug;
-}
-
-function getIsTronAddress(address: string) {
-  return TRON_ADDRESS_REGEX.test(address);
-}
-
-function getChainFromAddress(address: string): ApiChain {
-  if (getIsTronAddress(address)) {
-    return 'tron';
-  }
-
-  return 'ton';
-}
 
 function useFeeModal(explainedFee: ExplainedTransferFee) {
   const isAvailable = explainedFee.realFee?.precision !== 'exact';
   const [isOpen, open, close] = useFlag(false);
   const openIfAvailable = isAvailable ? open : undefined;
   return [isOpen, openIfAvailable, close] as const;
+}
+
+function isSelectableToken(token: UserToken, selectedTokenSlug: string) {
+  return token.type !== 'lp_token'
+    || (token.amount > 0 && !token.isDisabled)
+    || token.slug === selectedTokenSlug;
+}
+
+function getScamWarning(lang: LangFn, scamWarning: ScamWarningType | undefined) {
+  if (!scamWarning) return undefined;
+
+  return lang(scamWarning === ScamWarningType.DomainLike
+    ? '$domain_like_scam_warning'
+    : '$seed_phrase_scam_warning', {
+    help_center_link: (
+      <a
+        href={getHelpCenterUrl(lang.code, scamWarning === ScamWarningType.DomainLike ? 'domainScam' : 'seedScam')}
+        target="_blank"
+        rel="noreferrer"
+      >
+        <b>{lang('$help_center_prepositional')}</b>
+      </a>
+    ),
+  });
+}
+
+// Calculates fee in the token currency to keep abstraction from SDK native fee values
+function getFullFee(terms: FeeTerms<bigint> | undefined, tokenSlug: string): bigint | undefined {
+  if (!terms) return undefined;
+  const tokenPart = terms.token ?? 0n;
+  const nativePart = getIsNativeToken(tokenSlug) ? (terms.native ?? 0n) : 0n;
+  return tokenPart + nativePart;
 }

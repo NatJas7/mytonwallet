@@ -4,6 +4,7 @@ import React, {
 import { getActions, withGlobal } from '../../../global';
 
 import renderText from '../../../global/helpers/renderText';
+import { getDoesUsePinPad } from '../../../util/biometrics';
 import buildClassName from '../../../util/buildClassName';
 import captureKeyboardListeners from '../../../util/captureKeyboardListeners';
 import resolveSlideTransitionName from '../../../util/resolveSlideTransitionName';
@@ -43,8 +44,8 @@ function SignatureModal({
 
   const lang = useLang();
   const [isModalOpen, openModal, closeModal] = useFlag(false);
-  const [currentSlide, setCurrentSlide] = useState<number>(SLIDES.confirm);
-  const [nextKey, setNextKey] = useState<number | undefined>(SLIDES.password);
+  const [currentSlide, setCurrentSlide] = useState<SLIDES>(SLIDES.confirm);
+  const [nextKey, setNextKey] = useState<SLIDES | undefined>(SLIDES.password);
 
   useLayoutEffect(() => {
     if (dataHex) {
@@ -101,12 +102,13 @@ function SignatureModal({
   function renderPasswordForm(isActive: boolean) {
     return (
       <>
-        <ModalHeader title={lang('Enter Password')} onClose={closeModal} />
+        <ModalHeader title={lang(getDoesUsePinPad() ? 'Enter Passcode' : 'Enter Password')} onClose={closeModal} />
         <PasswordForm
           isActive={isActive}
           error={error}
           submitLabel={lang('Sign')}
           cancelLabel={lang('Cancel')}
+          noAutoConfirm
           onSubmit={handlePasswordSubmit}
           onCancel={closeModal}
           onUpdate={clearSignatureError}
@@ -140,8 +142,8 @@ function SignatureModal({
       </>
     );
   }
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: SLIDES) {
     switch (currentKey) {
       case SLIDES.confirm:
         return renderConfirm();

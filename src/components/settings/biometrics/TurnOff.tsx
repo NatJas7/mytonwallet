@@ -4,6 +4,7 @@ import { getActions } from '../../../global';
 import { BiometricsState } from '../../../global/types';
 
 import { ANIMATED_STICKER_HUGE_SIZE_PX } from '../../../config';
+import { getDoesUsePinPad } from '../../../util/biometrics';
 import buildClassName from '../../../util/buildClassName';
 import resolveSlideTransitionName from '../../../util/resolveSlideTransitionName';
 import { ANIMATED_STICKERS_PATHS } from '../../ui/helpers/animatedAssets';
@@ -45,8 +46,7 @@ function TurnOff({
     disableBiometrics({ password, isPasswordNumeric });
   });
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: BiometricsState) {
     switch (currentKey) {
       case BiometricsState.TurnOffBiometricConfirmation:
         return (
@@ -66,7 +66,7 @@ function TurnOff({
               {error ? (
                 <div className={styles.error}>{lang(error)}</div>
               ) : (
-                <div className={styles.step}>{lang('Please verify the operation.')}</div>
+                <div className={styles.step}>{lang('Please verify the action.')}</div>
               )}
 
               <div className={modalStyles.buttons}>
@@ -81,7 +81,7 @@ function TurnOff({
       case BiometricsState.TurnOffCreatePassword:
         return (
           <>
-            <ModalHeader title={lang('Create Password')} onClose={onClose} />
+            <ModalHeader title={lang(getDoesUsePinPad() ? 'Create Passcode' : 'Create Password')} onClose={onClose} />
             <div className={modalStyles.transitionContent}>
               <AnimatedIconWithPreview
                 tgsUrl={ANIMATED_STICKERS_PATHS.guard}

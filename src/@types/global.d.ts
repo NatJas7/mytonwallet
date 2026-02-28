@@ -2,20 +2,28 @@ declare const process: NodeJS.Process;
 
 declare module '*.module.scss';
 
-declare const APP_REVISION: string;
-
 declare namespace React {
   interface HTMLAttributes {
     // Optimization for DOM nodes prepends and inserts
     teactFastList?: boolean;
-    teactExperimentControlled?: boolean;
     // `focusScroll.ts` uses this attribute to decide where to scroll the focused element to in Capacitor environments.
     // 'nearest' - no scroll unless the element is hidden; 'start' - the element will at the top; 'end' - at the bottom.
     'data-focus-scroll-position'?: ScrollLogicalPosition;
   }
 
+  interface InputHTMLAttributes {
+    // The internal implementation of the attribute is a boolean value
+    // https://caniuse.com/mdn-html_global_attributes_autocorrect (see partial support notes)
+    autoCorrect?: boolean;
+  }
+
   // Teact feature
+  // eslint-disable-next-line @typescript-eslint/no-wrapper-object-types, @typescript-eslint/no-empty-object-type
   interface CSSProperties extends String {}
+
+  interface ClassAttributes<T> extends RefAttributes<T> {
+    ref?: ((instance: T | undefined) => void) | React.RefObject<T | undefined> | undefined; // Teact ref
+  }
 
   interface Attributes {
     // Optimization for DOM nodes reordering. Requires `teactFastList` for parent
@@ -44,9 +52,12 @@ type AnyFunction = (...args: any[]) => any;
 type AnyAsyncFunction = (...args: any[]) => Promise<any>;
 type AnyToVoidFunction = (...args: any[]) => void;
 type NoneToVoidFunction = () => void;
+type MaybePromise<T> = Promise<T> | T;
 
 type ValueOf<T> = T[keyof T];
 type Entries<T> = [keyof T, ValueOf<T>][];
+type EnsurePromise<T> = T extends Promise<any> ? T : Promise<T>;
+type Override<T, U> = T extends any ? Omit<T, keyof U> & U : never;
 
 type EmojiCategory = {
   id: string;
@@ -69,22 +80,22 @@ type AllEmojis = Record<string, Emoji | EmojiWithSkins>;
 // Declare supported for import formats as modules
 declare module '*.webp';
 declare module '*.png';
+declare module '*.jpg';
+declare module '*.avif';
 declare module '*.svg';
 declare module '*.tgs';
 declare module '*.wasm';
 declare module '*.mp3';
+declare module '*.mp4';
 
 declare module '*.txt' {
   const content: string;
   export default content;
 }
 
-declare module 'pako/dist/pako_inflate' {
-  function inflate(...args: any[]): string;
-}
-
 declare module 'opus-recorder' {
   export interface IOpusRecorder extends Omit<MediaRecorder, 'start' | 'ondataavailable'> {
+    // eslint-disable-next-line @typescript-eslint/no-misused-new
     new(options: AnyLiteral): IOpusRecorder;
 
     start(stream?: MediaStreamAudioSourceNode): void;
@@ -150,7 +161,7 @@ type Falsy = false | 0 | '' | null | undefined;
 interface BooleanConstructor {
   new<T>(value: T | Falsy): value is T;
   <T>(value: T | Falsy): value is T;
-  readonly prototype: Boolean;
+  readonly prototype: boolean;
 }
 
 interface Array<T> {
@@ -174,7 +185,7 @@ interface FileSystemSyncAccessHandle {
 
   truncate: (size: number) => Promise<undefined>;
   getSize: () => Promise<number>;
-  flush: () => Promise<undefined> ;
+  flush: () => Promise<undefined>;
   close: () => Promise<undefined>;
 }
 

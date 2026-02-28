@@ -1,32 +1,38 @@
 import type {
-  Account, AccountSettings, AccountState, NotificationType,
+  Account, AccountSettings, AccountState, ToastType,
 } from '../../types';
-import { ApiCommonError, ApiTransactionDraftError, ApiTransactionError } from '../../../api/types';
 import { AppState } from '../../types';
 
 import {
-  DEFAULT_SWAP_FISRT_TOKEN_SLUG,
+  DEFAULT_SWAP_FIRST_TOKEN_SLUG,
   DEFAULT_SWAP_SECOND_TOKEN_SLUG,
   DEFAULT_TRANSFER_TOKEN_SLUG,
   IS_CAPACITOR,
+  IS_EXPLORER,
   IS_EXTENSION,
+  IS_TELEGRAM_APP,
   TONCOIN,
 } from '../../../config';
 import { requestMutation } from '../../../lib/fasterdom/fasterdom';
 import { parseAccountId } from '../../../util/account';
 import authApi from '../../../util/authApi';
 import { initCapacitorWithGlobal } from '../../../util/capacitor';
-import { processDeeplinkAfterSignIn } from '../../../util/deeplink';
+import {
+  getDeeplinkFromLocation,
+  processDeeplink,
+  processDeeplinkAfterInit,
+  processDeeplinkAfterSignIn,
+} from '../../../util/deeplink';
 import { omit } from '../../../util/iteratees';
-import { clearPreviousLangpacks, setLanguage } from '../../../util/langProvider';
-import { callActionInMain } from '../../../util/multitab';
+import { clearPreviousLangpacks, getTranslation, setLanguage } from '../../../util/langProvider';
 import { initializeSounds } from '../../../util/notificationSound';
 import switchAnimationLevel from '../../../util/switchAnimationLevel';
 import switchTheme, { setStatusBarStyle } from '../../../util/switchTheme';
+import { initTelegramWithGlobal } from '../../../util/telegram';
 import {
+  getIsMobileTelegramApp,
   IS_ANDROID,
   IS_ANDROID_APP,
-  IS_DELEGATED_BOTTOM_SHEET,
   IS_ELECTRON,
   IS_IOS,
   IS_LINUX,
@@ -37,13 +43,15 @@ import {
   setScrollbarWidthProperty,
 } from '../../../util/windowEnvironment';
 import { callApi } from '../../../api';
+import { errorCodeToMessage } from '../../helpers/errors';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import { updateCurrentAccountId, updateCurrentAccountState } from '../../reducers';
 import {
+  selectCurrentAccountId,
   selectCurrentNetwork,
   selectNetworkAccounts,
   selectNetworkAccountsMemoized,
-  selectNewestTxTimestamps,
+  selectNewestActivityTimestamps,
   selectSwapTokens,
 } from '../../selectors';
 
@@ -54,9 +62,9 @@ addActionHandler('init', (_, actions) => {
     const { documentElement } = document;
 
     if (IS_IOS) {
-      documentElement.classList.add('is-ios');
+      documentElement.classList.add('is-ios', 'is-mobile');
     } else if (IS_ANDROID) {
-      documentElement.classList.add('is-android');
+      documentElement.classList.add('is-android', 'is-mobile');
       if (IS_ANDROID_APP) {
         documentElement.classList.add('is-android-app');
       }
@@ -79,8 +87,11 @@ addActionHandler('init', (_, actions) => {
     if (IS_ELECTRON) {
       documentElement.classList.add('is-electron');
     }
-    if (IS_DELEGATED_BOTTOM_SHEET) {
-      documentElement.classList.add('is-native-bottom-sheet');
+    if (IS_TELEGRAM_APP) {
+      documentElement.classList.add('is-telegram-app');
+    }
+    if (getIsMobileTelegramApp()) {
+      documentElement.classList.add('is-mobile-telegram-app');
     }
 
     setScrollbarWidthProperty();
@@ -89,7 +100,7 @@ addActionHandler('init', (_, actions) => {
   });
 });
 
-addActionHandler('afterInit', (global) => {
+addActionHandler('afterInit', (global, actions) => {
   const {
     theme, animationLevel, langCode, authConfig,
   } = global.settings;
@@ -101,11 +112,28 @@ addActionHandler('afterInit', (global) => {
   });
   void setLanguage(langCode);
   clearPreviousLangpacks();
+  processDeeplinkAfterInit();
 
   if (IS_CAPACITOR) {
     void initCapacitorWithGlobal(authConfig);
   } else {
+    if (IS_TELEGRAM_APP) {
+      initTelegramWithGlobal(global);
+    }
+
     document.addEventListener('click', initializeSounds, { once: true });
+  }
+
+  if (!IS_EXPLORER) return;
+
+  void callApi('clearStorageForExplorerMode');
+
+  const deeplinkUrl = getDeeplinkFromLocation();
+
+  if (deeplinkUrl) {
+    void processDeeplink(deeplinkUrl);
+  } else {
+    actions.showToast({ message: getTranslation('$explorer_mode_warning') });
   }
 });
 
@@ -120,27 +148,24 @@ addActionHandler('afterSignIn', (global, actions) => {
 });
 
 addActionHandler('afterSignOut', (global, actions, payload) => {
-  if (payload?.isFromAllAccounts) {
-    if (IS_CAPACITOR && global.settings.authConfig?.kind === 'native-biometrics') {
-      authApi.removeNativeBiometrics();
+  if (payload?.shouldReset) {
+    if (global.settings.authConfig?.kind === 'native-biometrics') {
+      void authApi.removeNativeBiometrics();
     }
+    actions.setInMemoryPassword({ password: undefined, force: true });
 
     actions.resetApiSettings({ areAllDisabled: true });
   }
-
-  actions.clearSwapPairsCache();
 });
 
 addActionHandler('showDialog', (global, actions, payload) => {
-  const { message, title } = payload;
-
   const newDialogs = [...global.dialogs];
-  const existingMessageIndex = newDialogs.findIndex((dialog) => dialog.message === message);
+  const existingMessageIndex = newDialogs.findIndex((dialog) => dialog.message === payload.message);
   if (existingMessageIndex !== -1) {
     newDialogs.splice(existingMessageIndex, 1);
   }
 
-  newDialogs.push({ message, title });
+  newDialogs.push(payload);
 
   return {
     ...global,
@@ -173,26 +198,29 @@ addActionHandler('selectToken', (global, actions, { slug } = {}) => {
       actions.changeTransferToken({ tokenSlug: slug });
     }
   } else {
-    const currentActivityToken = global.byAccountId[global.currentAccountId!].currentTokenSlug;
+    const currentAccountId = selectCurrentAccountId(global);
+    if (!currentAccountId) return;
 
-    const isDefaultFirstTokenOutSwap = global.currentSwap.tokenOutSlug === DEFAULT_SWAP_FISRT_TOKEN_SLUG
-    && global.currentSwap.tokenInSlug === DEFAULT_SWAP_SECOND_TOKEN_SLUG;
+    const currentActivityToken = global.byAccountId[currentAccountId].currentTokenSlug;
+
+    const isDefaultFirstTokenOutSwap = global.currentSwap.tokenOutSlug === DEFAULT_SWAP_FIRST_TOKEN_SLUG
+      && global.currentSwap.tokenInSlug === DEFAULT_SWAP_SECOND_TOKEN_SLUG;
 
     const shouldResetSwap = global.currentSwap.tokenOutSlug === currentActivityToken
-    && (
-      (
-        global.currentSwap.tokenInSlug === DEFAULT_SWAP_FISRT_TOKEN_SLUG
-        && global.currentSwap.tokenOutSlug !== DEFAULT_SWAP_SECOND_TOKEN_SLUG
-      )
-    || isDefaultFirstTokenOutSwap
-    );
+      && (
+        (
+          global.currentSwap.tokenInSlug === DEFAULT_SWAP_FIRST_TOKEN_SLUG
+          && global.currentSwap.tokenOutSlug !== DEFAULT_SWAP_SECOND_TOKEN_SLUG
+        )
+        || isDefaultFirstTokenOutSwap
+      );
 
     if (shouldResetSwap) {
       actions.setDefaultSwapParams({ tokenInSlug: undefined, tokenOutSlug: undefined, withResetAmount: true });
     }
 
     const shouldResetTransfer = (global.currentTransfer.tokenSlug === currentActivityToken
-    && global.currentTransfer.tokenSlug !== DEFAULT_TRANSFER_TOKEN_SLUG)
+      && global.currentTransfer.tokenSlug !== DEFAULT_TRANSFER_TOKEN_SLUG)
     && !global.currentTransfer.nfts?.length;
 
     if (shouldResetTransfer) {
@@ -204,125 +232,38 @@ addActionHandler('selectToken', (global, actions, { slug } = {}) => {
 });
 
 addActionHandler('showError', (global, actions, { error } = {}) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('showError', { error });
-    return;
-  }
-
-  switch (error) {
-    case ApiTransactionDraftError.InvalidAmount:
-      actions.showDialog({ message: 'Invalid amount' });
-      break;
-
-    case ApiTransactionDraftError.InvalidToAddress:
-      actions.showDialog({ message: 'Invalid address' });
-      break;
-
-    case ApiTransactionDraftError.StateInitWithoutBin:
-      actions.showDialog({ message: '$state_init_requires_bin' });
-      break;
-
-    case ApiTransactionDraftError.InvalidStateInit:
-      actions.showDialog({ message: '$state_init_invalid' });
-      break;
-
-    case ApiTransactionDraftError.InsufficientBalance:
-      actions.showDialog({ message: 'Insufficient balance' });
-      break;
-
-    case ApiTransactionDraftError.DomainNotResolved:
-      actions.showDialog({ message: 'Domain is not connected to a wallet' });
-      break;
-
-    case ApiTransactionDraftError.WalletNotInitialized:
-      actions.showDialog({
-        message: 'Encryption is not possible. The recipient is not a wallet or has no outgoing transactions.',
-      });
-      break;
-
-    case ApiTransactionDraftError.InvalidAddressFormat:
-      actions.showDialog({
-        message: 'Invalid address format. Only URL Safe Base64 format is allowed.',
-      });
-      break;
-
-    case ApiTransactionError.PartialTransactionFailure:
-      actions.showDialog({ message: 'Not all transactions were sent successfully' });
-      break;
-
-    case ApiTransactionError.IncorrectDeviceTime:
-      actions.showDialog({ message: 'The time on your device is incorrect, sync it and try again' });
-      break;
-
-    case ApiTransactionError.UnsuccesfulTransfer:
-      actions.showDialog({ message: 'Transfer was unsuccessful. Try again later.' });
-      break;
-
-    case ApiTransactionDraftError.InactiveContract:
-      actions.showDialog({
-        message: '$transfer_inactive_contract_error',
-      });
-      break;
-
-    case ApiTransactionError.NotSupportedHardwareOperation:
-      actions.showDialog({
-        message: '$ledger_not_supported_operation',
-      });
-      break;
-
-    case ApiCommonError.ServerError:
-      actions.showDialog({
-        message: window.navigator.onLine
-          ? 'An error on the server side. Please try again.'
-          : 'No internet connection. Please check your connection and try again.',
-      });
-      break;
-
-    case ApiCommonError.DebugError:
-      actions.showDialog({ message: 'Unexpected error. Please let the support know.' });
-      break;
-
-    case ApiCommonError.Unexpected:
-    case undefined:
-      actions.showDialog({ message: 'Unexpected' });
-      break;
-
-    default:
-      actions.showDialog({ message: error });
-      break;
-  }
+  actions.showDialog({
+    message: error === undefined || typeof error === 'string'
+      ? errorCodeToMessage(error)
+      : error,
+  });
 });
 
-addActionHandler('showNotification', (global, actions, payload) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('showNotification', payload);
-    return undefined;
-  }
-
+addActionHandler('showToast', (global, actions, payload) => {
   const { message, icon } = payload;
 
-  const newNotifications: NotificationType[] = [...global.notifications];
-  const existingNotificationIndex = newNotifications.findIndex((n) => n.message === message);
-  if (existingNotificationIndex !== -1) {
-    newNotifications.splice(existingNotificationIndex, 1);
+  const newToasts: ToastType[] = [...global.toasts];
+  const existingToastIndex = newToasts.findIndex((n) => n.message === message);
+  if (existingToastIndex !== -1) {
+    newToasts.splice(existingToastIndex, 1);
   }
 
-  newNotifications.push({ message, icon });
+  newToasts.push({ message, icon });
 
   return {
     ...global,
-    notifications: newNotifications,
+    toasts: newToasts,
   };
 });
 
-addActionHandler('dismissNotification', (global) => {
-  const newNotifications = [...global.notifications];
+addActionHandler('dismissToast', (global) => {
+  const newToasts = [...global.toasts];
 
-  newNotifications.pop();
+  newToasts.pop();
 
   return {
     ...global,
-    notifications: newNotifications,
+    toasts: newToasts,
   };
 });
 
@@ -338,21 +279,9 @@ addActionHandler('toggleTonProxy', (global, actions, { isEnabled }) => {
   };
 });
 
-addActionHandler('toggleTonMagic', (global, actions, { isEnabled }) => {
-  void callApi('doMagic', isEnabled);
-
-  return {
-    ...global,
-    settings: {
-      ...global.settings,
-      isTonMagicEnabled: isEnabled,
-    },
-  };
-});
-
 addActionHandler('toggleDeeplinkHook', (global, actions, { isEnabled }) => {
   if (IS_ELECTRON) {
-    window.electron?.toggleDeeplinkHandler(isEnabled);
+    void window.electron?.toggleDeeplinkHandler(isEnabled);
   } else {
     void callApi('doDeeplinkHook', isEnabled);
   }
@@ -367,18 +296,20 @@ addActionHandler('toggleDeeplinkHook', (global, actions, { isEnabled }) => {
 });
 
 addActionHandler('signOut', async (global, actions, payload) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) {
-    callActionInMain('signOut', payload);
-  }
-
-  const { isFromAllAccounts } = payload || {};
+  const { level, accountId } = payload;
 
   const network = selectCurrentNetwork(global);
   const accounts = selectNetworkAccounts(global)!;
   const accountIds = Object.keys(accounts);
+  const isFromAllAccounts = level !== 'account';
 
   const otherNetwork = network === 'mainnet' ? 'testnet' : 'mainnet';
-  const otherNetworkAccountIds = Object.keys(selectNetworkAccountsMemoized(otherNetwork, global.accounts?.byId)!);
+  let otherNetworkAccountIds = Object.keys(selectNetworkAccountsMemoized(otherNetwork, global.accounts?.byId)!);
+
+  if (level === 'all' && otherNetworkAccountIds.length > 0) {
+    await callApi('removeNetworkAccounts', otherNetwork);
+    otherNetworkAccountIds = [];
+  }
 
   if (isFromAllAccounts || accountIds.length === 1) {
     actions.deleteAllNotificationAccounts({ accountIds });
@@ -431,27 +362,40 @@ addActionHandler('signOut', async (global, actions, payload) => {
     } else {
       await callApi('resetAccounts');
 
-      actions.afterSignOut({ isFromAllAccounts: true });
+      actions.afterSignOut({ shouldReset: true });
       actions.init();
     }
   } else {
-    const prevAccountId = global.currentAccountId!;
-    const nextAccountId = accountIds.find((id) => id !== prevAccountId)!;
-    const nextNewestTxTimestamps = selectNewestTxTimestamps(global, nextAccountId);
+    const currentAccountId = selectCurrentAccountId(global)!;
+    const removingAccountId = accountId ?? currentAccountId;
+    const shouldSwitchAccount = removingAccountId === currentAccountId;
+    const isRemovingTemporaryAccount = removingAccountId === global.currentTemporaryViewAccountId;
+    // If removing temporary account, we should switch to previous account (aka `global.currentAccountId`), not to the first of the `accountIds`.
+    const nextAccountId = shouldSwitchAccount
+      ? (isRemovingTemporaryAccount && global.currentAccountId
+        ? global.currentAccountId
+        : accountIds.find((id) => id !== removingAccountId)!)
+      : undefined;
+    const nextNewestActivityTimestamps = nextAccountId
+      ? selectNewestActivityTimestamps(global, nextAccountId)
+      : undefined;
 
-    await callApi('removeAccount', prevAccountId, nextAccountId, nextNewestTxTimestamps);
-    actions.deleteNotificationAccount({ accountId: prevAccountId });
+    await callApi('removeAccount', removingAccountId, nextAccountId, nextNewestActivityTimestamps);
+    actions.deleteNotificationAccount({ accountId: removingAccountId });
 
     global = getGlobal();
 
-    const accountsById = omit(global.accounts!.byId, [prevAccountId]);
-    const byAccountId = omit(global.byAccountId, [prevAccountId]);
-    const settingsByAccountId = omit(global.settings.byAccountId, [prevAccountId]);
+    const accountsById = omit(global.accounts!.byId, [removingAccountId]);
+    const byAccountId = omit(global.byAccountId, [removingAccountId]);
+    const settingsByAccountId = omit(global.settings.byAccountId, [removingAccountId]);
 
-    global = updateCurrentAccountId(global, nextAccountId);
+    if (nextAccountId !== undefined) {
+      global = updateCurrentAccountId(global, nextAccountId);
+    }
 
     global = {
       ...global,
+      currentTemporaryViewAccountId: undefined,
       accounts: {
         ...global.accounts!,
         byId: accountsById,

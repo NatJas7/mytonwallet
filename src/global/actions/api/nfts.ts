@@ -1,16 +1,29 @@
-import {
-  BURN_ADDRESS, NOTCOIN_EXCHANGERS, NOTCOIN_VOUCHERS_ADDRESS, TONCOIN,
-} from '../../../config';
-import { findDifference } from '../../../util/iteratees';
-import { IS_DELEGATED_BOTTOM_SHEET, IS_DELEGATING_BOTTOM_SHEET } from '../../../util/windowEnvironment';
+import { DEFAULT_CHAIN } from '../../../config';
+import { getChainConfig } from '../../../util/chain';
+import { findDifference, omit } from '../../../util/iteratees';
 import { callApi } from '../../../api';
-import { addActionHandler, getGlobal, setGlobal } from '../../index';
-import { updateAccountSettings, updateCurrentAccountState } from '../../reducers';
-import { selectCurrentAccountState } from '../../selectors';
+import { addActionHandler, setGlobal } from '../../index';
+import { updateAccountState, updateCurrentAccountState } from '../../reducers';
+import { selectAccountState, selectCurrentAccountId, selectCurrentAccountState } from '../../selectors';
 
 import { getIsPortrait } from '../../../hooks/useDeviceScreen';
 
-const NBS_INIT_TIMEOUT = IS_DELEGATING_BOTTOM_SHEET ? 100 : 0;
+addActionHandler('fetchNftsFromCollection', (global, actions, { collection }) => {
+  actions.clearNftCollectionLoading({ collection });
+  void callApi('fetchNftsFromCollection', selectCurrentAccountId(global)!, collection);
+});
+
+addActionHandler('clearNftCollectionLoading', (global, actions, { collection }) => {
+  const currentAccountId = selectCurrentAccountId(global)!;
+  const accountState = selectAccountState(global, currentAccountId);
+  global = updateAccountState(global, currentAccountId, {
+    nfts: {
+      ...accountState!.nfts,
+      isLoadedByAddress: omit(accountState!.nfts?.isLoadedByAddress ?? {}, [collection.address]),
+    },
+  });
+  setGlobal(global);
+});
 
 addActionHandler('burnNfts', (global, actions, { nfts }) => {
   actions.startTransfer({
@@ -18,16 +31,17 @@ addActionHandler('burnNfts', (global, actions, { nfts }) => {
     nfts,
   });
 
-  const isNotcoinVouchers = nfts.some((n) => n.collectionAddress === NOTCOIN_VOUCHERS_ADDRESS);
+  const chain = nfts?.[0].chain || DEFAULT_CHAIN;
 
-  setTimeout(() => {
-    actions.submitTransferInitial({
-      tokenSlug: TONCOIN.slug,
-      amount: 0n,
-      toAddress: isNotcoinVouchers ? NOTCOIN_EXCHANGERS[0] : BURN_ADDRESS,
-      nfts,
-    });
-  }, NBS_INIT_TIMEOUT);
+  const NFT_BURN_PLACEHOLDER_ADDRESS = 'placeholder_address';
+
+  actions.submitTransferInitial({
+    tokenSlug: getChainConfig(chain).nativeToken.slug,
+    amount: 0n,
+    toAddress: NFT_BURN_PLACEHOLDER_ADDRESS, // Define real inside action
+    nfts,
+    isNftBurn: true,
+  });
 });
 
 addActionHandler('addNftsToBlacklist', (global, actions, { addresses: nftAddresses }) => {
@@ -93,46 +107,16 @@ addActionHandler('closeHideNftModal', (global) => {
   });
 });
 
-addActionHandler('checkCardNftOwnership', (global) => {
-  if (IS_DELEGATED_BOTTOM_SHEET) return;
+addActionHandler('openNftAttributesModal', (global, actions, { nft, withOwner }) => {
+  return updateCurrentAccountState(global, {
+    currentNftForAttributes: nft,
+    shouldShowOwnerInNftAttributes: withOwner,
+  });
+});
 
-  const { byAccountId } = global.settings;
-
-  Object.entries(byAccountId).forEach(async ([accountId, settings]) => {
-    const cardBackgroundNftAddress = settings.cardBackgroundNft?.address;
-    const accentColorNftAddress = settings.accentColorNft?.address;
-
-    if (!cardBackgroundNftAddress && !accentColorNftAddress) return;
-
-    const promises = [
-      cardBackgroundNftAddress
-        ? callApi('checkNftOwnership', accountId, cardBackgroundNftAddress)
-        : undefined,
-      accentColorNftAddress && accentColorNftAddress !== cardBackgroundNftAddress
-        ? callApi('checkNftOwnership', accountId, accentColorNftAddress)
-        : undefined,
-    ];
-
-    const [isCardBackgroundNftOwned, isAccentColorNftOwned] = await Promise.all(promises);
-
-    let newGlobal = getGlobal();
-
-    if (cardBackgroundNftAddress && isCardBackgroundNftOwned === false) {
-      newGlobal = updateAccountSettings(newGlobal, accountId, {
-        cardBackgroundNft: undefined,
-      });
-    }
-
-    if (accentColorNftAddress && (
-      (accentColorNftAddress === cardBackgroundNftAddress && isCardBackgroundNftOwned === false)
-      || (accentColorNftAddress !== cardBackgroundNftAddress && isAccentColorNftOwned === false)
-    )) {
-      newGlobal = updateAccountSettings(newGlobal, accountId, {
-        accentColorNft: undefined,
-        accentColorIndex: undefined,
-      });
-    }
-
-    setGlobal(newGlobal);
+addActionHandler('closeNftAttributesModal', (global) => {
+  return updateCurrentAccountState(global, {
+    currentNftForAttributes: undefined,
+    shouldShowOwnerInNftAttributes: undefined,
   });
 });

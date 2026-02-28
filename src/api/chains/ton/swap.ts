@@ -1,65 +1,83 @@
-import type { SwapHistoryRange } from '../../methods';
 import type {
-  ApiActivity,
+  ApiAccountWithChain,
   ApiNetwork,
   ApiSwapBuildRequest,
-  ApiSwapHistoryItem,
   ApiTokensTransferPayload,
-  ApiTransaction,
-  ApiTransactionActivity,
 } from '../../types';
 import type { TonTransferParams } from './types';
 
 import { DIESEL_ADDRESS, SWAP_FEE_ADDRESS, TONCOIN } from '../../../config';
-import { parseAccountId } from '../../../util/account';
-import { assert } from '../../../util/assert';
+import { assert as originalAssert } from '../../../util/assert';
 import { fromDecimal } from '../../../util/decimals';
-import { logDebugError } from '../../../util/logs';
-import { pause } from '../../../util/schedulers';
-import { parseTxId } from './util';
-import { parsePayloadBase64 } from './util/metadata';
+import { getMaxMessagesInTransaction, isTokenTransferPayload } from '../../../util/ton/transfer';
+import { parsePayloadSlice } from './util/metadata';
 import { resolveTokenWalletAddress, toBase64Address } from './util/tonCore';
-import { fetchStoredTonWallet } from '../../common/accounts';
-import { swapGetHistory, swapGetHistoryByRanges, swapItemToActivity } from '../../common/swap';
-import { getTokenByAddress, getTokenBySlug } from '../../common/tokens';
+import { getTokenByAddress } from '../../common/tokens';
 import { getContractInfo } from './wallet';
 
-type LtRange = [number, number];
+async function getContractInfos(network: ApiNetwork, addresses: string[]) {
+  // Can't be done via Toncenter `/api/v3/accountStates` endpoint because it serializes code cells
+  // differently, resulting in `codeHashOld` mismatch
+  const result: Record<string, Awaited<ReturnType<typeof getContractInfo>>> = {};
+  const infos = await Promise.all(addresses.map((address) => getContractInfo(network, address)));
+  for (let i = 0; i < addresses.length; i++) {
+    result[addresses[i]] = infos[i];
+  }
+  return result;
+}
 
 const FEE_ADDRESSES = [SWAP_FEE_ADDRESS, DIESEL_ADDRESS];
-const MEGATON_WTON_MINTER = 'EQCajaUU1XXSAjTD-xOV7pE49fGtg4q8kF3ELCOJtGvQFQ2C';
-const MAX_NETWORK_FEE = 1000000000n; // 1 TON
-
-const SWAP_MAX_LT = 50;
-const SWAP_WAITING_TIME = 5 * 60 * 1_000; // 5 min
-const SWAP_WAITING_PAUSE = 1_000; // 1 sec
-const MAX_OLD_SWAP_ID = 41276;
+const MAX_NETWORK_FEE = 3600000000n; // 3.6 TON = 0.3 TON * 3 * 4 - when 4 splits with 3 hops per split on Stonfi
+const MAX_SPLITS = 4; // Backend configuration
 
 export async function validateDexSwapTransfers(
   network: ApiNetwork,
   address: string,
   request: ApiSwapBuildRequest,
   transfers: TonTransferParams[],
+  account: ApiAccountWithChain<'ton'>,
 ) {
-  assert(transfers.length <= 2);
+  const feeTransfer = (
+    toBase64Address(transfers.at(-1)?.toAddress ?? '', false) === SWAP_FEE_ADDRESS
+  ) ? transfers.at(-1)! : undefined;
+  const mainTransfers = feeTransfer ? transfers.slice(0, -1) : transfers;
+  const maxMessages = getMaxMessagesInTransaction(account);
+  const maxSplits = Math.min(maxMessages - (feeTransfer ? 1 : 0), MAX_SPLITS);
 
-  const [mainTransfer, feeTransfer] = transfers;
+  const assert = (condition: boolean, message: string) => {
+    originalAssert(condition, message, {
+      network, address, request, transfers, maxMessages, maxSplits,
+    });
+  };
+
+  assert(mainTransfers.length <= maxSplits, 'Too many main transfers');
 
   if (request.from === TONCOIN.symbol) {
-    const maxAmount = fromDecimal(request.fromAmount) + MAX_NETWORK_FEE;
-    const { isSwapAllowed, codeHash } = await getContractInfo(network, mainTransfer.toAddress);
+    const maxAmount = fromDecimal(request.fromAmount) + fromDecimal(request.ourFee) + MAX_NETWORK_FEE;
+    let sumAmount = 0n;
 
-    assert(!!isSwapAllowed, `Not allowed swap contract: ${codeHash} ${mainTransfer.toAddress}`);
-    assert(mainTransfer.amount <= maxAmount);
+    const contractInfos = await getContractInfos(network, mainTransfers.map((transfer) => transfer.toAddress));
+
+    for (let i = 0; i < mainTransfers.length; i++) {
+      const mainTransfer = mainTransfers[i];
+      sumAmount += mainTransfer.amount;
+      const { isSwapAllowed, codeHash } = contractInfos[mainTransfer.toAddress];
+      assert(
+        !!isSwapAllowed,
+        `Main transfer ${i + 1}/${mainTransfers.length} is not to a swap contract: codeHash=${codeHash}`,
+      );
+    }
+
+    assert(sumAmount <= maxAmount, 'Main transfers amount is too big');
 
     if (feeTransfer) {
-      assert(feeTransfer.amount <= mainTransfer.amount);
-      assert(feeTransfer.amount + mainTransfer.amount < maxAmount);
-      assert(FEE_ADDRESSES.includes(toBase64Address(feeTransfer.toAddress, false)));
+      assert(feeTransfer.amount <= sumAmount, 'Fee transfer amount is bigger than main transfers amount');
+      assert(feeTransfer.amount + sumAmount < maxAmount, 'Total amount is too big');
+      assert(FEE_ADDRESSES.includes(toBase64Address(feeTransfer.toAddress, false)), 'Unexpected fee transfer address');
     }
   } else {
     const token = getTokenByAddress(request.from)!;
-    assert(!!token);
+    assert(!!token, 'Unknown "from" token');
 
     const maxAmount = fromDecimal(request.fromAmount, token.decimals)
       + fromDecimal(request.ourFee ?? 0, token.decimals)
@@ -67,195 +85,56 @@ export async function validateDexSwapTransfers(
     const maxTonAmount = MAX_NETWORK_FEE;
 
     const walletAddress = await resolveTokenWalletAddress(network, address, token.tokenAddress!);
-    const parsedPayload = await parsePayloadBase64(network, mainTransfer.toAddress, mainTransfer.payload as string);
+    let sumTokenAmount = 0n;
+    let sumTonAmount = 0n;
 
-    let destination: string;
-    let tokenAmount = 0n;
+    const parsedPayloads = await Promise.all(mainTransfers.map(
+      async (transfer) => transfer.payload
+        && parsePayloadSlice(network, transfer.toAddress, transfer.payload.beginParse()),
+    ));
+    const contractInfos = await getContractInfos(
+      network,
+      parsedPayloads.filter(isTokenTransferPayload).map((payload) => payload.destination),
+    );
+    for (let i = 0; i < mainTransfers.length; i++) {
+      const mainTransfer = mainTransfers[i];
+      const parsedPayload = parsedPayloads[i];
+      assert(
+        mainTransfer.toAddress === walletAddress,
+        `Main transfer ${i + 1}/${mainTransfers.length} address is not the token wallet address`,
+      );
+      assert(
+        isTokenTransferPayload(parsedPayload),
+        `Main transfer ${i + 1}/${mainTransfers.length} payload is not a token transfer`,
+      );
 
-    if (mainTransfer.toAddress === MEGATON_WTON_MINTER) {
-      destination = mainTransfer.toAddress;
-      assert(mainTransfer.toAddress === token.tokenAddress);
-    } else {
-      assert(mainTransfer.toAddress === walletAddress);
-      assert(['tokens:transfer', 'tokens:transfer-non-standard'].includes(parsedPayload.type));
+      const { amount: tokenAmount, destination } = parsedPayload as ApiTokensTransferPayload;
+      sumTokenAmount += tokenAmount;
+      sumTonAmount += mainTransfer.amount;
 
-      ({ amount: tokenAmount, destination } = parsedPayload as ApiTokensTransferPayload);
-      assert(tokenAmount <= maxAmount);
+      const { isSwapAllowed, codeHash } = contractInfos[destination];
+
+      assert(
+        isSwapAllowed || FEE_ADDRESSES.includes(toBase64Address(destination, false)),
+        `Main transfer ${i + 1}/${mainTransfers.length} destination is not a swap smart contract: `
+        + `${destination}, codeHash=${codeHash}`,
+      );
     }
-
-    assert(mainTransfer.amount < maxTonAmount);
-
-    const { isSwapAllowed } = await getContractInfo(network, destination);
-
-    assert(!!isSwapAllowed);
+    assert(sumTokenAmount <= maxAmount, 'Main transfers token amount is too big');
+    assert(sumTonAmount <= maxTonAmount, 'Main transfers TON amount is too big');
 
     if (feeTransfer) {
-      const feePayload = await parsePayloadBase64(network, feeTransfer.toAddress, feeTransfer.payload as string);
+      const feePayload = feeTransfer.payload
+        && await parsePayloadSlice(network, feeTransfer.toAddress, feeTransfer.payload.beginParse());
 
-      assert(feeTransfer.amount + mainTransfer.amount < maxTonAmount);
-      assert(feeTransfer.toAddress === walletAddress);
-      assert(['tokens:transfer', 'tokens:transfer-non-standard'].includes(feePayload.type));
+      assert(feeTransfer.amount + sumTonAmount < maxTonAmount, 'Total TON amount is too big');
+      assert(feeTransfer.toAddress === walletAddress, 'Fee transfer address is not the token wallet address');
+      assert(isTokenTransferPayload(feePayload), 'Fee transfer payload is not a token transfer');
 
       const { amount: tokenFeeAmount, destination: feeDestination } = feePayload as ApiTokensTransferPayload;
 
-      assert(tokenAmount + tokenFeeAmount <= maxAmount);
-      assert(FEE_ADDRESSES.includes(toBase64Address(feeDestination, false)));
+      assert(sumTokenAmount + tokenFeeAmount <= maxAmount, 'Total token amount is too big');
+      assert(FEE_ADDRESSES.includes(toBase64Address(feeDestination, false)), 'Unexpected fee transfer destination');
     }
   }
-}
-
-export async function swapReplaceTransactions(
-  accountId: string,
-  transactions: ApiTransactionActivity[],
-  network: ApiNetwork,
-  slug?: string,
-): Promise<ApiActivity[]> {
-  if (!transactions.length || network === 'testnet') {
-    return transactions;
-  }
-
-  try {
-    const { address } = await fetchStoredTonWallet(accountId);
-    const asset = slug ? getTokenBySlug(slug).tokenAddress ?? TONCOIN.symbol : undefined;
-    const {
-      fromLt, toLt, fromTime, toTime,
-    } = buildSwapHistoryRange(transactions);
-
-    const swaps = await swapGetHistory(address, {
-      fromLt,
-      toLt,
-      fromTimestamp: fromTime,
-      toTimestamp: toTime,
-      asset,
-    });
-
-    if (!swaps.length) {
-      return transactions;
-    }
-
-    return replaceTransactions(transactions, swaps);
-  } catch (err) {
-    logDebugError('swapReplaceTransactions', err);
-    return transactions;
-  }
-}
-
-export async function swapReplaceTransactionsByRanges(
-  accountId: string,
-  transactions: ApiTransactionActivity[],
-  chunks: ApiTransactionActivity[][],
-  isFirstLoad?: boolean,
-): Promise<ApiActivity[]> {
-  transactions = transactions.slice();
-
-  const { network } = parseAccountId(accountId);
-
-  if (!chunks.length || network === 'testnet') {
-    return transactions;
-  }
-
-  try {
-    const { address } = await fetchStoredTonWallet(accountId);
-
-    if (!isFirstLoad) {
-      await waitPendingDexSwap(address);
-    }
-
-    const ranges = chunks.map((txs) => buildSwapHistoryRange(txs));
-    const swaps = await swapGetHistoryByRanges(address, ranges);
-
-    if (!swaps.length) {
-      return transactions;
-    }
-
-    return replaceTransactions(transactions, swaps);
-  } catch (err) {
-    logDebugError('swapReplaceTransactionsByRanges', err);
-    return transactions;
-  }
-}
-
-function replaceTransactions(transactions: ApiTransactionActivity[], swaps: ApiSwapHistoryItem[]) {
-  const result: ApiActivity[] = [];
-  const hiddenTxIds = new Set<string>();
-
-  const skipLtRanges: LtRange[] = []; // TODO Remove it after applying correcting script in backend
-
-  for (const swap of swaps) {
-    swap.txIds?.forEach((txId) => {
-      hiddenTxIds.add(txId);
-    });
-
-    if (swap.lt && Number(swap.id) < MAX_OLD_SWAP_ID) {
-      skipLtRanges.push([swap.lt, swap.lt + SWAP_MAX_LT]);
-    }
-
-    const swapActivity = swapItemToActivity(swap);
-
-    result.push(swapActivity);
-  }
-
-  for (let transaction of transactions) {
-    const [ltString, hash] = transaction.txId.split(':');
-    const lt = Number(ltString);
-    const shortenedTxId = `${lt}:${hash}`;
-
-    const shouldHide = Boolean(
-      hiddenTxIds.has(shortenedTxId)
-      || skipLtRanges.find(([startLt, endLt]) => lt >= startLt && lt <= endLt),
-    );
-
-    if (shouldHide) {
-      transaction = { ...transaction, shouldHide };
-    }
-    result.push(transaction);
-  }
-
-  return result;
-}
-
-async function waitPendingDexSwap(address: string) {
-  const waitUntil = Date.now() + SWAP_WAITING_TIME;
-
-  while (Date.now() < waitUntil) {
-    const pendingSwaps = await swapGetHistory(address, {
-      status: 'pending',
-      isCex: false,
-    });
-
-    if (!pendingSwaps.length) {
-      break;
-    }
-
-    const areAllStale = pendingSwaps.every((swap) => (
-      Date.now() - swap.timestamp > SWAP_WAITING_TIME * 2
-    ));
-    if (areAllStale) {
-      break;
-    }
-
-    await pause(SWAP_WAITING_PAUSE);
-  }
-}
-
-function buildSwapHistoryRange(transactions: ApiTransaction[]): SwapHistoryRange {
-  const firstLt = parseTxId(transactions[0].txId).lt;
-  const lastLt = parseTxId(transactions[transactions.length - 1].txId).lt;
-
-  const firstTimestamp = transactions[0].timestamp;
-  const lastTimestamp = transactions[transactions.length - 1].timestamp;
-
-  const [fromLt, fromTime] = firstLt > lastLt ? [lastLt, lastTimestamp] : [firstLt, firstTimestamp];
-  const [toLt, toTime] = firstLt > lastLt ? [firstLt, firstTimestamp] : [lastLt, lastTimestamp];
-
-  const slug = transactions[0].slug;
-  const asset = slug === TONCOIN.slug ? TONCOIN.symbol : getTokenBySlug(slug).tokenAddress!;
-
-  return {
-    asset,
-    fromLt: Math.floor(fromLt / 100) * 100,
-    toLt,
-    fromTime,
-    toTime,
-  };
 }

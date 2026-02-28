@@ -5,8 +5,7 @@ import { getActions } from '../../../global';
 import { type ApiNft } from '../../../api/types';
 import { MediaType } from '../../../global/types';
 
-import buildClassName from '../../../util/buildClassName';
-import { IS_DELEGATED_BOTTOM_SHEET, IS_DELEGATING_BOTTOM_SHEET, IS_ELECTRON } from '../../../util/windowEnvironment';
+import { IS_ELECTRON } from '../../../util/windowEnvironment';
 
 import { useDeviceScreen } from '../../../hooks/useDeviceScreen';
 import useFlag from '../../../hooks/useFlag';
@@ -32,12 +31,13 @@ function HiddenByUserNft({ nft }: OwnProps) {
     removeNftSpecialStatus({ address: nft.address });
   });
 
-  const {
-    transitionClassNames,
-  } = useShowTransition(isNftHidden, handleUnhide);
+  const { ref } = useShowTransition({
+    isOpen: isNftHidden,
+    onCloseAnimationEnd: handleUnhide,
+  });
 
   const { isPortrait } = useDeviceScreen();
-  const areSettingsInModal = !isPortrait || IS_ELECTRON || IS_DELEGATING_BOTTOM_SHEET || IS_DELEGATED_BOTTOM_SHEET;
+  const areSettingsInModal = !isPortrait || IS_ELECTRON;
 
   function handleNftClick() {
     openMediaViewer({
@@ -47,7 +47,8 @@ function HiddenByUserNft({ nft }: OwnProps) {
 
   return (
     <div
-      className={buildClassName(styles.item, transitionClassNames)}
+      ref={ref}
+      className={styles.item}
       onClick={handleNftClick}
       key={nft.address}
       role="button"

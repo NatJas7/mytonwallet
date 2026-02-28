@@ -2,6 +2,7 @@ import React, { memo, useEffect, useState } from '../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../global';
 
 import { PIN_LENGTH } from '../../../config';
+import { selectIsNativeBiometricAuthEnabled } from '../../../global/selectors';
 import buildClassName from '../../../util/buildClassName';
 import { ANIMATED_STICKERS_PATHS } from '../../ui/helpers/animatedAssets';
 
@@ -19,6 +20,7 @@ import styles from '../Settings.module.scss';
 
 interface OwnProps {
   isActive?: boolean;
+  isInsideModal?: boolean;
   handleBackClick: NoneToVoidFunction;
 }
 
@@ -30,6 +32,7 @@ interface StateProps {
 
 function NativeBiometricsTurnOn({
   isActive,
+  isInsideModal,
   isPinAccepted,
   error,
   isNativeBiometricsEnabled,
@@ -79,14 +82,16 @@ function NativeBiometricsTurnOn({
         </div>
 
         <div className={styles.pinPadHeader}>
-          <AnimatedIconWithPreview
-            play={isActive}
-            tgsUrl={ANIMATED_STICKERS_PATHS.guard}
-            previewUrl={ANIMATED_STICKERS_PATHS.guardPreview}
-            noLoop={false}
-            nonInteractive
-            className={styles.stickerNativeBiometric}
-          />
+          {!isInsideModal && (
+            <AnimatedIconWithPreview
+              play={isActive}
+              tgsUrl={ANIMATED_STICKERS_PATHS.guard}
+              previewUrl={ANIMATED_STICKERS_PATHS.guardPreview}
+              noLoop={false}
+              nonInteractive
+              className={styles.stickerNativeBiometric}
+            />
+          )}
 
           {!isSmallHeight && <div className={styles.pinPadTitle}>{lang('Confirm Passcode')}</div>}
         </div>
@@ -96,6 +101,7 @@ function NativeBiometricsTurnOn({
           onClearError={clearNativeBiometricsError}
           title={lang(pinTitle)}
           type={pinPadType}
+
           length={PIN_LENGTH}
           value={pin}
           onChange={setPin}
@@ -107,15 +113,11 @@ function NativeBiometricsTurnOn({
 }
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
-  const {
-    nativeBiometricsError,
-    isPinAccepted,
-    settings: { authConfig },
-  } = global;
+  const { nativeBiometricsError, isPinAccepted } = global;
 
   return {
     isPinAccepted,
     error: nativeBiometricsError,
-    isNativeBiometricsEnabled: !!authConfig && authConfig.kind === 'native-biometrics',
+    isNativeBiometricsEnabled: selectIsNativeBiometricAuthEnabled(global),
   };
 })(NativeBiometricsTurnOn));

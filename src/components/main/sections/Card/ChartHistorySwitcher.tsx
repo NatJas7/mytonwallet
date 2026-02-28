@@ -5,7 +5,7 @@ import type { TokenPeriod } from '../../../../global/types';
 
 import { HISTORY_PERIODS } from '../../../../config';
 import { selectCurrentAccountState } from '../../../../global/selectors';
-import { vibrate } from '../../../../util/capacitor';
+import { vibrate } from '../../../../util/haptics';
 
 import useLastCallback from '../../../../hooks/useLastCallback';
 
@@ -38,7 +38,7 @@ function ChartHistorySwitcher({
 
     if (period === currentPeriod) return;
 
-    vibrate();
+    void vibrate();
 
     setCurrentTokenPeriod({ period: period as TokenPeriod });
     onChange?.(period as TokenPeriod);
@@ -53,7 +53,7 @@ function ChartHistorySwitcher({
       bubbleClassName={styles.menu}
       buttonClassName={styles.menuItem}
       selectedValue={currentPeriod}
-      menuPositionHorizontal="right"
+      menuPositionX="right"
       onSelect={handlePeriodChange}
     />
   );

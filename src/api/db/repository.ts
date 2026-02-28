@@ -1,9 +1,15 @@
 import type { Table, UpdateSpec } from 'dexie';
 
+import { IS_AIR_APP } from '../../config';
+
 const IGNORED_DEXIE_ERRORS = new Set(['AbortError', 'BulkError', 'UnknownError']);
 
 async function tryDbQuery<T>(cb: () => Promise<T>) {
   try {
+    if (IS_AIR_APP) {
+      void cb();
+      return undefined;
+    }
     return await cb();
   } catch (error: any) {
     if (IGNORED_DEXIE_ERRORS.has(error?.name)) return undefined;
@@ -22,9 +28,7 @@ export class DbRepository<T> {
     return this.table.toArray();
   }
 
-  find(where: {
-    [key: string]: any;
-  }) {
+  find(where: Record<string, any>) {
     return tryDbQuery(() => {
       return this.table.where(where).toArray();
     });
@@ -54,9 +58,7 @@ export class DbRepository<T> {
     });
   }
 
-  deleteWhere(where: {
-    [key: string]: any;
-  }) {
+  deleteWhere(where: Record<string, any>) {
     return tryDbQuery(() => {
       return this.table.where(where).delete();
     });

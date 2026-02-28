@@ -4,11 +4,11 @@ import React, {
 
 import { PIN_LENGTH } from '../../config';
 import buildClassName from '../../util/buildClassName';
+import { stopEvent } from '../../util/domEvents';
 import { IS_ANDROID, IS_IOS } from '../../util/windowEnvironment';
 
 import useFlag from '../../hooks/useFlag';
 import useFocusAfterAnimation from '../../hooks/useFocusAfterAnimation';
-import useHideBottomBar from '../../hooks/useHideBottomBar';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import { usePasswordValidation } from '../../hooks/usePasswordValidation';
@@ -35,8 +35,7 @@ function CreatePasswordForm({
   const lang = useLang();
   const isMobile = IS_IOS || IS_ANDROID;
 
-  // eslint-disable-next-line no-null/no-null
-  const firstInputRef = useRef<HTMLInputElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>();
 
   const [isJustSubmitted, setIsJustSubmitted] = useState<boolean>(false);
   const [firstPassword, setFirstPassword] = useState<string>('');
@@ -59,8 +58,6 @@ function CreatePasswordForm({
   });
 
   useFocusAfterAnimation(firstInputRef, !isActive);
-
-  useHideBottomBar(Boolean(isActive));
 
   useEffect(() => {
     setIsPasswordsNotEqual(false);
@@ -100,8 +97,7 @@ function CreatePasswordForm({
   });
 
   const handleSubmit = useLastCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+    stopEvent(e);
 
     if (!canSubmit) {
       return;
@@ -124,6 +120,7 @@ function CreatePasswordForm({
     if (isWeakPasswordModalOpen) {
       closeWeakPasswordModal();
     }
+
     onSubmit(firstPassword, isMobile);
   });
 
@@ -193,8 +190,8 @@ function CreatePasswordForm({
             onInput={handleFirstPasswordChange}
             onFocus={markPasswordFocused}
             onBlur={unmarkPasswordFocused}
-            className={styles.input}
             maxLength={isMobile ? PIN_LENGTH : undefined}
+            enterKeyHint="next"
           />
           <Input
             type="password"
@@ -208,23 +205,20 @@ function CreatePasswordForm({
             onInput={handleSecondPasswordChange}
             onFocus={markSecondPasswordFocused}
             onBlur={unmarkSecondPasswordFocused}
-            className={styles.input}
             maxLength={isMobile ? PIN_LENGTH : undefined}
+            enterKeyHint="next"
           />
         </div>
 
         {renderErrors()}
 
-        <div className={modalStyles.buttons}>
-          <Button onClick={onCancel} className={modalStyles.button} isDisabled={isLoading}>
-            {lang('Cancel')}
-          </Button>
+        <div className={styles.buttons}>
           <Button
             isSubmit
             isPrimary
             isDisabled={isPasswordsNotEqual || firstPassword === ''}
             isLoading={isLoading}
-            className={modalStyles.button}
+            className={styles.btn}
           >
             {lang('Continue')}
           </Button>
@@ -243,9 +237,13 @@ function CreatePasswordForm({
         <p className={modalStyles.text}>
           {lang('Continue or change password to something more secure?')}
         </p>
-        <div className={buildClassName(modalStyles.buttons, modalStyles.buttonsNoExtraSpace)}>
-          <Button isPrimary onClick={closeWeakPasswordModal} className={modalStyles.button}>{lang('Change')}</Button>
-          <Button forFormId={formId} isSubmit isDestructive className={modalStyles.button}>{lang('Continue')}</Button>
+        <div className={buildClassName(modalStyles.footerButtons, modalStyles.footerButtonsVertical)}>
+          <Button isPrimary onClick={closeWeakPasswordModal} className={modalStyles.buttonFullWidth}>
+            {lang('Change')}
+          </Button>
+          <Button isDestructive forFormId={formId} isSubmit className={modalStyles.buttonFullWidth}>
+            {lang('Continue')}
+          </Button>
         </div>
       </Modal>
     </>

@@ -1,14 +1,15 @@
-import { inflate } from 'pako/dist/pako_inflate';
-
 import type { CancellableCallback } from '../../util/PostMessageConnector';
 
+import { ungzip } from '../../util/compression';
 import { createPostMessageInterface } from '../../util/createPostMessageInterface';
+import { fetchWithTimeout } from '../../util/fetch';
+import { logDebugError } from '../../util/logs';
 
 declare const Module: any;
 
 declare function allocate(...args: any[]): string;
 
-declare function intArrayFromString(str: String): string;
+declare function intArrayFromString(str: string): string;
 
 declare const self: WorkerGlobalScope;
 
@@ -18,7 +19,7 @@ try {
   throw new Error('Failed to import rlottie-wasm.js');
 }
 
-let rLottieApi: Record<string, Function>;
+let rLottieApi: Record<string, AnyFunction>;
 const rLottieApiPromise = new Promise<void>((resolve) => {
   Module.onRuntimeInitialized = () => {
     rLottieApi = {
@@ -37,6 +38,7 @@ const rLottieApiPromise = new Promise<void>((resolve) => {
 const HIGH_PRIORITY_MAX_FPS = 60;
 const LOW_PRIORITY_MAX_FPS = 30;
 const DESTROY_REPEAT_DELAY = 1000;
+const LOTTIE_JSON_STUB = '{"tgs":1,"w":16,"h":16,"layers":[]}';
 
 const renderers = new Map<string, {
   imgSize: number;
@@ -96,15 +98,26 @@ async function changeData(
 }
 
 async function extractJson(tgsUrl: string) {
-  const response = await fetch(tgsUrl);
-  const contentType = response.headers.get('Content-Type');
+  const response = await fetchWithTimeout(tgsUrl);
 
+  if (!response.ok) {
+    return LOTTIE_JSON_STUB;
+  }
+
+  const contentType = response.headers.get('Content-Type')?.split(';')[0];
   if (contentType === 'application/json') {
     return response.text();
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  return inflate(arrayBuffer, { to: 'string' });
+  try {
+    const arrayBuffer = await response.arrayBuffer();
+    const inflated = await ungzip(arrayBuffer);
+    return new TextDecoder().decode(inflated);
+  } catch (err: any) {
+    logDebugError('[extractJson] decompression error:', err?.message, err);
+
+    return LOTTIE_JSON_STUB;
+  }
 }
 
 function calcParams(json: string, isLowPriority: boolean, framesCount: number) {

@@ -1,0 +1,101 @@
+@use "../../../../styles/mixins";
+
+@use "../../../../styles/scssVariables" as v;
+
+$actionIconSize: 1.5rem;
+$iconGapSize: 1rem;
+
+.root {
+  overflow: hidden;
+}
+
+.slide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  height: v.$portraitHeaderHeight;
+  padding: 0 0.75rem;
+
+  @include mixins.respond-below(xs) {
+    max-width: calc(100% - (var(--icons-amount, 1) * ($actionIconSize + $iconGapSize)) * 2);
+    margin: 0 calc(var(--icons-amount, 1) * ($actionIconSize + $iconGapSize));
+  }
+}
+
+.accountTitle {
+  display: flex;
+  justify-content: center;
+
+  max-width: 100%;
+  padding: 0;
+  border: none;
+
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.5rem;
+  color: var(--color-black);
+  text-align: center;
+
+  appearance: none;
+  background: none;
+  outline: none;
+
+  &.withBalance {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1rem;
+    color: var(--color-gray-2);
+  }
+}
+
+.accountTitleInteractive {
+  cursor: var(--custom-cursor, pointer);
+
+  @include mixins.transition(opacity 150ms);
+
+  &:focus-visible,
+  &:hover {
+    opacity: 0.65;
+  }
+
+  // Optimization
+  &:active {
+    transition: none !important;
+  }
+}
+
+.accountTitleInner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expandIcon {
+  position: relative;
+  top: 0.3125rem;
+
+  margin-inline-start: 0.25rem;
+
+  font-size: 0.5rem;
+  line-height: 1rem;
+  vertical-align: 0;
+}
+
+.balance {
+  --border-radius-value: 0.25rem;
+
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-black);
+}
+
+.balanceFractionPart,
+.balanceCurrency {
+  color: var(--color-gray-3);
+}
+
+.balanceCurrencyPrefix {
+  margin-inline-end: 0.125rem;
+}

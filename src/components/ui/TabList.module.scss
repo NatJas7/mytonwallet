@@ -1,25 +1,31 @@
-.container {
-  user-select: none;
+@use "../../styles/mixins";
 
-  z-index: 1;
-
-  overflow: auto;
+.container ,
+.clipPathContainer {
   display: flex;
   flex-shrink: 0;
   flex-wrap: nowrap;
+  gap: var(--tab-gap-size, 0.25rem);
   align-items: flex-end;
-  justify-content: space-between;
-
-  padding: 0 1rem;
+  justify-content: flex-start;
 
   font-size: 0.9375rem;
   font-weight: 500;
+}
 
-  transition: background-color 150ms;
-
+.container {
+  user-select: none;
   scrollbar-color: rgba(0, 0, 0, 0);
-
   scrollbar-width: none;
+
+  position: relative;
+  z-index: 1;
+
+  overflow: auto;
+
+  color: var(--color-gray-2);
+
+  @include mixins.transition(background-color 150ms);
 
   &::-webkit-scrollbar {
     height: 0;
@@ -30,31 +36,31 @@
     // `box-shadow` prevents repaint on macOS when hovering out of scrollable container
     box-shadow: 0 0 1px rgba(255, 255, 255, 0.01);
   }
-
-  :global(html.animation-level-0) & {
-    transition: none !important;
-  }
 }
 
-.withBorder {
-  position: relative;
+.clipPathContainer {
+  // Hardware acceleration for clip-path animations
+  will-change: clip-path;
+  // Use GPU compositing for better performance
+  isolation: isolate;
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  left: 0;
 
-  &::after {
-    content: "";
+  // Optimize for animations
+  contain: layout style paint;
+  overflow: hidden;
 
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    transform: translateY(-0.03125rem);
+  width: fit-content;
 
-    width: 100%;
-    height: 0.0625rem;
+  color: var(--color-accent);
 
-    /* stylelint-disable-next-line plugin/whole-pixel */
-    box-shadow: inset 0 -0.025rem 0 0 var(--color-separator);
+  background-color: var(--color-activity-blue-background);
+
+  @include mixins.transition(clip-path var(--slide-transition));
+
+  @supports (background-color: color-mix(in lab, var(--color-accent) 8%, transparent)) {
+    background-color: color-mix(in lab, var(--color-accent) 8%, transparent);
   }
-}
-
-.big {
-  font-size: 1rem;
 }

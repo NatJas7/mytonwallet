@@ -1,4 +1,5 @@
-import dotenv from 'dotenv';
+import './dev/loadEnv';
+
 import HtmlPlugin from 'html-webpack-plugin';
 import MiniCssExtractPlugin from 'mini-css-extract-plugin';
 import path from 'path';
@@ -7,9 +8,7 @@ import {
   EnvironmentPlugin, NormalModuleReplacementPlugin, ProvidePlugin,
 } from 'webpack';
 
-dotenv.config();
-
-const { APP_ENV = 'production', GIVEAWAYS_API_URL = 'http://0.0.0.0:5005/' } = process.env;
+import { APP_ENV, GIVEAWAYS_API_URL } from './src/giveaways/config';
 
 const cspConnectSrcExtra = APP_ENV === 'development'
   ? `http://localhost:5005 ${GIVEAWAYS_API_URL}`
@@ -77,7 +76,7 @@ export default function createConfig(
     module: {
       rules: [
         {
-          test: /\.(ts|tsx|js)$/,
+          test: /\.(ts|tsx|js|mjs|cjs)$/,
           loader: 'babel-loader',
           exclude: /node_modules/,
         },
@@ -135,7 +134,7 @@ export default function createConfig(
     },
 
     resolve: {
-      extensions: ['.js', '.ts', '.tsx'],
+      extensions: ['.js', '.cjs', '.mjs', '.ts', '.tsx'],
       fallback: {
         stream: require.resolve('stream-browserify'),
         process: require.resolve('process/browser'),
@@ -179,7 +178,7 @@ export default function createConfig(
       ),
       new NormalModuleReplacementPlugin(
         /i18n\/en\.json/,
-        '../giveaways/assets/mockI18N.json',
+        '../giveaways/utils/mockI18nEn.json',
       ),
     ],
     devtool: APP_ENV === 'development' ? 'source-map' : 'hidden-source-map',

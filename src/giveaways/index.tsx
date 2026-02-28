@@ -41,7 +41,7 @@ declare global {
   }
 }
 
-(async () => {
+void (async () => {
   const actions = getActions();
   actions.setAnimationLevel({ level: ANIMATION_LEVEL_DEFAULT });
   actions.setTheme({ theme: THEME_DEFAULT });
@@ -57,7 +57,7 @@ declare global {
 
   requestMutation(() => {
     TeactDOM.render(
-      // eslint-disable-next-line react/jsx-no-bind
+
       <App mtwWalletInfo={mtwWalletInfo} />,
       document.getElementById('root')!,
     );

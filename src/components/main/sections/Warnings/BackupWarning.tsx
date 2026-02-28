@@ -3,6 +3,7 @@ import { withGlobal } from '../../../../global';
 
 import type { Theme } from '../../../../global/types';
 
+import { selectCurrentAccountId } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
 
 import useBrowserUiColor from '../../../../hooks/useBrowserUiColor';
@@ -25,7 +26,11 @@ const UI_BG_RED_LIGHT = '#F36A6B';
 const UI_BG_RED_DARK = '#C44646';
 
 function BackupWarning({ isRequired, theme, onOpenBackupWallet }: OwnProps & StateProps) {
-  const { shouldRender, transitionClassNames } = useShowTransition(isRequired, undefined, true);
+  const { shouldRender, ref } = useShowTransition({
+    isOpen: isRequired,
+    noMountTransition: true,
+    withShouldRender: true,
+  });
   const { isLandscape } = useDeviceScreen();
 
   const lang = useLang();
@@ -47,7 +52,8 @@ function BackupWarning({ isRequired, theme, onOpenBackupWallet }: OwnProps & Sta
 
   return (
     <div
-      className={buildClassName(styles.wrapper, isLandscape && styles.wrapper_landscape, transitionClassNames)}
+      ref={ref}
+      className={buildClassName(styles.wrapper, isLandscape && styles.wrapper_landscape)}
       onClick={handleClick}
     >
       {lang('Wallet is not backed up')}
@@ -66,6 +72,6 @@ export default memo(
         theme: global.settings.theme,
       };
     },
-    (global, _, stickToFirst) => stickToFirst(global.currentAccountId),
+    (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)),
   )(BackupWarning),
 );

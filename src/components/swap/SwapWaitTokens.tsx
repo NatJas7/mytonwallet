@@ -6,10 +6,11 @@ import type { Account, UserSwapToken } from '../../global/types';
 import {
   CHANGELLY_LIVE_CHAT_URL, CHANGELLY_SUPPORT_EMAIL, CHANGELLY_WAITING_DEADLINE,
 } from '../../config';
-import { getIsInternalSwap, getIsSupportedChain } from '../../global/helpers';
 import buildClassName from '../../util/buildClassName';
+import { getChainTitle, getIsSupportedChain } from '../../util/chain';
 import { formatCurrencyExtended } from '../../util/formatNumber';
 import getChainNetworkName from '../../util/swap/getChainNetworkName';
+import { getIsInternalSwap } from '../../util/swap/getSwapType';
 
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
@@ -36,7 +37,7 @@ interface OwnProps {
   payoutAddress?: string;
   payinExtraId?: string;
   activity?: ApiActivity;
-  addressByChain?: Account['addressByChain'];
+  accountChains?: Account['byChain'];
   onClose: NoneToVoidFunction;
 }
 
@@ -50,7 +51,7 @@ function SwapWaitTokens({
   payoutAddress,
   payinExtraId,
   activity,
-  addressByChain,
+  accountChains,
   onClose,
 }: OwnProps) {
   const lang = useLang();
@@ -68,7 +69,7 @@ function SwapWaitTokens({
 
   const shouldShowQrCode = !payinExtraId;
   const isInternalSwap = getIsInternalSwap({
-    from: tokenIn, to: tokenOut, toAddress: payoutAddress, addressByChain,
+    from: tokenIn, to: tokenOut, toAddress: payoutAddress, accountChains,
   });
 
   useHistoryBack({
@@ -89,9 +90,8 @@ function SwapWaitTokens({
           {lang('Memo')}
         </span>
         <InteractiveTextField
-          chain="ton"
           address={payinExtraId}
-          copyNotification={lang('Memo was copied!')}
+          copyNotification={lang('Memo Copied')}
           noSavedAddress
           noExplorer
           className={styles.changellyTextField}
@@ -119,17 +119,19 @@ function SwapWaitTokens({
                   className={styles.changellyDescriptionBold}
                 >
                   {lang('Changelly Live Chat')}
-                </a>),
+                </a>
+              ),
               email: (
                 <span className={styles.changellyDescriptionBold}>
                   {CHANGELLY_SUPPORT_EMAIL}
-                </span>),
+                </span>
+              ),
             })}
           </span>
           {cexTransactionId && (
             <InteractiveTextField
               text={cexTransactionId}
-              copyNotification={lang('Transaction ID was copied!')}
+              copyNotification={lang('Transaction ID Copied')}
               noSavedAddress
               noExplorer
               className={styles.changellyTextField}
@@ -153,7 +155,7 @@ function SwapWaitTokens({
 
     return (
       <div className={styles.changellyInfoBlock}>
-        <span className={styles.changellyDescription}>{lang('$swap_changelly_to_ton_description1', {
+        <span className={styles.changellyDescription}>{lang('$swap_changelly_to_wallet_description1', {
           value: (
             <span className={styles.changellyDescriptionBold}>
               {formatCurrencyExtended(Number(amountIn), tokenIn?.symbol ?? '', true)}
@@ -164,19 +166,22 @@ function SwapWaitTokens({
               {getChainNetworkName(tokenIn?.chain)}
             </span>
           ),
-          time: <Countdown
-            timestamp={timestamp}
-            deadline={CHANGELLY_WAITING_DEADLINE}
-            onCompleted={handleTimeout}
-          />,
+          time: (
+            <Countdown
+              timestamp={timestamp}
+              deadline={CHANGELLY_WAITING_DEADLINE}
+              onCompleted={handleTimeout}
+            />
+          ),
         })}
         </span>
         <InteractiveTextField
           chain={chain}
           address={payinAddress}
-          copyNotification={lang('Address was copied!')}
+          copyNotification={lang('%chain% Address Copied', { chain: chain ? getChainTitle(chain) : '' }) as string}
           noSavedAddress
           noExplorer
+          noDimming
           className={styles.changellyTextField}
         />
         {renderMemo()}

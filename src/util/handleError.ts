@@ -1,4 +1,5 @@
 import { APP_ENV, DEBUG_ALERT_MSG } from '../config';
+import { SECOND } from './dateFormat';
 import { IS_EXTENSION_PAGE_SCRIPT } from './environment';
 import { logDebugError } from './logs';
 import { throttle } from './schedulers';
@@ -7,12 +8,9 @@ const shouldShowAlert = (APP_ENV === 'development' || APP_ENV === 'staging')
   && typeof window === 'object'
   && !IS_EXTENSION_PAGE_SCRIPT;
 
-// eslint-disable-next-line no-alert
-const throttledAlert = throttle((message) => window.alert(message), 1000);
+const throttledAlert = throttle((message) => window.alert(message), 10 * SECOND);
 
-// eslint-disable-next-line no-restricted-globals
 self.addEventListener('error', handleErrorEvent);
-// eslint-disable-next-line no-restricted-globals
 self.addEventListener('unhandledrejection', handleErrorEvent);
 
 function handleErrorEvent(e: ErrorEvent | PromiseRejectionEvent) {
@@ -33,6 +31,10 @@ export function handleError(err: Error | string) {
   const stack = typeof err === 'object' ? err.stack : undefined;
 
   if (message.endsWith('Failed to import rlottie-wasm.js')) {
+    return;
+  }
+
+  if (APP_ENV === 'staging' && message === 'Failed to fetch') {
     return;
   }
 

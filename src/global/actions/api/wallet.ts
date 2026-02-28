@@ -1,25 +1,19 @@
-import type {
-  ApiActivity,
-  ApiSwapAsset,
-  ApiToken,
-  ApiTokenWithPrice,
-} from '../../../api/types';
+import type { ApiAnyDisplayError, ApiChain, ApiSwapAsset, ApiToken, ApiTokenWithPrice } from '../../../api/types';
+import { ApiHardwareError } from '../../../api/types';
 
-import { compareActivities } from '../../../util/compareActivities';
-import {
-  buildCollectionByKey, extractKey, findLast, unique,
-} from '../../../util/iteratees';
-import { getIsTransactionWithPoisoning } from '../../../util/poisoningHash';
-import { onTickEnd, pause } from '../../../util/schedulers';
+import { getDoesUsePinPad } from '../../../util/biometrics';
+import { getChainTitle } from '../../../util/chain';
+import { unique } from '../../../util/iteratees';
+import { getTranslation } from '../../../util/langProvider';
+import { logDebugError } from '../../../util/logs';
+import { pause } from '../../../util/schedulers';
 import { buildUserToken } from '../../../util/tokens';
 import { callApi } from '../../../api';
-import { getIsSwapId, getIsTinyOrScamTransaction, getIsTxIdLocal } from '../../helpers';
+import { errorCodeToMessage } from '../../helpers/errors';
+import { isErrorTransferResult } from '../../helpers/transfer';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
   changeBalance,
-  updateAccountState,
-  updateActivitiesIsHistoryEndReached,
-  updateActivitiesIsLoading,
   updateCurrentAccountSettings,
   updateCurrentAccountState,
   updateCurrentSignature,
@@ -27,175 +21,14 @@ import {
 } from '../../reducers';
 import { updateTokenInfo } from '../../reducers/tokens';
 import {
+  selectAccount,
   selectAccountState,
-  selectAccountTxTokenSlugs,
+  selectCurrentAccountId,
   selectCurrentAccountSettings,
   selectCurrentAccountState,
-  selectLastMainTxTimestamp,
-  selectToken,
 } from '../../selectors';
 
 const IMPORT_TOKEN_PAUSE = 250;
-
-addActionHandler('fetchTokenTransactions', async (global, actions, { limit, slug, shouldLoadWithBudget }) => {
-  global = updateActivitiesIsLoading(global, true);
-  setGlobal(global);
-
-  const accountId = global.currentAccountId!;
-
-  let { idsBySlug, byId } = selectAccountState(global, accountId)?.activities || {};
-  let shouldFetchMore = true;
-  let fetchedActivities: ApiActivity[] = [];
-  let tokenIds = (idsBySlug && idsBySlug[slug]) || [];
-  const toTxId = findLast(tokenIds, (id) => !getIsTxIdLocal(id) && !getIsSwapId(id));
-  let toTimestamp = toTxId && byId ? byId[toTxId].timestamp : undefined;
-  const { chain } = selectToken(global, slug);
-
-  while (shouldFetchMore) {
-    const result = await callApi('fetchTokenActivitySlice', accountId, chain, slug, toTimestamp, limit);
-
-    global = getGlobal();
-
-    if (!result || 'error' in result) {
-      break;
-    }
-
-    if (!result.length) {
-      global = updateActivitiesIsHistoryEndReached(global, true, slug);
-      break;
-    }
-
-    const { areTinyTransfersHidden } = global.settings;
-
-    const filteredResult = result.filter((tx) => {
-      const shouldHide = tx.kind === 'transaction'
-        && (
-          getIsTransactionWithPoisoning(tx)
-          || (areTinyTransfersHidden && getIsTinyOrScamTransaction(tx))
-        );
-
-      return !shouldHide;
-    });
-
-    fetchedActivities = fetchedActivities.concat(result);
-    shouldFetchMore = filteredResult.length < limit && fetchedActivities.length < limit;
-
-    tokenIds = unique(tokenIds.concat(filteredResult.map((tx) => tx.id)));
-    toTimestamp = result[result.length - 1].timestamp;
-  }
-
-  fetchedActivities.sort(compareActivities);
-
-  global = updateActivitiesIsLoading(global, false);
-
-  const newById = buildCollectionByKey(fetchedActivities, 'id');
-  const newOrderedIds = Object.keys(newById);
-  const currentActivities = selectAccountState(global, accountId)?.activities;
-  byId = { ...(currentActivities?.byId || {}), ...newById };
-
-  idsBySlug = currentActivities?.idsBySlug || {};
-  tokenIds = unique((idsBySlug[slug] || []).concat(newOrderedIds));
-
-  tokenIds.sort((a, b) => compareActivities(byId[a], byId[b]));
-
-  global = updateAccountState(global, accountId, {
-    activities: {
-      ...currentActivities,
-      byId,
-      idsBySlug: { ...idsBySlug, [slug]: tokenIds },
-    },
-  });
-
-  setGlobal(global);
-
-  if (shouldLoadWithBudget) {
-    onTickEnd(() => {
-      actions.fetchTokenTransactions({ limit, slug });
-    });
-  }
-});
-
-addActionHandler('fetchAllTransactions', async (global, actions, { limit, shouldLoadWithBudget }) => {
-  global = updateActivitiesIsLoading(global, true);
-  setGlobal(global);
-
-  const accountId = global.currentAccountId!;
-
-  const tonTokenSlugs = selectAccountTxTokenSlugs(global, accountId, 'ton') ?? [];
-  const tronTokenSlugs = selectAccountTxTokenSlugs(global, accountId, 'tron') ?? [];
-  let toTimestamp = selectLastMainTxTimestamp(global, accountId)!;
-  let shouldFetchMore = true;
-  let fetchedActivities: ApiActivity[] = [];
-
-  while (shouldFetchMore) {
-    const result = await callApi(
-      'fetchAllActivitySlice',
-      accountId,
-      limit,
-      toTimestamp,
-      tonTokenSlugs,
-      tronTokenSlugs,
-    );
-
-    global = getGlobal();
-
-    if (!result || 'error' in result) {
-      break;
-    }
-
-    if (!result.length) {
-      global = updateActivitiesIsHistoryEndReached(global, true);
-      break;
-    }
-
-    const { areTinyTransfersHidden } = global.settings;
-
-    const filteredResult = result.filter((tx) => {
-      const shouldHide = tx.kind === 'transaction'
-        && (
-          getIsTransactionWithPoisoning(tx)
-          || (areTinyTransfersHidden && getIsTinyOrScamTransaction(tx))
-        );
-
-      return !shouldHide;
-    });
-
-    fetchedActivities = fetchedActivities.concat(result);
-    shouldFetchMore = filteredResult.length < limit && fetchedActivities.length < limit;
-    toTimestamp = result[result.length - 1].timestamp;
-  }
-
-  global = updateActivitiesIsLoading(global, false);
-
-  const newById = buildCollectionByKey(fetchedActivities, 'id');
-  const currentActivities = selectAccountState(global, accountId)?.activities;
-  const byId = { ...(currentActivities?.byId || {}), ...newById };
-
-  fetchedActivities.sort(compareActivities);
-
-  const idsMain = unique((currentActivities?.idsMain ?? []).concat(extractKey(fetchedActivities, 'id')));
-
-  global = updateAccountState(global, accountId, {
-    activities: {
-      ...currentActivities,
-      byId,
-      idsMain,
-    },
-  });
-
-  setGlobal(global);
-
-  if (shouldLoadWithBudget) {
-    onTickEnd(() => {
-      actions.fetchAllTransactions({ limit });
-    });
-  }
-});
-
-addActionHandler('resetIsHistoryEndReached', (global, actions, payload) => {
-  global = updateActivitiesIsHistoryEndReached(global, false, payload?.slug);
-  setGlobal(global);
-});
 
 addActionHandler('setIsBackupRequired', (global, actions, { isMnemonicChecked }) => {
   const { isBackupRequired } = selectCurrentAccountState(global) ?? {};
@@ -210,12 +43,13 @@ addActionHandler('submitSignature', async (global, actions, payload) => {
   const { promiseId } = global.currentSignature!;
 
   if (!(await callApi('verifyPassword', password))) {
-    setGlobal(updateCurrentSignature(getGlobal(), { error: 'Wrong password, please try again.' }));
+    const error = getDoesUsePinPad() ? 'Wrong passcode, please try again.' : 'Wrong password, please try again.';
+    setGlobal(updateCurrentSignature(getGlobal(), { error }));
 
     return;
   }
 
-  await callApi('confirmDappRequest', promiseId, password!);
+  await callApi('confirmDappRequest', promiseId, password);
 
   setGlobal(updateCurrentSignature(getGlobal(), { isSigned: true }));
 });
@@ -248,12 +82,8 @@ addActionHandler('addToken', (global, actions, { token }) => {
         chain: token.chain,
         image: token.image,
         keywords: token.keywords,
-        quote: {
-          slug: token.slug,
-          price: token.price ?? 0,
-          priceUsd: token.priceUsd ?? 0,
-          percentChange24h: token.change24h ?? 0,
-        },
+        priceUsd: token.priceUsd ?? 0,
+        percentChange24h: token.change24h ?? 0,
       },
     });
   }
@@ -280,40 +110,46 @@ addActionHandler('addToken', (global, actions, { token }) => {
   const accountSettings = selectCurrentAccountSettings(global) ?? {};
   global = updateCurrentAccountSettings(global, {
     ...accountSettings,
-    orderedSlugs: [...accountSettings.orderedSlugs ?? [], token.slug],
     alwaysShownSlugs: unique([...accountSettings.alwaysShownSlugs ?? [], token.slug]),
     alwaysHiddenSlugs: accountSettings.alwaysHiddenSlugs?.filter((slug) => slug !== token.slug),
     deletedSlugs: accountSettings.deletedSlugs?.filter((slug) => slug !== token.slug),
   });
 
+  if (token.tokenAddress) {
+    void callApi('importToken', selectCurrentAccountId(global)!, token.chain, token.tokenAddress);
+  }
+
   return global;
 });
 
-addActionHandler('importToken', async (global, actions, { address }) => {
-  const { currentAccountId } = global;
+addActionHandler('importToken', async (global, actions, { chain, address }) => {
+  const accountId = selectCurrentAccountId(global)!;
+
   global = updateSettings(global, {
     importToken: {
       isLoading: true,
       token: undefined,
+      error: undefined,
     },
   });
   setGlobal(global);
 
-  const slug = (await callApi('buildTokenSlug', 'ton', address))!;
+  const slug = (await callApi('buildTokenSlug', chain, address))!;
   global = getGlobal();
 
-  let token: ApiTokenWithPrice | ApiToken | undefined = global.tokenInfo.bySlug?.[slug!];
+  let token: ApiTokenWithPrice | ApiToken | { error: ApiAnyDisplayError } | undefined = global.tokenInfo.bySlug?.[slug];
 
   if (!token) {
-    token = await callApi('fetchToken', global.currentAccountId!, address);
+    token = await callApi('fetchToken', accountId, chain, address);
     await pause(IMPORT_TOKEN_PAUSE);
-
     global = getGlobal();
-    if (!token) {
+
+    if (isErrorTransferResult(token)) {
       global = updateSettings(global, {
         importToken: {
           isLoading: false,
           token: undefined,
+          error: errorCodeToMessage(token?.error),
         },
       });
       setGlobal(global);
@@ -321,19 +157,15 @@ addActionHandler('importToken', async (global, actions, { address }) => {
     } else {
       const apiToken: ApiTokenWithPrice = {
         ...token,
-        quote: {
-          slug: token.slug,
-          price: 0,
-          priceUsd: 0,
-          percentChange24h: 0,
-        },
+        priceUsd: 0,
+        percentChange24h: 0,
       };
       global = updateTokenInfo(global, { [apiToken.slug]: apiToken });
       setGlobal(global);
     }
   }
 
-  const balances = selectAccountState(global, currentAccountId!)?.balances?.bySlug ?? {};
+  const balances = selectAccountState(global, accountId)?.balances?.bySlug ?? {};
   const shouldUpdateBalance = !(token.slug in balances);
 
   const userToken = buildUserToken(token);
@@ -343,10 +175,11 @@ addActionHandler('importToken', async (global, actions, { address }) => {
     importToken: {
       isLoading: false,
       token: userToken,
+      error: undefined,
     },
   });
   if (shouldUpdateBalance) {
-    global = changeBalance(global, global.currentAccountId!, token.slug, 0n);
+    global = changeBalance(global, accountId, token.slug, 0n);
   }
   setGlobal(global);
 });
@@ -356,28 +189,64 @@ addActionHandler('resetImportToken', (global) => {
     importToken: {
       isLoading: false,
       token: undefined,
+      error: undefined,
     },
   });
   setGlobal(global);
 });
 
-addActionHandler('verifyHardwareAddress', async (global, actions) => {
-  const accountId = global.currentAccountId!;
+addActionHandler('verifyHardwareAddress', async (global, actions, { chain }) => {
+  const accountId = selectCurrentAccountId(global)!;
+  const currentAddress = selectAccount(global, accountId)?.byChain[chain]?.address;
 
-  const ledgerApi = await import('../../../util/ledger');
-
-  if (!(await ledgerApi.reconnectLedger())) {
-    actions.showError({ error: '$ledger_not_ready' });
+  if (!(await connectLedger(chain))) {
+    actions.showError({
+      error: getTranslation('$ledger_not_ready', { chain: getChainTitle(chain) }),
+    });
     return;
   }
 
-  try {
-    actions.showDialog({ title: 'Ledger', message: '$ledger_verify_address_on_device' });
-    await ledgerApi.verifyAddress(accountId);
-  } catch (err) {
-    actions.showError({ error: err as string });
+  actions.showDialog({ title: 'Ledger', message: '$ledger_verify_address_on_device' });
+  const ledgerAddress = await callApi('verifyLedgerWalletAddress', accountId, chain);
+
+  if (isErrorTransferResult(ledgerAddress)) {
+    if (ledgerAddress?.error !== ApiHardwareError.RejectedByUser) {
+      actions.showError({ error: ledgerAddress?.error });
+    }
+    return;
+  }
+
+  if (ledgerAddress !== currentAddress) {
+    actions.showError({ error: '$ledger_wrong_device' });
   }
 });
+
+// A cute mini version of the `initializeHardwareWalletConnection` action
+async function connectLedger(chain: ApiChain, noRetry?: boolean) {
+  const ledgerApi = await import('../../../util/ledger');
+
+  // Step 1: Connect to the Ledger device
+
+  const isLedgerConnected = await ledgerApi.connectLedger();
+  if (!isLedgerConnected) {
+    return false;
+  }
+
+  // Step 2: Ensure that the chain app is open on the Ledger device
+
+  const isChainAppConnected = await callApi('waitForLedgerApp', chain);
+  if (isErrorTransferResult(isChainAppConnected)) {
+    const isLedgerDisconnected = isChainAppConnected?.error === ApiHardwareError.ConnectionBroken;
+    if (isLedgerDisconnected && !noRetry) {
+      return connectLedger(chain, true);
+    }
+
+    logDebugError('wallet / connectLedger', isChainAppConnected?.error);
+    return false;
+  }
+
+  return isChainAppConnected;
+}
 
 addActionHandler('setActiveContentTab', (global, actions, { tab }) => {
   return updateCurrentAccountState(global, {
@@ -402,8 +271,7 @@ addActionHandler('addSwapToken', (global, actions, { token }) => {
     tokenAddress: token.tokenAddress,
     keywords: token.keywords,
     isPopular: false,
-    price: 0,
-    priceUsd: 0,
+    priceUsd: token.priceUsd,
   };
 
   setGlobal({

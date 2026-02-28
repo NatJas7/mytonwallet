@@ -9,26 +9,26 @@ const COMMON_PLUGINS = [
   '@capacitor/app',
   '@capacitor/app-launcher',
   '@capacitor/clipboard',
+  '@capacitor/dialog',
   '@capacitor/filesystem',
   '@capacitor/haptics',
   '@capacitor/keyboard',
   '@capacitor/push-notifications',
   '@capacitor/share',
+  '@capacitor/status-bar',
   '@capgo/capacitor-native-biometric',
   '@capgo/native-audio',
   '@mauricewegner/capacitor-navigation-bar',
-  '@sina_kh/mtw-capacitor-status-bar',
+  '@mytonwallet/air-app-launcher',
+  '@mytonwallet/capacitor-usb-hid',
   'capacitor-native-settings',
   'capacitor-plugin-safe-area',
   'capacitor-secure-storage-plugin',
   'cordova-plugin-inappbrowser',
-  'mtw-capacitor-usb-hid',
-  'native-bottom-sheet',
-  'native-dialog',
 ];
 
 const IOS_PLUGINS = [
-  '@sina_kh/mtw-capacitor-splash-screen',
+  '@capacitor/splash-screen',
 ];
 
 const config: CapacitorConfig = {
@@ -61,9 +61,16 @@ const config: CapacitorConfig = {
       presentationOptions: [],
     },
     Keyboard: {
-      // Needed to disable the automatic focus scrolling on iOS. The scroll is controlled manually by focusScroll.ts
-      // for a better focus scroll control.
+      // Needed to disable the automatic focus scrolling on iOS.
+      // The scroll is controlled manually by focusScroll.ts for a better focus scroll control.
       resize: 'none' as KeyboardResize,
+      // There is an Android bug that prevents the keyboard from resizing the WebView when the app is in full screen
+      // (i.e. if StatusBar plugin is used to overlay the status bar).
+      // This setting, if set to true, add a workaround that resizes the WebView even
+      // when the app is in full screen. Only available for Android
+      // https://capacitorjs.com/docs/apis/keyboard#configuration
+      // This is necessary since Cap7, otherwise input will be hidden by the keyboard.
+      resizeOnFullScreen: true,
     },
   },
 };

@@ -1,8 +1,7 @@
-@import "../../styles/mixins";
+@use "../../styles/mixins";
 
 .modalDialog {
   overflow: hidden;
-
   height: 40.125rem;
 
   @supports (height: var(--safe-area-bottom)) {
@@ -20,7 +19,7 @@
   min-height: 0;
   padding: 0 1rem 1rem;
 
-  @include adapt-padding-to-scrollbar(1rem);
+  @include mixins.adapt-padding-to-scrollbar(1rem);
 
   @supports (padding-bottom: var(--safe-area-bottom)) {
     padding-bottom: max(var(--safe-area-bottom), 1rem);
@@ -43,45 +42,14 @@
   padding-right: 0.5rem;
 }
 
-.balanceContainer,
 .advancedSlippageContainer {
   position: relative;
   z-index: 1;
-
   width: 100%;
-}
-
-.balance {
-  position: absolute;
-  top: -0.125rem;
-  right: 0.5rem;
-
-  display: flex;
-  gap: 0.25rem;
-
-  font-size: 0.8125rem;
-  color: var(--color-gray-1);
-}
-
-.balanceLink {
-  cursor: var(--custom-cursor, pointer);
-
-  font-weight: 600;
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      text-decoration: none;
-    }
-  }
 }
 
 .content {
   position: relative;
-
   display: flex;
   flex-direction: column;
 }
@@ -91,79 +59,9 @@
   flex-direction: column;
 }
 
-.advancedSlippageButton,
-.slippageLabel {
+.advancedSlippageButton {
   display: flex;
   align-items: center;
-}
-
-.tokenSelectorWrapper {
-  align-self: center;
-
-  width: auto;
-  height: 3rem;
-}
-
-.tokenSelectorSlide {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.tokenSelector {
-  cursor: var(--custom-cursor, pointer);
-
-  display: flex;
-  gap: 0.375rem;
-  align-items: center;
-  align-self: center;
-  justify-content: center;
-
-  height: 3rem;
-  padding: 0.75rem !important;
-
-  color: var(--color-input-button-text);
-
-  background-color: var(--color-input-button-background);
-  border: none;
-  border-radius: var(--border-radius-small);
-  outline: none;
-
-  @media (hover: hover) {
-    &:hover {
-      background-color: var(--color-input-button-background-hover);
-    }
-  }
-
-  @media (pointer: coarse) {
-    &:active {
-      background-color: var(--color-input-button-background-hover);
-    }
-  }
-}
-
-.tokenSelectorIcon {
-  margin-top: -0.0625rem;
-
-  font-size: 1rem;
-  color: var(--color-gray-3);
-}
-
-.tokenIcon {
-  --color-background-first: var(--color-input-button-background);
-
-  .tokenSelector:hover > & {
-    --color-background-first: var(--color-input-button-background-hover);
-  }
-}
-
-.tokenContent {
-  display: flex;
-  align-items: center;
-
-  margin-top: 0.125rem;
-
-  font-size: 0.9375rem;
-  font-weight: 700;
 }
 
 .swapButtonWrapper {
@@ -181,9 +79,9 @@
 
   width: 2.75rem;
   height: 2.75rem;
+  border-radius: 50%;
 
   background-color: var(--color-background-window);
-  border-radius: 50%;
 }
 
 .swapButtonWrapperStatic {
@@ -198,12 +96,12 @@
 
   width: 2.25rem;
   height: 2.25rem;
+  border-radius: 50%;
 
   font-size: 0.875rem;
   color: var(--color-accent-button-text);
 
   background-color: var(--color-accent-button-background);
-  border-radius: 50%;
 
   transition: background-color 150ms;
 
@@ -235,12 +133,12 @@
   width: 0.125rem;
   height: 0.125rem;
   margin: 0 0.25rem;
+  border-radius: 50%;
 
   font-style: normal;
   line-height: 1rem;
 
   background-color: var(--color-accent);
-  border-radius: 50%;
 }
 
 .advancedBlock {
@@ -250,47 +148,33 @@
 
   margin-bottom: 1.25rem;
   padding: 1rem;
+  border-radius: var(--border-radius-default);
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 }
 
 .advancedRow {
   display: flex;
+  gap: 0.25rem;
   justify-content: space-between;
 }
 
 .advancedDescription {
-  display: flex;
-  align-items: center;
-
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-gray-1);
 }
 
 .advancedTooltip {
-  cursor: var(--custom-cursor, pointer);
-
-  margin-left: 0.25rem;
-
   color: var(--color-gray-4);
-
   transition: color 150ms;
 }
 
 .advancedTooltipContainer {
-  z-index: 1;
-
-  width: 18.9375rem;
-}
-
-.advancedTooltipMessage {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-
-  font-size: 0.75rem;
+  max-width: 18.9375rem !important;
 }
 
 .advancedValue {
@@ -332,7 +216,6 @@
 
 .advancedInput {
   position: relative;
-
   margin-bottom: 0.5rem;
 }
 
@@ -341,7 +224,6 @@
 
   &.isEmpty::before {
     content: "0";
-
     font-size: 1rem;
   }
 }
@@ -379,7 +261,6 @@
 
 .advancedLinkIcon {
   margin-inline-end: -0.267em;
-
   font-size: 115.4%;
 }
 
@@ -388,7 +269,8 @@
 }
 
 .footerButtonWrapper {
-  height: 2.75rem;
+  overflow: hidden;
+  height: 3rem;
 
   :global(.Transition_slide) {
     background: var(--background-color);
@@ -401,31 +283,26 @@
   padding: 0.5rem !important;
 }
 
-.swapArrowIcon {
-  margin: 0 -0.125rem;
-
-  font-size: 1.25rem;
-
-  &:global(.icon-arrow-right) {
-    font-weight: 600 !important;
-  }
+.footerButtonInner {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.swapArrowIconTitle {
+.swapArrowIcon {
+  font-size: 1rem;
   line-height: 1;
   vertical-align: -0.125rem;
 
-  &:global(.icon-arrow-right) {
-    font-weight: 700 !important;
+  &:global(.icon-chevron-right) {
+    font-weight: 600 !important;
   }
 }
 
 .changellyInfo,
 .priceImpact {
   padding: 1rem;
-
-  background-color: var(--color-background-first);
   border-radius: var(--border-radius-default);
+  background-color: var(--color-background-first);
 
   .feeLine + & {
     margin-top: -0.25rem;
@@ -434,7 +311,6 @@
 
 .priceImpact {
   cursor: var(--custom-cursor, pointer);
-
   display: flex;
   gap: 1rem;
   align-items: center;
@@ -453,7 +329,6 @@
 
 .priceImpactTitle {
   position: relative;
-
   font-size: 0.9375rem;
   font-weight: 700;
   color: var(--color-red);
@@ -466,10 +341,9 @@
 }
 
 .priceImpactArrow {
-  position: absolute;
-  bottom: 0.0625rem;
-
-  font-size: 0.75rem;
+  font-size: 1rem;
+  line-height: 1;
+  vertical-align: -0.1875rem;
 }
 
 .priceImpactDescription {
@@ -501,9 +375,9 @@
 
     width: 3rem;
     height: 3rem;
+    border-radius: 50% 50% 0 0;
 
     background: var(--color-background-first);
-    border-radius: 50% 50% 0 0;
   }
 
   &::before {
@@ -536,7 +410,6 @@
 
 .swapCornerStaticTop {
   bottom: 0;
-
   height: 0.75rem;
 
   &::before {
@@ -560,7 +433,6 @@
 .blockchainHintWrapper {
   display: flex;
   justify-content: center;
-
   margin-top: 1rem;
   padding: 0 2rem;
 }
@@ -589,18 +461,17 @@
 
   width: 2rem;
   height: 2rem;
+  border-radius: var(--border-radius-small) !important;
 
   font-size: 1.25rem;
   color: var(--color-gray-3);
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-small) !important;
 
   @media (hover: hover) {
     &:hover,
     &:focus-visible {
       color: var(--color-input-button-text);
-
       background-color: var(--color-input-button-background);
     }
   }
@@ -608,7 +479,6 @@
   @media (pointer: coarse) {
     &:active {
       color: var(--color-input-button-text);
-
       background-color: var(--color-input-button-background);
       // Optimization
       transition: none;
@@ -696,13 +566,11 @@ $animation-time: 350ms;
 @keyframes arrow-disappear {
   from {
     transform: none;
-
     opacity: 1;
   }
 
   to {
     transform: translateY(-$translate);
-
     opacity: 0;
   }
 }
@@ -710,13 +578,11 @@ $animation-time: 350ms;
 @keyframes arrow-appear {
   from {
     transform: translateY($translate);
-
     opacity: 0;
   }
 
   to {
     transform: none;
-
     opacity: 1;
   }
 }
@@ -742,7 +608,6 @@ $animation-time: 350ms;
 
 .transactionBanner {
   align-self: center;
-
   margin-bottom: 2rem;
 }
 
@@ -759,9 +624,9 @@ $animation-time: 350ms;
   width: 100%;
   max-width: 9rem;
   margin: 0 auto;
+  border-radius: var(--border-radius-card);
 
   background-color: var(--color-white);
-  border-radius: var(--border-radius-card);
 
   transition: opacity 350ms ease-in-out;
 
@@ -796,4 +661,8 @@ $animation-time: 350ms;
   font-size: 0.8125rem;
   font-weight: 700;
   color: var(--color-gray-2);
+}
+
+.feeLine {
+  align-self: stretch;
 }

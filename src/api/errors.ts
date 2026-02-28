@@ -1,6 +1,5 @@
-// eslint-disable-next-line max-classes-per-file
 import type { ApiAnyDisplayError } from './types';
-import { ApiCommonError, ApiTransactionError } from './types';
+import { ApiCommonError } from './types';
 
 export class ApiBaseError extends Error {
   constructor(message?: string, public displayError?: ApiAnyDisplayError) {
@@ -18,18 +17,6 @@ export class ApiUserRejectsError extends ApiBaseError {
 export class ApiServerError extends ApiBaseError {
   constructor(message: string, public statusCode?: number) {
     super(message, ApiCommonError.ServerError);
-  }
-}
-
-export class ApiUnsupportedVersionError extends ApiBaseError {
-  constructor(message: string) {
-    super(message, ApiCommonError.UnsupportedVersion);
-  }
-}
-
-export class ApiHardwareBlindSigningNotEnabled extends ApiBaseError {
-  constructor(message: string = 'Blind signing not enabled') {
-    super(message, ApiTransactionError.HardwareBlindSigningNotEnabled);
   }
 }
 

@@ -1,4 +1,4 @@
-import type { FC } from '../../lib/teact/teact';
+import type { TeactNode } from '../../lib/teact/teact';
 import React from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
@@ -7,19 +7,26 @@ import useLastCallback from '../../hooks/useLastCallback';
 
 import styles from './MenuItem.module.scss';
 
-type OnClickHandler = (e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>, arg?: any) => void;
+type OnClickHandler<T = void> = T extends void
+  ? (e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>) => void
+  : (e: React.SyntheticEvent<HTMLDivElement | HTMLAnchorElement>, arg: T) => void;
 
-interface OwnProps {
+type OwnProps<T = void> = {
   className?: string;
   href?: string;
-  children: React.ReactNode;
-  onClick?: OnClickHandler;
-  clickArg?: string;
+  children: TeactNode;
   isDestructive?: boolean;
-  isSeparator?: boolean;
-}
+  role?: string;
+  isSelected?: boolean;
+} & (T extends void ? {
+  onClick?: OnClickHandler<void>;
+  clickArg?: never;
+} : {
+  onClick?: OnClickHandler<T>;
+  clickArg: T;
+});
 
-const MenuItem: FC<OwnProps> = (props) => {
+function MenuItem<T>(props: OwnProps<T>) {
   const {
     className,
     href,
@@ -27,7 +34,8 @@ const MenuItem: FC<OwnProps> = (props) => {
     onClick,
     clickArg,
     isDestructive,
-    isSeparator,
+    role,
+    isSelected,
   } = props;
 
   const handleClick = useLastCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -38,7 +46,8 @@ const MenuItem: FC<OwnProps> = (props) => {
       return;
     }
 
-    onClick(e, clickArg);
+    // Type assertion needed because clickArg is guaranteed to be present when T is not void
+    (onClick as (e: React.SyntheticEvent, arg?: T) => void)(e, clickArg);
   });
 
   const handleKeyDown = useLastCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -53,14 +62,14 @@ const MenuItem: FC<OwnProps> = (props) => {
       return;
     }
 
-    onClick(e);
+    // Type assertion needed because clickArg is guaranteed to be present when T is not void
+    (onClick as (e: React.SyntheticEvent, arg?: T) => void)(e, clickArg);
   });
 
   const fullClassName = buildClassName(
     styles.menuItem,
     className,
     isDestructive && styles.destructive,
-    isSeparator && styles.menuItem_separator,
   );
 
   if (href) {
@@ -73,8 +82,9 @@ const MenuItem: FC<OwnProps> = (props) => {
 
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role={role || 'button'}
+      aria-selected={isSelected}
+      tabIndex={isSelected ? 0 : -1}
       className={fullClassName}
       onClick={handleClick}
       onKeyDown={handleKeyDown}
@@ -82,6 +92,6 @@ const MenuItem: FC<OwnProps> = (props) => {
       {children}
     </div>
   );
-};
+}
 
 export default MenuItem;

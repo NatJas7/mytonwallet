@@ -3,6 +3,9 @@ export enum ApiCommonError {
   ServerError = 'ServerError',
   DebugError = 'DebugError',
   UnsupportedVersion = 'UnsupportedVersion',
+  InvalidPassword = 'InvalidPassword',
+  InvalidAddress = 'InvalidAddress',
+  DomainNotResolved = 'DomainNotResolved',
 }
 
 export enum ApiAuthError {
@@ -14,8 +17,6 @@ export enum ApiTransactionDraftError {
   InvalidToAddress = 'InvalidToAddress',
   InsufficientBalance = 'InsufficientBalance',
   InvalidStateInit = 'InvalidStateInit',
-  StateInitWithoutBin = 'StateInitWithoutBin',
-  DomainNotResolved = 'DomainNotResolved',
   WalletNotInitialized = 'WalletNotInitialized',
   InvalidAddressFormat = 'InvalidAddressFormat',
   InactiveContract = 'InactiveContract',
@@ -26,10 +27,30 @@ export enum ApiTransactionError {
   IncorrectDeviceTime = 'IncorrectDeviceTime',
   InsufficientBalance = 'InsufficientBalance',
   UnsuccesfulTransfer = 'UnsuccesfulTransfer',
-  NotSupportedHardwareOperation = 'NotSupportedHardwareOperation',
-  HardwareBlindSigningNotEnabled = 'HardwareBlindSigningNotEnabled',
   WrongAddress = 'WrongAddress',
   WrongNetwork = 'WrongNetwork',
+  ConcurrentTransaction = 'ConcurrentTransaction',
 }
 
-export type ApiAnyDisplayError = ApiCommonError | ApiAuthError | ApiTransactionDraftError | ApiTransactionError;
+export enum ApiHardwareError {
+  /** Used when the chain's Ledger app needs to be updated to support this transaction */
+  HardwareOutdated = 'HardwareOutdated',
+  BlindSigningNotEnabled = 'BlindSigningNotEnabled',
+  RejectedByUser = 'RejectedByUser',
+  ProofTooLarge = 'ProofTooLarge',
+  ConnectionBroken = 'ConnectionBroken',
+  WrongDevice = 'WrongDevice',
+}
+
+export enum ApiTokenImportError {
+  AddressDoesNotExist = 'AddressDoesNotExist',
+  NotATokenAddress = 'NotATokenAddress',
+}
+
+export type ApiAnyDisplayError =
+  | ApiCommonError
+  | ApiAuthError
+  | ApiTransactionDraftError
+  | ApiTransactionError
+  | ApiHardwareError
+  | ApiTokenImportError;

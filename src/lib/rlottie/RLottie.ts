@@ -98,7 +98,6 @@ class RLottie {
     let instance = instancesByRenderId.get(renderId);
 
     if (!instance) {
-      // eslint-disable-next-line prefer-rest-params
       instance = new RLottie(...args);
       instancesByRenderId.set(renderId, instance);
     } else {
@@ -248,7 +247,7 @@ class RLottie {
     const frame = this.getFrame(this.prevFrameIndex) || this.getFrame(Math.round(this.approxFrameIndex));
 
     if (frame && frame !== WAITING) {
-      ctx.drawImage(frame, containerInfo.coords!.x, containerInfo.coords!.y);
+      ctx.drawImage(frame, containerInfo.coords.x, containerInfo.coords.y);
     }
   }
 
@@ -379,7 +378,7 @@ class RLottie {
   private initRenderer() {
     this.workerIndex = cycleRestrict(MAX_WORKERS, ++lastWorkerIndex);
 
-    workers[this.workerIndex].request({
+    void workers[this.workerIndex].request({
       name: 'rlottie:init',
       args: [
         this.renderId,
@@ -393,7 +392,7 @@ class RLottie {
   }
 
   private destroyRenderer() {
-    workers[this.workerIndex].request({
+    void workers[this.workerIndex].request({
       name: 'rlottie:destroy',
       args: [this.renderId],
     });
@@ -415,7 +414,7 @@ class RLottie {
     this.tgsUrl = tgsUrl;
     this.initConfig();
 
-    workers[this.workerIndex].request({
+    void workers[this.workerIndex].request({
       name: 'rlottie:changeData',
       args: [
         this.renderId,
@@ -575,7 +574,7 @@ class RLottie {
   private requestFrame(frameIndex: number) {
     this.frames[frameIndex] = WAITING;
 
-    workers[this.workerIndex].request({
+    void workers[this.workerIndex].request({
       name: 'rlottie:renderFrames',
       args: [this.renderId, frameIndex, this.onFrameLoad.bind(this)],
     });

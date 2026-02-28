@@ -4,15 +4,16 @@ import React, {
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiActivity } from '../../api/types';
-import type { Account, GlobalState, UserSwapToken } from '../../global/types';
+import type { Account, GlobalState, UserSwapToken, UserToken } from '../../global/types';
 import { SwapState, SwapType } from '../../global/types';
 
-import { IS_CAPACITOR } from '../../config';
 import {
   selectCurrentAccount,
   selectCurrentAccountState,
   selectSwapTokens,
+  selectSwapType,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import { formatCurrencyExtended } from '../../util/formatNumber';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
@@ -38,12 +39,11 @@ import styles from './Swap.module.scss';
 
 interface StateProps {
   currentSwap: GlobalState['currentSwap'];
+  swapType: SwapType;
   swapTokens?: UserSwapToken[];
   activityById?: Record<string, ApiActivity>;
-  addressByChain?: Account['addressByChain'];
+  accountChains?: Account['byChain'];
 }
-
-const FULL_SIZE_NBS_STATES = [SwapState.Password, SwapState.SelectTokenFrom, SwapState.SelectTokenTo];
 
 function SwapModal({
   currentSwap: {
@@ -55,16 +55,16 @@ function SwapModal({
     isLoading,
     error,
     activityId,
-    swapType,
     toAddress,
     payinAddress,
     payoutAddress,
     payinExtraId,
     shouldResetOnClose,
   },
+  swapType,
   swapTokens,
   activityById,
-  addressByChain,
+  accountChains,
 }: StateProps) {
   const {
     startSwap,
@@ -73,6 +73,9 @@ function SwapModal({
     submitSwap,
     showActivityInfo,
     submitSwapCex,
+    addSwapToken,
+    setSwapTokenIn,
+    setSwapTokenOut,
   } = getActions();
   const lang = useLang();
   const { isPortrait } = useDeviceScreen();
@@ -149,8 +152,10 @@ function SwapModal({
   });
 
   const handleTransactionInfoClick = useLastCallback(() => {
+    if (!activityId) return;
+
     cancelSwap({ shouldReset: true });
-    showActivityInfo({ id: activityId! });
+    showActivityInfo({ id: activityId });
   });
 
   const handleModalClose = useLastCallback(() => {
@@ -160,6 +165,13 @@ function SwapModal({
 
   const handleModalCloseWithReset = useLastCallback(() => {
     cancelSwap({ shouldReset: true });
+  });
+
+  const handleTokenSelect = useLastCallback((token: UserSwapToken | UserToken) => {
+    addSwapToken({ token: token as UserSwapToken });
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
+    const setToken = renderingKey === SwapState.SelectTokenTo ? setSwapTokenOut : setSwapTokenIn;
+    setToken({ tokenSlug: token.slug });
   });
 
   const handleStartSwap = useLastCallback(() => {
@@ -180,19 +192,18 @@ function SwapModal({
         tokenOut={tokenOut}
         text={formatCurrencyExtended(amountIn, tokenIn.symbol ?? '', true)}
         secondText={formatCurrencyExtended(amountOut, tokenOut.symbol ?? '', true)}
-        className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
+        className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
       />
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: SwapState) {
     switch (currentKey) {
       case SwapState.Initial:
         return (
           <>
             <ModalHeader
-              title={lang('SwapTitle')}
+              title={lang('$swap_action')}
               onClose={cancelSwap}
             />
             <SwapInitial isActive={isActive} />
@@ -219,7 +230,7 @@ function SwapModal({
             payinAddress={payinAddress}
             payoutAddress={payoutAddress}
             payinExtraId={payinExtraId}
-            addressByChain={addressByChain}
+            accountChains={accountChains}
             activity={renderedActivity}
             onClose={handleModalCloseWithReset}
           />
@@ -249,6 +260,7 @@ function SwapModal({
             onClose={handleModalCloseWithReset}
             onInfoClick={handleTransactionInfoClick}
             onStartSwap={handleStartSwap}
+            isDetailsDisabled={!activityId}
           />
         );
       }
@@ -257,7 +269,10 @@ function SwapModal({
         return (
           <TokenSelector
             isActive={isActive}
+            shouldUseSwapTokens
             shouldFilter={currentKey === SwapState.SelectTokenTo}
+            isSwapOut={currentKey === SwapState.SelectTokenTo}
+            onTokenSelect={handleTokenSelect}
             onBack={handleBackClick}
             onClose={handleModalCloseWithReset}
           />
@@ -265,18 +280,12 @@ function SwapModal({
     }
   }
 
-  const forceFullNative = FULL_SIZE_NBS_STATES.includes(renderingKey)
-    // Crosschain exchanges have additional information that may cause the height of the modal to be insufficient
-    || (renderingKey === SwapState.Complete && renderedSwapType !== SwapType.OnChain);
-
   return (
     <Modal
       isOpen={isOpen}
       onClose={cancelSwap}
       noBackdropClose
       dialogClassName={styles.modalDialog}
-      nativeBottomSheetKey="swap"
-      forceFullNative={forceFullNative}
       hasCloseButton
       onCloseAnimationEnd={handleModalClose}
     >
@@ -301,8 +310,9 @@ export default memo(withGlobal((global): StateProps => {
 
   return {
     currentSwap: global.currentSwap,
+    swapType: selectSwapType(global),
     swapTokens: selectSwapTokens(global),
     activityById,
-    addressByChain: account?.addressByChain,
+    accountChains: account?.byChain,
   };
 })(SwapModal));

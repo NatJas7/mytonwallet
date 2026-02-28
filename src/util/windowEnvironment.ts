@@ -1,19 +1,17 @@
 import type { LangCode } from '../global/types';
 
 import {
-  IS_CAPACITOR, IS_EXTENSION, IS_FIREFOX_EXTENSION, LANG_LIST,
+  IS_CAPACITOR, IS_CORE_WALLET, IS_EXTENSION, IS_FIREFOX_EXTENSION, IS_TELEGRAM_APP, LANG_LIST,
 } from '../config';
 import { requestForcedReflow } from '../lib/fasterdom/fasterdom';
+import { DETACHED_TAB_URL } from './ledger/tab';
 import { getPlatform } from './getPlatform';
 
-function isIPad() {
-  const { userAgent, platform } = window.navigator;
-  return platform === 'iPad'
-    || userAgent.includes('iPad')
-    || (platform === 'MacIntel' && ('maxTouchPoints' in navigator && navigator.maxTouchPoints > 2));
-}
+const TELEGRAM_MOBILE_PLATFORM = new Set(['android', 'android_x', 'ios']);
 
 function getBrowserLanguage(): LangCode {
+  if (IS_CORE_WALLET) return 'en';
+
   const { language } = navigator;
   const lang = language.startsWith('zh')
     ? (language.endsWith('TW') || language.endsWith('HK') ? 'zh-Hant' : 'zh-Hans')
@@ -41,23 +39,30 @@ export const IS_FIREFOX = navigator.userAgent.includes('Firefox/');
 export const IS_TOUCH_ENV = window.matchMedia('(pointer: coarse)').matches;
 export const IS_CHROME_EXTENSION = Boolean(window.chrome?.system);
 export const IS_ELECTRON = Boolean(window.electron);
-export const IS_WEB = !IS_CAPACITOR && !IS_ELECTRON && !IS_EXTENSION;
+export const IS_WEB = !IS_CAPACITOR && !IS_ELECTRON && !IS_EXTENSION && !IS_TELEGRAM_APP;
 export const DEFAULT_LANG_CODE = 'en';
 export const USER_AGENT_LANG_CODE = getBrowserLanguage();
 export const DPR = window.devicePixelRatio || 1;
-export const IS_LEDGER_SUPPORTED = IS_CAPACITOR || !(IS_IOS || IS_FIREFOX_EXTENSION);
-export const IS_LEDGER_EXTENSION_TAB = global.location.hash.startsWith('#detached');
+export const IS_LEDGER_SUPPORTED = IS_CAPACITOR
+  || !(IS_CORE_WALLET || IS_IOS || IS_FIREFOX_EXTENSION || IS_TELEGRAM_APP);
+export const IS_LEDGER_EXTENSION_TAB = global.location.hash.startsWith(DETACHED_TAB_URL);
 // Disable biometric auth on electron for now until this issue is fixed:
 // https://github.com/electron/electron/issues/24573
 export const IS_BIOMETRIC_AUTH_SUPPORTED = Boolean(
-  !IS_CAPACITOR && window.navigator.credentials && (!IS_ELECTRON || IS_MAC_OS),
+  !IS_CAPACITOR && !IS_TELEGRAM_APP && window.navigator.credentials && (!IS_ELECTRON || IS_MAC_OS),
 );
-export const IS_DELEGATED_BOTTOM_SHEET = IS_CAPACITOR && global.location.search.startsWith('?bottom-sheet');
-export const IS_DELEGATING_BOTTOM_SHEET = IS_CAPACITOR && IS_IOS && !IS_DELEGATED_BOTTOM_SHEET && !isIPad();
-export const IS_MULTITAB_SUPPORTED = 'BroadcastChannel' in window && !IS_LEDGER_EXTENSION_TAB;
 export const IS_DAPP_SUPPORTED = IS_EXTENSION || IS_ELECTRON || IS_CAPACITOR;
 export const IS_IOS_APP = IS_IOS && IS_CAPACITOR;
 export const IS_ANDROID_APP = IS_ANDROID && IS_CAPACITOR;
+export const IS_VIEW_TRANSITION_SUPPORTED = typeof document.startViewTransition === 'function';
+
+// Note: As of 01-10-2025, Firefox extensions require `clipboardRead` permission in manifest to read data
+// Note: As of 22-02-2023, clipboard functionality is only available to the Telegram partners
+// https://github.com/Telegram-Mini-Apps/telegram-apps/issues/609#issuecomment-2571435311
+export const IS_CLIPBOARDS_SUPPORTED = !(IS_TELEGRAM_APP || IS_FIREFOX_EXTENSION) && getIsClipboardReadTextSupported();
+
+export const REM = parseInt(getComputedStyle(document.documentElement).fontSize, 10);
+export const STICKY_CARD_INTERSECTION_THRESHOLD = -3 * REM;
 
 export function setScrollbarWidthProperty() {
   const el = document.createElement('div');
@@ -75,5 +80,14 @@ export function setScrollbarWidthProperty() {
   });
 }
 
-export const REM = parseInt(getComputedStyle(document.documentElement).fontSize, 10);
-export const STICKY_CARD_INTERSECTION_THRESHOLD = -3.75 * REM;
+export function getIsMobileTelegramApp() {
+  return IS_TELEGRAM_APP && TELEGRAM_MOBILE_PLATFORM.has(window.Telegram?.WebApp.platform ?? '');
+}
+
+function getIsClipboardReadTextSupported() {
+  return (
+    typeof navigator !== 'undefined'
+    && 'clipboard' in navigator
+    && typeof navigator.clipboard?.readText === 'function'
+  );
+}

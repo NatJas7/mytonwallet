@@ -1,10 +1,10 @@
 import { DEBUG, DEBUG_API } from '../config';
-import { omit } from './iteratees';
+import { AssertionError } from './assert';
 
-interface Log {
+export interface Log {
   message: string;
   args: any[];
-  timestamp: number;
+  time: number; // Passing data from the worker to the application as a date object is not supported
   level: 'debug' | 'debugError';
 }
 
@@ -17,12 +17,13 @@ export function errorReplacer(_: string, value: any) {
       name: value.name,
       message: value.message,
       stack: value.stack,
+      metadata: value instanceof AssertionError ? value.metadata : undefined,
     };
   }
   return value;
 }
 
-export function addLog(log: Omit<Log, 'timestamp'>) {
+export function addLog(log: Omit<Log, 'time'>) {
   if (logs.length > MAX_LOG_LENGTH) {
     logs.shift();
   }
@@ -30,23 +31,12 @@ export function addLog(log: Omit<Log, 'timestamp'>) {
   logs.push({
     ...log,
     args: log.args.map((arg) => JSON.stringify(arg, errorReplacer)),
-    timestamp: Date.now(),
+    time: Date.now(),
   });
 }
 
 export function getLogs() {
   return logs;
-}
-
-export function logActionHandling(name: string, payload?: any) {
-  if (!DEBUG_API) return;
-  if (name === 'apiUpdate') {
-    if (typeof payload?.type === 'object' && payload.type !== 'updatingStatus') {
-      logDebugApi(`Update: ${payload.type}`, omit(payload, ['type']));
-    }
-  } else {
-    logDebugApi(`Action: ${name}`, payload);
-  }
 }
 
 export function logDebugError(message: string, ...args: any[]) {
@@ -79,12 +69,12 @@ export function logDebugApi(message: any, obj1: any, obj2?: any) {
 export function logSelfXssWarnings() {
   const selfXssWarnings: AnyLiteral = {
     en: 'WARNING! This console can be a way for bad people to take over your crypto wallet through something called '
-        + 'a Self-XSS attack. So, don\'t put in or paste code you don\'t understand. Stay safe!',
+      + 'a Self-XSS attack. So, don\'t put in or paste code you don\'t understand. Stay safe!',
     ru: 'ВНИМАНИЕ! Через эту консоль злоумышленники могут захватить ваш криптовалютный кошелёк с помощью так '
-        + 'называемой атаки Self-XSS. Поэтому не вводите и не вставляйте код, который вы не понимаете. Берегите себя!',
+      + 'называемой атаки Self-XSS. Поэтому не вводите и не вставляйте код, который вы не понимаете. Берегите себя!',
     es: '¡ADVERTENCIA! Esta consola puede ser una forma en que las personas malintencionadas se apoderen de su '
-        + 'billetera de criptomonedas mediante un ataque llamado Self-XSS. Por lo tanto, '
-        + 'no introduzca ni pegue código que no comprenda. ¡Cuídese!',
+      + 'billetera de criptomonedas mediante un ataque llamado Self-XSS. Por lo tanto, '
+      + 'no introduzca ni pegue código que no comprenda. ¡Cuídese!',
     zh: '警告！这个控制台可能成为坏人通过所谓的Self-XSS攻击来接管你的加密货币钱包的方式。因此，请不要输入或粘贴您不理解的代码。请保护自己！',
   };
 

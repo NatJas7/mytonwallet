@@ -1,7 +1,4 @@
-export type ApiSubmitTransferTronResult = {
-  toAddress: string;
-  amount: bigint;
-  txId: string;
-} | {
-  error: string;
-};
+export enum TronContractMethodSignature {
+  Transfer = 'a9059cbb',
+  TransferFrom = '23b872dd',
+}

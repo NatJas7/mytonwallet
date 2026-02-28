@@ -8,15 +8,20 @@ import { formatCurrencyExtended } from '../../util/formatNumber';
 
 import useLang from '../../hooks/useLang';
 
+import SensitiveData from '../ui/SensitiveData';
+
 import styles from './StakingProfileItem.module.scss';
 
 interface OwnProps {
   tonToken: UserToken;
   timestamp: number;
   profit: string;
+  isSensitiveDataHidden?: true;
 }
 
-function StakingProfitItem({ tonToken, timestamp, profit }: OwnProps) {
+function StakingProfitItem({
+  tonToken, timestamp, profit, isSensitiveDataHidden,
+}: OwnProps) {
   const lang = useLang();
 
   return (
@@ -26,9 +31,18 @@ function StakingProfitItem({ tonToken, timestamp, profit }: OwnProps) {
         <div className={styles.operationName}>{lang('Earned')}</div>
         <div className={styles.date}>{formatHumanDay(lang, timestamp)}, {formatTime(timestamp)}</div>
       </div>
-      <div className={styles.amount}>
+      <SensitiveData
+        isActive={isSensitiveDataHidden}
+        cellSize={8}
+        rows={2}
+        min={4}
+        max={10}
+        seed={timestamp.toString()}
+        align="right"
+        className={styles.amount}
+      >
         {formatCurrencyExtended(profit, tonToken.symbol)}
-      </div>
+      </SensitiveData>
     </div>
   );
 }

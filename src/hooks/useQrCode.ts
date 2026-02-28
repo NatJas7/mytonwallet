@@ -1,18 +1,20 @@
 import type QRCodeStyling from 'qr-code-styling';
 import {
+  type ElementRef,
   useEffect, useLayoutEffect, useRef, useState,
 } from '../lib/teact/teact';
 import { removeExtraClass } from '../lib/teact/teact-dom';
 
 import type { ApiChain } from '../api/types';
 
+import { IS_CORE_WALLET } from '../config';
+import { getChainConfig } from '../util/chain';
 import getChainNetworkIcon from '../util/swap/getChainNetworkIcon';
-import formatTransferUrl from '../util/ton/formatTransferUrl';
 
 const QR_SIZE = 600;
 
 interface UseQRCodeHook {
-  qrCodeRef: React.RefObject<HTMLDivElement>;
+  qrCodeRef: ElementRef<HTMLDivElement>;
   isInitialized: boolean;
 }
 
@@ -24,41 +26,41 @@ export default function useQrCode({
   isActive,
   hiddenClassName,
   hideLogo,
-  withFormatTransferUrl,
+  preferUrl,
 }: {
   address?: string;
   chain?: ApiChain;
   isActive?: boolean;
   hiddenClassName?: string;
   hideLogo?: boolean;
-  withFormatTransferUrl?: boolean;
+  preferUrl?: boolean;
 }): UseQRCodeHook {
   const [isInitialized, setIsInitialized] = useState(!!qrCode);
+  const logoUrl = IS_CORE_WALLET ? './coreWallet/logo.svg' : './logo.svg';
 
-  // eslint-disable-next-line no-null/no-null
-  const qrCodeRef = useRef<HTMLDivElement>(null);
+  const qrCodeRef = useRef<HTMLDivElement>();
 
   useEffect(() => {
     if (isInitialized) return;
 
-    import('qr-code-styling')
+    void import('qr-code-styling')
       .then(({ default: QrCodeStyling }) => {
         qrCode = new QrCodeStyling({
           width: QR_SIZE,
           height: QR_SIZE,
-          image: chain ? getChainNetworkIcon(chain) : './logo.svg',
+          image: chain ? getChainNetworkIcon(chain) : logoUrl,
           margin: 0,
           type: 'canvas',
           dotsOptions: { type: 'rounded' },
           cornersSquareOptions: { type: 'extra-rounded' },
           imageOptions: { imageSize: 0.4, margin: 8, crossOrigin: 'anonymous' },
           qrOptions: { errorCorrectionLevel: 'M' },
-          data: formatTransferUrl(''),
+          data: '',
         });
 
         setIsInitialized(true);
       });
-  }, [chain, isInitialized]);
+  }, [chain, isInitialized, logoUrl]);
 
   useLayoutEffect(() => {
     if (!isActive || !isInitialized) return;
@@ -67,18 +69,21 @@ export default function useQrCode({
 
     if (qrCodeRef.current) {
       qrCode?.append(qrCodeRef.current);
-      // eslint-disable-next-line no-underscore-dangle
+
       qrCode._options.image = hideLogo
         ? undefined
-        : (chain ? getChainNetworkIcon(chain) : './logo.svg');
+        : (chain ? getChainNetworkIcon(chain) : logoUrl);
     }
-  }, [isActive, isInitialized, hiddenClassName, hideLogo, chain]);
+  }, [isActive, isInitialized, hiddenClassName, hideLogo, chain, logoUrl]);
 
   useEffect(() => {
     if (!address || !isActive || !qrCode || !isInitialized) return;
 
-    qrCode.update({ data: withFormatTransferUrl ? formatTransferUrl(address) : address });
-  }, [address, isActive, isInitialized, withFormatTransferUrl]);
+    const formatTransferUrl = chain && getChainConfig(chain).formatTransferUrl;
+    const data = preferUrl && formatTransferUrl ? formatTransferUrl(address) : address;
+
+    qrCode.update({ data });
+  }, [address, isActive, isInitialized, preferUrl, chain]);
 
   return { qrCodeRef, isInitialized };
 }

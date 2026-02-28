@@ -1,8 +1,9 @@
-import type { FC } from '../../lib/teact/teact';
+import type { FC, TeactNode } from '../../lib/teact/teact';
 import React, { memo, useEffect, useMemo } from '../../lib/teact/teact';
 import { getGlobal } from '../../global';
 
 import { ANIMATION_LEVEL_MAX } from '../../config';
+import buildClassName from '../../util/buildClassName';
 import { throttleWithTickEnd } from '../../util/schedulers';
 
 import useForceUpdate from '../../hooks/useForceUpdate';
@@ -56,7 +57,7 @@ const AnimatedCounter: FC<OwnProps> = ({
   }, [shouldAnimate, text]);
 
   return (
-    <span className={!isDisabled && styles.root} dir={isRtl ? 'rtl' : undefined}>
+    <span className={buildClassName(!isDisabled && styles.root)} dir={isRtl ? 'rtl' : undefined}>
       {characters}
     </span>
   );
@@ -77,7 +78,7 @@ function scheduleAnimation(condition: boolean) {
 }
 
 function renderAnimatedCharacters(text: string, prevText?: string) {
-  const elements: React.ReactNode[] = [];
+  const elements: TeactNode[] = [];
   const textLength = text.length;
   const prevTextLength = prevText?.length ?? 0;
 

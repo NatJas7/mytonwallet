@@ -1,20 +1,26 @@
 import React, {
-  memo, useEffect, useRef, useState,
+  memo, useEffect, useMemo, useRef, useState,
 } from '../../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../../global';
 
-import type { ApiNft } from '../../../../api/types';
+import type { ApiNft, ApiNftCollection } from '../../../../api/types';
 import { type IAnchorPosition } from '../../../../global/types';
 
-import { selectCurrentAccountState } from '../../../../global/selectors';
+import { IS_CORE_WALLET } from '../../../../config';
+import {
+  selectCurrentAccountState,
+  selectIsCurrentAccountViewMode,
+} from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
 import captureEscKeyListener from '../../../../util/captureEscKeyListener';
+import { getCountDaysToDate } from '../../../../util/dateFormat';
+import { getDomainsExpirationDate, isRenewableDnsNft } from '../../../../util/dns';
+import { compact } from '../../../../util/iteratees';
 
 import { getIsPortrait } from '../../../../hooks/useDeviceScreen';
 import useHistoryBack from '../../../../hooks/useHistoryBack';
 import useLang from '../../../../hooks/useLang';
 import useLastCallback from '../../../../hooks/useLastCallback';
-import useMenuPosition from '../../../../hooks/useMenuPosition';
 
 import Button from '../../../ui/Button';
 import { type DropdownItem } from '../../../ui/Dropdown';
@@ -22,36 +28,38 @@ import DropdownMenu from '../../../ui/DropdownMenu';
 
 import styles from './NftCollectionHeader.module.scss';
 
+type MenuHandler = 'send' | 'hide' | 'renew' | 'burn' | 'select-all';
+
 interface StateProps {
+  isViewMode: boolean;
   byAddress?: Record<string, ApiNft>;
-  selectedAddresses?: string[];
-  currentCollectionAddress?: string;
+  dnsExpiration?: Record<string, number>;
+  selectedNfts?: ApiNft[];
+  currentCollection?: ApiNftCollection;
 }
 
-const MENU_ITEMS: DropdownItem[] = [{
-  name: 'Send',
-  value: 'send',
-}, {
-  name: 'Hide',
-  value: 'hide',
-}, {
-  name: 'Burn',
-  value: 'burn',
-  isDangerous: true,
-}, {
-  name: 'Select All',
-  value: 'select-all',
-  withSeparator: true,
-}];
-
-function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAddress }: StateProps) {
+function NftSelectionHeader({
+  isViewMode, selectedNfts, byAddress, dnsExpiration, currentCollection,
+}: StateProps) {
   const {
-    selectAllNfts, clearNftsSelection, startTransfer, burnNfts, openHideNftModal,
+    selectAllNfts, clearNftsSelection, startTransfer, burnNfts, openHideNftModal, openDomainRenewalModal,
   } = getActions();
 
   const lang = useLang();
-  const amount = selectedAddresses?.length ?? 1;
-  const isActive = Boolean(selectedAddresses?.length);
+  const amount = selectedNfts?.length ?? 1;
+  const isActive = Boolean(selectedNfts?.length);
+  const areAllSelectedRenewableDns = useMemo(() => {
+    return selectedNfts?.length
+      ? selectedNfts.every((nft) => isRenewableDnsNft(byAddress?.[nft.address]))
+      : false;
+  }, [byAddress, selectedNfts]);
+  const dnsExpireInDays = useMemo(() => {
+    if (!areAllSelectedRenewableDns) return undefined;
+    const date = getDomainsExpirationDate(selectedNfts ?? [], byAddress, dnsExpiration);
+
+    return date ? getCountDaysToDate(date) : undefined;
+  }, [areAllSelectedRenewableDns, dnsExpiration, selectedNfts, byAddress]);
+  const tonDnsMultiSelected = (selectedNfts?.length ?? 0) > 1;
 
   useHistoryBack({
     isActive,
@@ -60,8 +68,39 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
 
   useEffect(() => (isActive ? captureEscKeyListener(clearNftsSelection) : undefined), [isActive]);
 
+  const menuItems: DropdownItem<MenuHandler>[] = useMemo(() => {
+    return compact([
+      !isViewMode && {
+        name: 'Send',
+        value: 'send',
+      },
+      !isViewMode && areAllSelectedRenewableDns && {
+        name: tonDnsMultiSelected ? 'Renew All' : 'Renew',
+        value: 'renew',
+        description: dnsExpireInDays && dnsExpireInDays < 0
+          ? (tonDnsMultiSelected ? '$expired_many' : 'Expired')
+          : lang('$expires_in %days%', {
+            days: lang('$in_days', dnsExpireInDays),
+          }, undefined, selectedNfts?.length ?? 1) as string,
+      } satisfies DropdownItem<MenuHandler>,
+      !IS_CORE_WALLET && {
+        name: 'Hide',
+        value: 'hide',
+      } satisfies DropdownItem<MenuHandler>,
+      !isViewMode && {
+        name: 'Burn',
+        value: 'burn',
+        isDangerous: true,
+      } satisfies DropdownItem<MenuHandler>, {
+        name: 'Select All',
+        value: 'select-all',
+        withDelimiter: true,
+      },
+    ]);
+  }, [areAllSelectedRenewableDns, dnsExpireInDays, isViewMode, lang, selectedNfts?.length, tonDnsMultiSelected]);
+
   const handleSendClick = useLastCallback(() => {
-    const nfts = selectedAddresses!.map((address) => byAddress![address]) ?? [];
+    const nfts = selectedNfts!.map((nft) => byAddress![nft.address]) ?? [];
 
     clearNftsSelection();
 
@@ -72,7 +111,7 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
   });
 
   const handleBurnClick = useLastCallback(() => {
-    const nfts = selectedAddresses!.map((address) => byAddress![address]) ?? [];
+    const nfts = selectedNfts!.map((nft) => byAddress![nft.address]) ?? [];
 
     clearNftsSelection();
 
@@ -82,36 +121,26 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
   const handleHideClick = useLastCallback(() => {
     clearNftsSelection();
 
-    openHideNftModal({ addresses: selectedAddresses!, isCollection: false });
+    openHideNftModal({ addresses: selectedNfts!.map((e) => e.address), isCollection: false });
   });
 
-  const [menuPosition, setMenuPosition] = useState<IAnchorPosition>();
-  const isMenuOpen = Boolean(menuPosition);
-  // eslint-disable-next-line no-null/no-null
-  const ref = useRef<HTMLButtonElement>(null);
+  const [menuAnchor, setMenuAnchor] = useState<IAnchorPosition>();
+  const isMenuOpen = Boolean(menuAnchor);
+  const ref = useRef<HTMLButtonElement>();
+  const menuRef = useRef<HTMLDivElement>();
   const handleMenuOpen = useLastCallback(() => {
     const { right: x, bottom: y } = ref.current!.getBoundingClientRect();
-    setMenuPosition({ x, y });
+    setMenuAnchor({ x, y });
   });
   const handleMenuClose = useLastCallback(() => {
-    setMenuPosition(undefined);
+    setMenuAnchor(undefined);
   });
   const getTriggerElement = useLastCallback(() => ref.current);
   const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => document.querySelector('#portals .menu-bubble'));
+  const getMenuElement = useLastCallback(() => menuRef.current);
   const getLayout = useLastCallback(() => ({ withPortal: true }));
 
-  const {
-    positionY, transformOriginX, transformOriginY, style: menuStyle,
-  } = useMenuPosition(
-    menuPosition,
-    getTriggerElement,
-    getRootElement,
-    getMenuElement,
-    getLayout,
-  );
-
-  const handleMenuItemClick = useLastCallback((value: string) => {
+  const handleMenuItemClick = useLastCallback((value: MenuHandler) => {
     switch (value) {
       case 'send': {
         handleSendClick();
@@ -126,7 +155,11 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
         break;
       }
       case 'select-all': {
-        selectAllNfts({ collectionAddress: currentCollectionAddress });
+        selectAllNfts({ collectionAddress: currentCollection?.address });
+        break;
+      }
+      case 'renew': {
+        openDomainRenewalModal({ addresses: selectedNfts!.map((e) => e.address) });
         break;
       }
     }
@@ -134,9 +167,14 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
 
   return (
     <div className={styles.root}>
-      <Button className={styles.backButton} isSimple isText onClick={clearNftsSelection}>
+      <Button
+        isSimple
+        isText
+        ariaLabel={lang('Back')}
+        className={styles.backButton}
+        onClick={clearNftsSelection}
+      >
         <i className={buildClassName(styles.backIcon, 'icon-chevron-left')} aria-hidden />
-        <span>{lang('Back')}</span>
       </Button>
       <div className={styles.content}>
         <div className={styles.title}>
@@ -149,16 +187,19 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
         </Button>
         <DropdownMenu
           isOpen={isMenuOpen}
+          ref={menuRef}
           withPortal
           shouldTranslateOptions
-          menuPositionHorizontal="right"
-          menuPosition={positionY}
-          menuStyle={menuStyle}
-          transformOriginX={transformOriginX}
-          transformOriginY={transformOriginY}
+          menuPositionX="right"
+          menuAnchor={menuAnchor}
+          getTriggerElement={getTriggerElement}
+          getRootElement={getRootElement}
+          getMenuElement={getMenuElement}
+          getLayout={getLayout}
           buttonClassName={styles.menuItem}
           bubbleClassName={styles.menu}
-          items={MENU_ITEMS}
+          itemDescriptionClassName={styles.menuItemDescription}
+          items={menuItems}
           onSelect={handleMenuItemClick}
           onClose={handleMenuClose}
         />
@@ -169,8 +210,14 @@ function NftSelectionHeader({ selectedAddresses, byAddress, currentCollectionAdd
 
 export default memo(withGlobal((global): StateProps => {
   const {
-    selectedAddresses, byAddress, currentCollectionAddress,
+    selectedNfts, byAddress, currentCollection, dnsExpiration,
   } = selectCurrentAccountState(global)?.nfts || {};
 
-  return { selectedAddresses, byAddress, currentCollectionAddress };
+  return {
+    selectedNfts,
+    byAddress,
+    currentCollection,
+    dnsExpiration,
+    isViewMode: selectIsCurrentAccountViewMode(global),
+  };
 })(NftSelectionHeader));

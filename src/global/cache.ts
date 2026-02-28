@@ -1,13 +1,13 @@
 import { getIsHeavyAnimating, onFullyIdle } from '../lib/teact/teact';
 import { addCallback, removeCallback } from '../lib/teact/teactn';
 
-import type { ApiActivity } from '../api/types';
+import type { ApiActivity, ApiChain } from '../api/types';
 import type {
+  Account,
   AccountState,
   GlobalState,
   SavedAddress,
   TokenPeriod,
-  UserToken,
 } from './types';
 import {
   StakingState,
@@ -22,22 +22,28 @@ import {
   TONCOIN,
 } from '../config';
 import { buildAccountId, parseAccountId } from '../util/account';
+import { getActivityTokenSlugs, getIsActivityPending, getIsTxIdLocal } from '../util/activities';
 import { bigintReviver } from '../util/bigint';
+import { getTokenInfo } from '../util/chain';
+import isEmptyObject from '../util/isEmptyObject';
 import {
-  cloneDeep, filterValues, mapValues, pick, pickTruthy,
+  cloneDeep, extractKey, filterValues, mapValues, omit, pick, pickTruthy, unique,
 } from '../util/iteratees';
-import { clearPoisoningCache, updatePoisoningCache } from '../util/poisoningHash';
+import {
+  clearPoisoningCache,
+  updatePoisoningCacheFromGlobalState,
+} from '../util/poisoningHash';
 import { onBeforeUnload, throttle } from '../util/schedulers';
+import { getIsActiveStakingState } from '../util/staking';
 import { IS_ELECTRON } from '../util/windowEnvironment';
-import { getIsActiveStakingState } from './helpers/staking';
-import { getIsTxIdLocal } from './helpers';
 import { addActionHandler, getGlobal } from './index';
 import { INITIAL_STATE, STATE_VERSION } from './initialState';
-import { selectAccountTokens } from './selectors';
+import { selectAccountState, selectAccountTokens } from './selectors';
 
 const UPDATE_THROTTLE = IS_CAPACITOR ? 500 : 5000;
 const ACTIVITIES_LIMIT = 20;
 const ACTIVITY_TOKENS_LIMIT = 30;
+const STAKING_HISTORY_LIMIT = 30;
 
 const updateCacheThrottled = throttle(() => onFullyIdle(() => updateCache()), UPDATE_THROTTLE, false);
 const updateCacheForced = () => updateCache(true);
@@ -54,17 +60,13 @@ export function initCache() {
   addActionHandler('afterSignIn', setupCaching);
 
   addActionHandler('afterSignOut', (global, actions, payload) => {
-    const { isFromAllAccounts } = payload || {};
-
     clearPoisoningCache();
 
-    if (!isFromAllAccounts) return;
-
-    preloadedData = pick(global, ['swapTokenInfo', 'tokenInfo', 'restrictions']);
-
-    clearCaching();
-
-    localStorage.removeItem(GLOBAL_STATE_CACHE_KEY);
+    if (payload?.shouldReset) {
+      preloadedData = pick(global, ['swapTokenInfo', 'tokenInfo', 'restrictions']);
+      clearCaching();
+      localStorage.removeItem(GLOBAL_STATE_CACHE_KEY);
+    }
   });
 
   addActionHandler('cancelCaching', clearCaching);
@@ -192,7 +194,7 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
   }
 
   // Initializing the v1
-  if (!cached.stateVersion && cached.accounts && Object.keys(cached.accounts).length > 0) {
+  if (!cached.stateVersion && cached.accounts && !isEmptyObject(cached.accounts)) {
     cached.stateVersion = 1;
   }
 
@@ -211,7 +213,7 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
     if (cached.byAccountId) {
       Object.values(cached.byAccountId).forEach((accountState) => {
         if (accountState.balances?.bySlug) {
-          accountState.balances.bySlug = pick(accountState.balances!.bySlug, ['toncoin']);
+          accountState.balances.bySlug = pick(accountState.balances.bySlug, ['toncoin']);
         }
         if ((accountState as any).transactions) {
           delete (accountState as any).transactions;
@@ -337,7 +339,6 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
 
         const { balances } = cached.byAccountId[accountId];
         if (balances) {
-          // eslint-disable-next-line @typescript-eslint/no-loop-func
           balances.bySlug = Object.entries(balances.bySlug).reduce((acc, [slug, balance]) => {
             acc[slug] = BigInt(balance);
             return acc;
@@ -358,22 +359,7 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
     cached.stateVersion = 14;
   }
 
-  if (cached.stateVersion === 14) {
-    clearActivities();
-    cached.stateVersion = 15;
-  }
-
-  if (cached.stateVersion === 15) {
-    clearActivities();
-    cached.stateVersion = 16;
-  }
-
-  if (cached.stateVersion === 16) {
-    clearActivities();
-    cached.stateVersion = 17;
-  }
-
-  if (cached.stateVersion === 17) {
+  if (cached.stateVersion >= 14 && cached.stateVersion <= 17) {
     clearActivities();
     cached.stateVersion = 18;
   }
@@ -385,25 +371,13 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
     cached.stateVersion = 20;
   }
 
-  if (cached.stateVersion === 20) {
-    clearActivities();
-    cached.stateVersion = 21;
-  }
-
-  if (cached.stateVersion === 21) {
-    clearActivities();
-    cached.stateVersion = 22;
-  }
-
-  if (cached.stateVersion === 22) {
+  if (cached.stateVersion >= 20 && cached.stateVersion <= 22) {
     clearActivities();
     cached.stateVersion = 23;
   }
 
   if (cached.stateVersion === 23) {
-    if (!('isSortByValueEnabled' in cached.settings)) {
-      cached.settings.isSortByValueEnabled = initialState.settings.isSortByValueEnabled;
-    }
+    // Removed: isSortByValueEnabled initialization (deprecated in v50)
     cached.stateVersion = 24;
   }
 
@@ -411,7 +385,7 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
     if (cached.accounts) {
       clearActivities();
       for (const account of Object.values(cached.accounts.byId)) {
-        account.addressByChain = { ton: (account as any).address } as any;
+        (account as any).addressByChain = { ton: (account as any).address };
         delete (account as any).address;
       }
     }
@@ -475,28 +449,213 @@ function migrateCache(cached: GlobalState, initialState: GlobalState) {
     cached.stateVersion = 32;
   }
 
+  if (cached.stateVersion >= 32 && cached.stateVersion <= 35) {
+    clearActivities();
+    cached.stateVersion = 36;
+  }
+
+  if (cached.stateVersion === 36) {
+    for (const account of Object.values(cached.accounts?.byId ?? {})) {
+      account.type = (account as { isHardware?: boolean }).isHardware ? 'hardware' : 'mnemonic';
+      delete (account as { isHardware?: boolean }).isHardware;
+    }
+    cached.stateVersion = 37;
+  }
+
+  if (cached.stateVersion === 37) {
+    for (const token of Object.values(cached.tokenInfo.bySlug) as any[]) {
+      if (!token.price) token.price = 0;
+      if (!token.percentChange24h) token.percentChange24h = 0;
+      if (!token.priceUsd) token.priceUsd = 0;
+      if (token.quote) delete token.quote;
+    }
+    cached.stateVersion = 38;
+  }
+
+  if (cached.stateVersion >= 38 && cached.stateVersion <= 41) {
+    clearActivities();
+    cached.stateVersion = 42;
+  }
+
+  if (cached.stateVersion === 41) {
+    for (const accountId of Object.keys(cached.byAccountId)) {
+      const accountState = cached.byAccountId[accountId];
+      if ((accountState as any).dappLastOpenedDatesByOrigin) {
+        accountState.dappLastOpenedDatesByUrl = (accountState as any).dappLastOpenedDatesByOrigin;
+        delete (accountState as any).dappLastOpenedDatesByOrigin;
+      }
+    }
+    cached.stateVersion = 42;
+  }
+
+  if (cached.stateVersion >= 42 && cached.stateVersion <= 44) {
+    clearActivities();
+    cached.stateVersion = 45;
+  }
+
+  if (cached.stateVersion === 45) {
+    clearActivities();
+
+    if (cached.accounts) {
+      for (const _account of Object.values(cached.accounts.byId)) {
+        const account = _account as Account & {
+          addressByChain?: Partial<Record<ApiChain, string>>;
+          domainByChain?: Partial<Record<ApiChain, string>>;
+          isMultisigByChain?: Partial<Record<ApiChain, boolean>>;
+        };
+
+        if (account.byChain) continue; // The migration has passed already
+
+        account.byChain = mapValues(account.addressByChain ?? {}, (address, chain) => ({
+          address,
+          domain: account.domainByChain?.[chain as ApiChain],
+          isMultisig: account.isMultisigByChain?.[chain as ApiChain] || undefined,
+        }));
+
+        delete account.addressByChain;
+        delete account.domainByChain;
+        delete account.isMultisigByChain;
+      }
+    }
+
+    cached.stateVersion = 46;
+  }
+
+  if (cached.stateVersion === 46) {
+    if (cached.accounts) {
+      for (const _account of Object.values(cached.accounts.byId)) {
+        const account = _account as Account & {
+          ledger?: { index: number };
+          byChain: { ton?: { ledgerIndex?: number } };
+        };
+
+        if (
+          account.type !== 'hardware'
+          || !account.byChain.ton
+          || !account.ledger // Already migrated
+        ) continue;
+
+        account.byChain.ton.ledgerIndex = account.ledger.index;
+        delete account.ledger;
+      }
+    }
+
+    cached.stateVersion = 47;
+  }
+
+  if (cached.stateVersion === 47) {
+    cached.pushNotifications.enabledAccounts = Object.keys(cached.pushNotifications.enabledAccounts ?? {});
+    cached.stateVersion = 48;
+  }
+
+  if (cached.stateVersion <= 49) {
+    // Android app specific migration
+    cached.stateVersion = 50;
+  }
+
+  if (cached.stateVersion === 49) {
+    // Initialize pinnedSlugs for all accounts
+    if (cached.settings?.byAccountId) {
+      Object.values(cached.settings.byAccountId).forEach((accountSettings) => {
+        if (accountSettings && !accountSettings.pinnedSlugs) {
+          accountSettings.pinnedSlugs = [];
+        }
+      });
+    }
+
+    // Remove global isSortByValueEnabled
+    if (cached.settings && 'isSortByValueEnabled' in cached.settings) {
+      const { isSortByValueEnabled: _, ...restSettings } = cached.settings as any;
+      cached.settings = restSettings;
+    }
+
+    cached.stateVersion = 50;
+  }
+
+  if (cached.stateVersion === 50) {
+    clearActivities();
+    cached.stateVersion = 51;
+  }
+
+  if (cached.stateVersion === 51) {
+    if (cached.byAccountId && cached.settings?.byAccountId) {
+      for (const accountId of Object.keys(cached.byAccountId)) {
+        const accountState = cached.byAccountId[accountId];
+        const stateById = accountState.staking?.stateById;
+        if (!stateById) continue;
+
+        const stakingSlugs = Object.values(stateById)
+          .filter((state: any) => state?.tokenSlug)
+          .map((state: any) => `staking-${state.tokenSlug}`);
+
+        if (stakingSlugs.length > 0) {
+          const accountSettings = cached.settings.byAccountId[accountId] ??= {} as any;
+          const { pinnedSlugs = [] } = accountSettings;
+          accountSettings.pinnedSlugs = unique([...stakingSlugs, ...pinnedSlugs]);
+        }
+      }
+    }
+
+    cached.stateVersion = 52;
+  }
+  if (cached.stateVersion === 52) {
+    if (cached.byAccountId) {
+      for (const accountId of Object.keys(cached.byAccountId)) {
+        if (cached.byAccountId[accountId]?.nfts?.collectionTabs) {
+          cached.byAccountId[accountId].nfts.collectionTabs = cached.byAccountId[accountId].nfts.collectionTabs
+            ?.map((e) => typeof e === 'string' ? { address: e, chain: 'ton' } : e) || [];
+        }
+      }
+    }
+    cached.stateVersion = 53;
+  }
   // When adding migration here, increase `STATE_VERSION`
 }
 
 function loadMemoryCache(cached: GlobalState) {
-  if (!cached.currentAccountId) return;
+  updatePoisoningCacheFromGlobalState(cached);
+}
 
-  const { byId, newestTransactionsBySlug } = cached.byAccountId[cached.currentAccountId].activities || {};
+const getUsedTokenSlugs = (reducedGlobal: GlobalState): string[] => {
+  const usedTokenSlugs = new Set<string>(Object.keys(getTokenInfo()));
 
-  if (byId) {
-    Object.values(byId).forEach((tx) => {
-      if (tx.kind === 'transaction' && tx.isIncoming) {
-        updatePoisoningCache(tx);
-      }
-    });
+  if (reducedGlobal.currentAccountId) {
+    const currentTokenSlug = reducedGlobal.byAccountId[reducedGlobal.currentAccountId]?.currentTokenSlug;
+    if (currentTokenSlug) {
+      usedTokenSlugs.add(currentTokenSlug);
+    }
   }
-  if (newestTransactionsBySlug) {
-    Object.values(newestTransactionsBySlug).forEach((tx) => {
-      if (tx.isIncoming) {
-        updatePoisoningCache(tx);
-      }
+
+  Object.values(reducedGlobal.byAccountId).forEach((state) => {
+    const { balances, activities, staking } = state;
+
+    Object.keys(balances?.bySlug ?? {}).forEach((slug) => usedTokenSlugs.add(slug));
+    Object.keys(activities?.byId ?? {}).forEach((transactionId) => {
+      getActivityTokenSlugs(activities!.byId[transactionId]).forEach((slug) => usedTokenSlugs.add(slug));
     });
+    Object.keys(activities?.idsBySlug ?? {}).forEach((slug) => usedTokenSlugs.add(slug));
+    Object.keys(staking?.stateById ?? {}).forEach((id) => {
+      usedTokenSlugs.add(staking!.stateById![id].tokenSlug);
+    });
+  });
+
+  return Array.from(usedTokenSlugs);
+};
+
+function getAccountTokenSlugs(global: GlobalState, accountId: string) {
+  const { currentTokenSlug } = selectAccountState(global, accountId) ?? {};
+  const tokenSlugs = extractKey(selectAccountTokens(global, accountId) ?? [], 'slug')
+    .slice(0, ACTIVITY_TOKENS_LIMIT);
+
+  if (!tokenSlugs.includes(TONCOIN.slug)) {
+    tokenSlugs.push(TONCOIN.slug);
   }
+
+  if (currentTokenSlug && !tokenSlugs.includes(currentTokenSlug)) {
+    tokenSlugs.push(currentTokenSlug);
+  }
+
+  return tokenSlugs;
 }
 
 function updateCache(force?: boolean) {
@@ -504,72 +663,136 @@ function updateCache(force?: boolean) {
     return;
   }
 
-  const global = getGlobal();
+  const global = getGlobalWithoutTemporaryAccount();
+
+  const accountsById = global.accounts?.byId || {};
   const reducedGlobal: GlobalState = {
     ...INITIAL_STATE,
     ...pick(global, [
-      'tokenInfo',
-      'settings',
       'currentAccountId',
+      // The temporary account is correctly removed from the state during the initialization phase
+      'currentTemporaryViewAccountId',
       'stateVersion',
       'restrictions',
       'pushNotifications',
+      'isFullscreen',
       'isManualLockActive',
       'stakingDefault',
+      'currencyRates',
+      'accountSelectorViewMode',
+      'seasonalTheme',
     ]),
     accounts: {
-      byId: global.accounts?.byId || {},
+      byId: accountsById,
     },
     byAccountId: reduceByAccountId(global),
+    settings: {
+      ...global.settings,
+      byAccountId: pick(global.settings.byAccountId, Object.keys(accountsById)),
+    },
+  };
+
+  const usedTokenSlugs = getUsedTokenSlugs(reducedGlobal);
+
+  reducedGlobal.tokenInfo = {
+    bySlug: pickTruthy(global.tokenInfo.bySlug, usedTokenSlugs),
   };
 
   const json = JSON.stringify(reducedGlobal);
   localStorage.setItem(GLOBAL_STATE_CACHE_KEY, json);
 }
 
+function getGlobalWithoutTemporaryAccount(): GlobalState {
+  const global = getGlobal();
+  const temporaryAccountId = global.currentTemporaryViewAccountId;
+  if (!temporaryAccountId) return global;
+
+  const accountsById = global.accounts?.byId;
+  if (!accountsById || !(temporaryAccountId in accountsById)) {
+    return global;
+  }
+
+  const newAccountsById = omit(global.accounts!.byId, [temporaryAccountId]);
+  const newByAccountId = omit(global.byAccountId, [temporaryAccountId]);
+  const newSettingsByAccountId = omit(global.settings.byAccountId, [temporaryAccountId]);
+  const orderedAccountIds = global.settings.orderedAccountIds?.filter((id) => id !== temporaryAccountId);
+
+  return {
+    ...global,
+    currentTemporaryViewAccountId: undefined,
+    accounts: {
+      ...global.accounts,
+      byId: newAccountsById,
+    },
+    byAccountId: newByAccountId,
+    settings: {
+      ...global.settings,
+      byAccountId: newSettingsByAccountId,
+      orderedAccountIds,
+    },
+  };
+}
+
 function reduceByAccountId(global: GlobalState) {
   return Object.entries(global.byAccountId).reduce((acc, [accountId, state]) => {
+    if (!global.accounts?.byId[accountId]) {
+      return acc;
+    }
+
     acc[accountId] = pick(state, [
-      'balances',
       'isBackupRequired',
       'currentTokenSlug',
       'currentTokenPeriod',
       'savedAddresses',
       'staking',
-      'stakingHistory',
       'activeContentTab',
       'landscapeActionsActiveTabIndex',
       'browserHistory',
       'blacklistedNftAddresses',
       'whitelistedNftAddresses',
-      'dappLastOpenedDatesByOrigin',
+      'dappLastOpenedDatesByUrl',
       'dapps',
     ]);
 
-    const accountTokens = selectAccountTokens(global, accountId);
-    acc[accountId].activities = reduceAccountActivities(state.activities, accountTokens);
+    if (state.nfts?.collectionTabs) {
+      acc[accountId].nfts = {
+        collectionTabs: state.nfts.collectionTabs,
+        wasTelegramGiftsAutoAdded: state.nfts.wasTelegramGiftsAutoAdded,
+      };
+    }
+
+    const accountTokenSlugs = getAccountTokenSlugs(global, accountId);
+    acc[accountId].balances = reduceAccountBalances(state.balances, accountTokenSlugs);
+    acc[accountId].activities = reduceAccountActivities(state.activities, accountTokenSlugs);
     acc[accountId].staking = reduceAccountStaking(state.staking);
+    acc[accountId].stakingHistory = state.stakingHistory?.length
+      ? state.stakingHistory.slice(0, STAKING_HISTORY_LIMIT)
+      : undefined;
 
     return acc;
   }, {} as GlobalState['byAccountId']);
 }
 
-function reduceAccountActivities(activities?: AccountState['activities'], tokens?: UserToken[]) {
-  const {
-    idsBySlug, newestTransactionsBySlug, byId, idsMain,
-  } = activities || {};
-  if (!tokens || !idsBySlug || !byId || !idsMain) return undefined;
+function reduceAccountBalances(balances?: AccountState['balances'], tokenSlugs?: string[]) {
+  if (!balances?.bySlug || !tokenSlugs) return balances;
 
-  const reducedSlugs = tokens.slice(0, ACTIVITY_TOKENS_LIMIT).map(({ slug }) => slug);
-  if (!reducedSlugs.includes(TONCOIN.slug)) {
-    reducedSlugs.push(TONCOIN.slug);
-  }
+  return {
+    ...balances,
+    bySlug: pick(balances.bySlug, tokenSlugs),
+  };
+}
+
+function reduceAccountActivities(activities?: AccountState['activities'], tokenSlugs?: string[]) {
+  const {
+    idsBySlug, newestActivitiesBySlug, byId, idsMain,
+  } = activities || {};
+  if (!tokenSlugs || !idsBySlug || !byId || !idsMain) return undefined;
 
   const reducedIdsMain = pickVisibleActivities(idsMain, byId);
-  const reducedIdsBySlug = mapValues(pickTruthy(idsBySlug, reducedSlugs), (ids) => pickVisibleActivities(ids, byId));
+  const reducedIdsBySlug = mapValues(pickTruthy(idsBySlug, tokenSlugs), (ids) => pickVisibleActivities(ids, byId));
 
-  const reducedNewestTransactionsBySlug = newestTransactionsBySlug
-    ? pick(newestTransactionsBySlug, reducedSlugs)
+  const reducedNewestActivitiesBySlug = newestActivitiesBySlug
+    ? pick(newestActivitiesBySlug, tokenSlugs)
     : undefined;
 
   const reducedIds = Object.values(reducedIdsBySlug).concat(reducedIdsMain).flat();
@@ -579,22 +802,19 @@ function reduceAccountActivities(activities?: AccountState['activities'], tokens
     byId: reducedById,
     idsMain: reducedIdsMain,
     idsBySlug: reducedIdsBySlug,
-    newestTransactionsBySlug: reducedNewestTransactionsBySlug,
+    newestActivitiesBySlug: reducedNewestActivitiesBySlug,
   };
 }
 
 function reduceAccountStaking(staking?: AccountState['staking']) {
-  let stateById = staking?.stateById;
-  let stakingId = staking?.stakingId;
+  let { stakingId, stateById } = staking ?? {};
 
-  if (!staking || !stateById || !Object.keys(stateById).length) {
-    return undefined;
-  }
+  if (stateById && !isEmptyObject(stateById)) {
+    stateById = filterValues(stateById, getIsActiveStakingState);
 
-  stateById = filterValues(stateById, getIsActiveStakingState);
-
-  if (!stakingId || !(stakingId in stateById)) {
-    stakingId = Object.values(stateById)[0]?.id;
+    if (!stakingId || !(stakingId in stateById)) {
+      stakingId = Object.values(stateById)[0]?.id;
+    }
   }
 
   return {
@@ -610,7 +830,7 @@ function pickVisibleActivities(ids: string[], byId: Record<string, ApiActivity>)
   let visibleIdCount = 0;
 
   ids
-    .filter((id) => !getIsTxIdLocal(id) && Boolean(byId[id]))
+    .filter((id) => shouldCacheActivity(id, byId))
     .forEach((id) => {
       if (visibleIdCount === ACTIVITIES_LIMIT) return;
 
@@ -622,4 +842,11 @@ function pickVisibleActivities(ids: string[], byId: Record<string, ApiActivity>)
     });
 
   return result;
+}
+
+function shouldCacheActivity(id: string, byId: Record<string, ApiActivity>) {
+  const activity = byId[id];
+  return activity
+    && !getIsTxIdLocal(id)
+    && !getIsActivityPending(activity);
 }

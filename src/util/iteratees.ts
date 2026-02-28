@@ -5,11 +5,9 @@ type OrderDirection =
   'asc'
   | 'desc';
 
-interface OrderCallback<T> {
-  (member: T): any;
-}
+type OrderCallback<T> = (member: T) => unknown;
 
-export function buildCollectionByKey<T extends AnyLiteral>(collection: T[], key: keyof T): CollectionByKey<T> {
+export function buildCollectionByKey<T extends AnyLiteral>(collection: readonly T[], key: keyof T): CollectionByKey<T> {
   return collection.reduce((byKey: CollectionByKey<T>, member: T) => {
     byKey[member[key]] = member;
 
@@ -17,21 +15,33 @@ export function buildCollectionByKey<T extends AnyLiteral>(collection: T[], key:
   }, {});
 }
 
-export function groupBy<T extends AnyLiteral>(collection: T[], key: keyof T): GroupedByKey<T> {
+export function buildArrayCollectionByKey<T extends AnyLiteral>(collection: T[], key: keyof T) {
+  return collection.reduce((byKey: CollectionByKey<Array<T>>, member: T) => {
+    const collectionKey = member[key];
+    if (!byKey[collectionKey]) {
+      byKey[collectionKey] = [];
+    }
+    byKey[collectionKey].push(member);
+
+    return byKey;
+  }, {});
+}
+
+export function groupBy<T extends AnyLiteral>(collection: readonly T[], key: keyof T): GroupedByKey<T> {
   return collection.reduce((byKey: GroupedByKey<T>, member: T) => {
     const groupKey = member[key];
 
     if (!byKey[groupKey]) {
       byKey[groupKey] = [member];
     } else {
-      byKey[groupKey]!.push(member);
+      byKey[groupKey].push(member);
     }
 
     return byKey;
   }, {});
 }
 
-export function mapValues<R extends any, M extends any>(
+export function mapValues<R, M>(
   byKey: CollectionByKey<M>,
   callback: (member: M, key: string, index: number, originalByKey: CollectionByKey<M>) => R,
 ): CollectionByKey<R> {
@@ -70,7 +80,7 @@ export function omitUndefined<T extends object>(object: T): T {
   return Object.keys(object).reduce((result, stringKey) => {
     const key = stringKey as keyof T;
     if (object[key] !== undefined) {
-      result[key as keyof T] = object[key];
+      result[key] = object[key];
     }
     return result;
   }, {} as T);
@@ -108,15 +118,15 @@ export function orderBy<T>(
   });
 }
 
-export function unique<T extends any>(array: T[]): T[] {
+export function unique<T>(array: readonly T[]): T[] {
   return Array.from(new Set(array));
 }
 
-export function compact<T extends any>(array: T[]) {
+export function compact<T>(array: T[]) {
   return array.filter(Boolean);
 }
 
-export function areSortedArraysEqual(array1: any[], array2: any[]) {
+export function areSortedArraysEqual<T>(array1: readonly T[], array2: readonly T[]) {
   if (array1.length !== array2.length) {
     return false;
   }
@@ -124,7 +134,7 @@ export function areSortedArraysEqual(array1: any[], array2: any[]) {
   return array1.every((item, i) => item === array2[i]);
 }
 
-export function split<T extends any>(array: T[], chunkSize: number) {
+export function split<T>(array: T[], chunkSize: number) {
   const result: T[][] = [];
   for (let i = 0; i < array.length; i += chunkSize) {
     result.push(array.slice(i, i + chunkSize));
@@ -184,17 +194,24 @@ export function fromKeyValueArrays<T>(keys: string[], values: T[] | T) {
   }, {} as Record<string, T>);
 }
 
-export function extractKey<T, K extends keyof T>(array: T[], key: K): T[K][] {
+export function extractKey<T, K extends keyof T>(array: readonly T[], key: K): T[K][] {
   return array.map((value) => value[key]);
 }
 
-export function findDifference<T>(array1: T[], array2: T[]): T[] {
+export function findDifference<T>(array1: Iterable<T>, array2: Iterable<T>): T[] {
   const set2 = new Set(array2);
+  const diff: T[] = [];
 
-  return array1.filter((element) => !set2.has(element));
+  for (const element of array1) {
+    if (!set2.has(element)) {
+      diff.push(element);
+    }
+  }
+
+  return diff;
 }
 
-export function filterValues<M extends any>(
+export function filterValues<M>(
   byKey: CollectionByKey<M>,
   callback: (member: M, key: string, index: number, originalByKey: CollectionByKey<M>) => boolean,
 ): CollectionByKey<M> {
@@ -206,3 +223,130 @@ export function filterValues<M extends any>(
     return newByKey;
   }, {});
 }
+
+export function uniqueByKey<T>(array: readonly T[], key: keyof T, shouldKeepFirst?: boolean) {
+  if (shouldKeepFirst) {
+    array = [...array].reverse();
+  }
+
+  const result = [...new Map(array.map((item) => [item[key], item])).values()];
+
+  if (shouldKeepFirst) {
+    result.reverse();
+  }
+
+  return result;
+}
+
+export function intersection<T>(x: Set<T>, y: Set<T>): Set<T> {
+  const result = new Set<T>();
+  for (const elem of y) {
+    if (x.has(elem)) {
+      result.add(elem);
+    }
+  }
+  return result;
+}
+
+export function swapKeysAndValues<
+  K extends string | number,
+  V extends keyof any,
+>(object: Record<K, V>): Record<V, `${K}`> {
+  const result = {} as any;
+  for (const [key, value] of Object.entries(object)) {
+    result[value as any] = key;
+  }
+  return result;
+}
+
+/**
+ * The arrays inside `arrays` must be sorted according to `compareFn`, otherwise the result is not guaranteed.
+ * `deduplicateEqual` doesn't remove duplicates if the individual input arrays contain duplicates.
+ * Always returns a new array (not any of the input arrays).
+ */
+export function mergeSortedArrays<T>(
+  arrays: readonly (readonly T[])[],
+  compareFn: (item1: T, item2: T) => number,
+  deduplicateEqual?: boolean,
+): T[] {
+  // This is a divide-and-conquer algorithm combined with a 2-pointers algorithm. Its time complexity is O(n*log(n)*m),
+  // where n is the number of arrays and m is the average array size. The heap algorithm is slightly faster, but it has
+  // the same time complexity and its implementation in JS is too bulky.
+  // This problem on LeetCode: https://leetcode.com/problems/merge-k-sorted-lists/
+
+  if (arrays.length === 1) return [...arrays[0]];
+
+  let toMerge = arrays as T[][];
+
+  while (toMerge.length > 1) {
+    const nextToMerge: T[][] = [];
+
+    for (let i = 0; i < toMerge.length; i += 2) {
+      nextToMerge.push(
+        i + 1 < toMerge.length
+          ? merge2(toMerge[i], toMerge[i + 1])
+          : toMerge[i], // If toMerge.length is odd, the last iteration has only 1 subarray to merge
+      );
+    }
+
+    toMerge = nextToMerge;
+  }
+
+  return toMerge[0] ?? [];
+
+  function merge2(arr1: readonly T[], arr2: readonly T[]) {
+    let index1 = 0;
+    let index2 = 0;
+    const result: T[] = [];
+
+    while (index1 < arr1.length && index2 < arr2.length) {
+      const compareResult = compareFn(arr1[index1], arr2[index2]);
+
+      if (compareResult === 0) {
+        result.push(arr1[index1]);
+        if (!deduplicateEqual) {
+          result.push(arr2[index2]);
+        }
+        index1++;
+        index2++;
+      } else if (compareResult < 0) {
+        result.push(arr1[index1++]);
+      } else {
+        result.push(arr2[index2++]);
+      }
+    }
+
+    result.push(...arr1.slice(index1));
+    result.push(...arr2.slice(index2));
+
+    return result;
+  }
+}
+
+export function shuffle<T>(array: T[]): T[] {
+  let currentIndex = array.length;
+  let randomIndex;
+
+  while (currentIndex !== 0) {
+    randomIndex = Math.floor(Math.random() * currentIndex);
+    currentIndex--;
+
+    [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+  }
+
+  return array;
+}
+
+export function orderByPattern<T, K>(arr: T[], getValue: (item: T) => K, pattern: K[]) {
+  const patternWeights = new Map(pattern.map((val, index) => [val, index]));
+
+  return [...arr].sort((a, b) => {
+    const valueA = getValue(a);
+    const valueB = getValue(b);
+
+    const indexA = patternWeights.has(valueA) ? patternWeights.get(valueA)! : Infinity;
+    const indexB = patternWeights.has(valueB) ? patternWeights.get(valueB)! : Infinity;
+
+    return indexA - indexB;
+  });
+};

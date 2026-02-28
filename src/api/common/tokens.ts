@@ -1,53 +1,110 @@
-import type {
-  ApiChain, ApiToken, ApiTokenWithPrice, OnApiUpdate,
+import {
+  type ApiChain,
+  type ApiTokenDetails,
+  type ApiTokenWithMaybePrice,
+  type ApiTokenWithPrice,
+  type OnApiUpdate,
 } from '../types';
 
-import { TOKEN_INFO } from '../../config';
+import { getTokenInfo } from '../../util/chain';
+import Deferred from '../../util/Deferred';
+import { buildCollectionByKey, omitUndefined } from '../../util/iteratees';
 import { tokenRepository } from '../db';
-import { getPricesCache } from './cache';
 
-const tokensCache = {
-  ...TOKEN_INFO,
-} as Record<string, ApiToken>;
+export const tokensPreload = new Deferred();
+const tokensCache: {
+  bySlug: Record<string, ApiTokenWithPrice>;
+} = {
+  bySlug: { ...getTokenInfo() },
+};
 
 export async function loadTokensCache() {
-  const tokens = await tokenRepository.all();
-  return addTokens(tokens);
+  try {
+    const tokens = await tokenRepository.all();
+    await updateTokens(tokens);
+  } finally {
+    tokensPreload.resolve();
+  }
 }
 
-export async function addTokens(tokens: ApiToken[], onUpdate?: OnApiUpdate, shouldForceSend?: boolean) {
-  const newTokens: ApiToken[] = [];
+export async function updateTokens(
+  tokens: ApiTokenWithMaybePrice[],
+  sendUpdate?: NoneToVoidFunction,
+  tokenDetails?: ApiTokenDetails[],
+  shouldSendUpdate?: boolean,
+) {
+  const tokensForDb: ApiTokenWithPrice[] = [];
+  const detailsBySlug = buildCollectionByKey(tokenDetails ?? [], 'slug');
 
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    const mergedToken = mergeTokenWithCache(token);
+  for (const { slug, ...details } of tokenDetails ?? []) {
+    const cachedToken = tokensCache.bySlug[slug] as ApiTokenWithPrice | undefined;
+    if (cachedToken) {
+      const token = { ...cachedToken, ...details };
+      tokensCache.bySlug[slug] = token;
+      tokensForDb.push(token);
+    }
+  }
+
+  for (const token of tokens) {
+    const { slug } = token;
+    const cachedToken = tokensCache.bySlug[slug] as ApiTokenWithPrice | undefined;
+    const mergedToken = mergeTokenWithCache(token, detailsBySlug, cachedToken);
 
     if (!(token.slug in tokensCache)) {
-      newTokens.push(mergedToken);
+      shouldSendUpdate = true;
     }
 
-    tokensCache[token.slug] = mergedToken;
-    tokens[i] = mergedToken;
+    tokensCache.bySlug[token.slug] = mergedToken;
+    if (token.tokenAddress) {
+      tokensForDb.push(mergedToken);
+    }
   }
 
-  await tokenRepository.bulkPut(tokens);
-  if ((shouldForceSend || newTokens.length) && onUpdate) {
-    sendUpdateTokens(onUpdate);
+  await tokenRepository.bulkPut(tokensForDb);
+
+  if (shouldSendUpdate && sendUpdate) {
+    sendUpdate();
   }
 }
 
-export function mergeTokenWithCache(token: ApiToken): ApiToken {
-  const cacheToken = tokensCache[token.slug] || {};
-
-  return { ...cacheToken, ...token };
+function mergeTokenWithCache(
+  token: ApiTokenWithMaybePrice,
+  detailsBySlug: Record<string, ApiTokenDetails>,
+  cachedToken?: ApiTokenWithPrice,
+): ApiTokenWithPrice {
+  if (cachedToken) {
+    // Metadata from backend takes priority (e.g., image)
+    return {
+      ...omitUndefined(token.isFromBackend ? cachedToken : token),
+      ...omitUndefined(token.isFromBackend ? token : cachedToken),
+      priceUsd: token.priceUsd ?? cachedToken.priceUsd,
+      percentChange24h: token.percentChange24h ?? cachedToken.percentChange24h,
+      // For the scenario where the token was cached previously, but now it's disabled
+      ...omitUndefined((detailsBySlug[token.slug] as ApiTokenDetails | undefined) ?? {}),
+      ...(token.slug in detailsBySlug && { isFromBackend: undefined }),
+    };
+  } else if (token.slug in detailsBySlug) {
+    return {
+      ...token,
+      ...detailsBySlug[token.slug],
+      isFromBackend: undefined,
+    };
+  } else {
+    return {
+      ...token,
+      priceUsd: token.priceUsd ?? 0,
+      percentChange24h: token.percentChange24h ?? 0,
+    };
+  }
 }
 
 export function getTokensCache() {
   return tokensCache;
 }
 
-export function getTokenBySlug(slug: string) {
-  return getTokensCache()[slug];
+/** Note that this function may return `undefined` if the token is not found (e.g. pTON) */
+export function getTokenBySlug(slug: string): ApiTokenWithPrice | undefined {
+  return tokensCache.bySlug[slug];
 }
 
 export function getTokenByAddress(tokenAddress: string) {
@@ -55,25 +112,9 @@ export function getTokenByAddress(tokenAddress: string) {
 }
 
 export function sendUpdateTokens(onUpdate: OnApiUpdate) {
-  const tokens = getTokensCache();
-  const prices = getPricesCache();
-
-  const entries = Object.values(tokens).map((token) => {
-    return [token.slug, {
-      ...token,
-      quote: prices.bySlug[token.slug] ?? {
-        slug: token.slug,
-        price: 0,
-        priceUsd: 0,
-        percentChange24h: 0,
-      },
-    }] as [string, ApiTokenWithPrice];
-  });
-
   onUpdate({
     type: 'updateTokens',
-    tokens: Object.fromEntries(entries),
-    baseCurrency: prices.baseCurrency,
+    tokens: tokensCache.bySlug,
   });
 }
 

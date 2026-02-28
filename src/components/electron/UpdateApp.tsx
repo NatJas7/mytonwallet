@@ -5,7 +5,7 @@ import { withGlobal } from '../../global';
 
 import { ElectronEvent } from '../../electron/types';
 
-import { PRODUCTION_URL } from '../../config';
+import { APP_NAME, PRODUCTION_URL } from '../../config';
 import buildClassName from '../../util/buildClassName';
 
 import useFlag from '../../hooks/useFlag';
@@ -34,7 +34,7 @@ function UpdateApp({ isAppUpdateAvailable }: StateProps) {
       setIsElectronUpdateDownloaded(true);
     });
 
-    window.electron?.getIsAutoUpdateEnabled().then(setIsElectronAutoUpdateEnabled);
+    void window.electron?.getIsAutoUpdateEnabled().then(setIsElectronAutoUpdateEnabled);
 
     return () => {
       removeUpdateErrorListener?.();
@@ -63,7 +63,10 @@ function UpdateApp({ isAppUpdateAvailable }: StateProps) {
     }
   });
 
-  const { transitionClassNames, shouldRender } = useShowTransition(isElectronUpdateDownloaded || isAppUpdateAvailable);
+  const { ref, shouldRender } = useShowTransition({
+    isOpen: isElectronUpdateDownloaded || isAppUpdateAvailable,
+    withShouldRender: true,
+  });
 
   if (!shouldRender) {
     return null; // eslint-disable-line no-null/no-null
@@ -71,9 +74,9 @@ function UpdateApp({ isAppUpdateAvailable }: StateProps) {
 
   return (
     <div
+      ref={ref}
       className={buildClassName(
         styles.container,
-        transitionClassNames,
         isDisabled && styles.disabled,
       )}
       onClick={handleClick}
@@ -82,7 +85,7 @@ function UpdateApp({ isAppUpdateAvailable }: StateProps) {
         <i className={buildClassName('icon-update', styles.icon)} />
       </div>
 
-      <div className={styles.text}>{lang('Update MyTonWallet')}</div>
+      <div className={styles.text}>{lang('Update %app_name%', { app_name: APP_NAME })}</div>
     </div>
   );
 }

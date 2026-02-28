@@ -1,3 +1,4 @@
+import type { TeactNode } from '../../lib/teact/teact';
 import React, { memo } from '../../lib/teact/teact';
 
 import type { FeePrecision, FeeTerms, FeeValue } from '../../util/fee/types';
@@ -5,8 +6,8 @@ import type { FeeToken } from '../ui/Fee';
 
 import renderText from '../../global/helpers/renderText';
 import buildClassName from '../../util/buildClassName';
-import { getChainConfig } from '../../util/chain';
-import { getChainBySlug } from '../../util/tokens';
+import { getChainTitle } from '../../util/chain';
+import { getChainBySlug, getNativeToken } from '../../util/tokens';
 
 import useLang from '../../hooks/useLang';
 
@@ -28,14 +29,21 @@ type OwnProps = {
   excessFeePrecision: FeePrecision | undefined;
   /** The token denoting the `token` fields of the `FeeTerms` objects. */
   token: FeeToken | undefined;
+  title?: TeactNode;
+  extraContent?: TeactNode;
 };
 
-function FeeDetailsModal({ isOpen, onClose, ...restProps }: OwnProps) {
+function FeeDetailsModal({ isOpen, onClose, title, ...restProps }: OwnProps) {
   const lang = useLang();
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} isCompact title={lang('Blockchain Fee Details')}>
-      {/* eslint-disable-next-line react/jsx-props-no-spreading */}
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      isCompact
+      title={title ?? lang('Blockchain Fee Details')}
+      contentClassName={styles.content}
+    >
       <FeeDetailsContent onClose={onClose} {...restProps} />
     </Modal>
   );
@@ -51,14 +59,15 @@ function FeeDetailsContent({
   excessFee,
   excessFeePrecision = 'exact',
   token,
-}: Omit<OwnProps, 'isOpen'>) {
+  extraContent,
+}: Omit<OwnProps, 'isOpen' | 'title'>) {
   const chain = token && getChainBySlug(token.slug);
-  const nativeToken = chain && getChainConfig(chain).nativeToken;
+  const nativeToken = chain && getNativeToken(chain);
   const lang = useLang();
 
   return (
     <>
-      <div className={styles.chart}>
+      <div>
         <div className={styles.chartLabels}>
           <div className={buildClassName(styles.chartLabel, styles.realFee)}>
             {lang('Final Fee')}
@@ -91,17 +100,14 @@ function FeeDetailsContent({
         </div>
       </div>
       <div className={styles.explanation}>
-        <p className={styles.explanationBlock}>
+        <div>
           {renderText(lang('$fee_details', {
             full_fee: fullFee && token && <b><Fee terms={fullFee} precision="exact" token={token} /></b>,
             excess_symbol: <b>{nativeToken?.symbol}</b>,
+            chain_name: chain && getChainTitle(chain),
           }))}
-        </p>
-        <p className={styles.explanationBlock}>
-          {lang('This is how the %chain_name% Blockchain works.', {
-            chain_name: chain?.toUpperCase(),
-          })}
-        </p>
+        </div>
+        {extraContent}
       </div>
       <div className={modalStyles.buttons}>
         <Button isPrimary className={modalStyles.button} onClick={onClose}>

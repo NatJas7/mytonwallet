@@ -1,8 +1,6 @@
+import { Dialog } from '@capacitor/dialog';
 import { AndroidSettings, IOSSettings, NativeSettings } from 'capacitor-native-settings';
-import { Dialog } from 'native-dialog';
-import React, {
-  memo, useLayoutEffect, useState,
-} from '../../lib/teact/teact';
+import React, { memo, useEffect, useLayoutEffect, useState } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { AutolockValueType } from '../../global/types';
@@ -12,19 +10,30 @@ import {
   ANIMATED_STICKER_BIG_SIZE_PX,
   ANIMATED_STICKER_HUGE_SIZE_PX,
   ANIMATED_STICKER_SMALL_SIZE_PX,
+  APP_NAME,
+  AUTO_CONFIRM_DURATION_MINUTES,
   AUTOLOCK_OPTIONS_LIST,
+  DEFAULT_AUTOLOCK_OPTION,
   IS_CAPACITOR,
   PIN_LENGTH,
 } from '../../config';
-import { selectIsMultichainAccount, selectIsPasswordPresent } from '../../global/selectors';
+import {
+  selectCurrentAccountId,
+  selectIsAllowSuspiciousActions,
+  selectIsBiometricAuthEnabled,
+  selectIsMnemonicAccount,
+  selectIsMultichainAccount,
+  selectIsNativeBiometricAuthEnabled,
+} from '../../global/selectors';
+import { getHasInMemoryPassword, getInMemoryPassword } from '../../util/authApi/inMemoryPasswordStore';
+import { getDoesUsePinPad, getIsNativeBiometricAuthSupported } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
-import { getIsNativeBiometricAuthSupported, vibrateOnSuccess } from '../../util/capacitor';
+import { vibrateOnSuccess } from '../../util/haptics';
 import isMnemonicPrivateKey from '../../util/isMnemonicPrivateKey';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
 import { pause } from '../../util/schedulers';
-import {
-  IS_BIOMETRIC_AUTH_SUPPORTED, IS_ELECTRON, IS_IOS, IS_IOS_APP,
-} from '../../util/windowEnvironment';
+import { getIsTelegramBiometricsRestricted } from '../../util/telegram';
+import { IS_BIOMETRIC_AUTH_SUPPORTED, IS_ELECTRON, IS_IOS, IS_IOS_APP } from '../../util/windowEnvironment';
 import { callApi } from '../../api';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
@@ -53,8 +62,8 @@ import NativeBiometricsToggle from './biometrics/NativeBiometricsToggle';
 import modalStyles from '../ui/Modal.module.scss';
 import styles from './Settings.module.scss';
 
+import backupImg from '../../assets/settings/settings_backup.svg';
 import biometricsImg from '../../assets/settings/settings_biometrics.svg';
-import backupImg from '../../assets/settings/settings_install-app.svg';
 
 export const enum SLIDES {
   password,
@@ -85,17 +94,17 @@ interface StateProps {
   isBiometricAuthEnabled: boolean;
   isNativeBiometricAuthEnabled: boolean;
   isPasswordNumeric?: boolean;
-  isPasswordPresent: boolean;
   isMultichainAccount: boolean;
   isAppLockEnabled?: boolean;
   autolockValue?: AutolockValueType;
+  isAutoConfirmEnabled?: boolean;
+  isAllowSuspiciousActions?: boolean;
+  shouldShowBackup: boolean;
   isLoading?: boolean;
   currentAccountId: string;
 }
 
-const INITIAL_CHANGE_PASSWORD_SLIDE = IS_CAPACITOR ? SLIDES.createNewPin : SLIDES.newPassword;
-
-const DEFAULT_AUTOLOCK_OPTION: AutolockValueType = 'never';
+const INITIAL_CHANGE_PASSWORD_SLIDE = getDoesUsePinPad() ? SLIDES.createNewPin : SLIDES.newPassword;
 
 function SettingsSecurity({
   isActive,
@@ -104,15 +113,17 @@ function SettingsSecurity({
   isBiometricAuthEnabled,
   isNativeBiometricAuthEnabled,
   isPasswordNumeric,
-  isPasswordPresent,
   isMultichainAccount,
   isAppLockEnabled,
   autolockValue = DEFAULT_AUTOLOCK_OPTION,
+  isAutoConfirmEnabled,
+  isAllowSuspiciousActions,
   isAutoUpdateEnabled,
   currentAccountId,
   onSettingsClose,
   onAutoUpdateEnabledToggle,
   isLoading,
+  shouldShowBackup,
 }: OwnProps & StateProps) {
   const {
     setIsPinAccepted,
@@ -123,7 +134,10 @@ function SettingsSecurity({
     openBiometricsTurnOn,
     setSettingsState,
     setAppLockValue,
+    setIsAutoConfirmEnabled,
+    setIsAllowSuspiciousActions,
     setIsAuthLoading,
+    setInMemoryPassword,
   } = getActions();
 
   const lang = useLang();
@@ -132,9 +146,9 @@ function SettingsSecurity({
     handleScroll: handleContentScroll,
   } = useScrolledState();
 
-  const [currentSlide, setCurrentSlide] = useState<number>(SLIDES.password);
+  const [currentSlide, setCurrentSlide] = useState<SLIDES>(SLIDES.password);
   const previousSlide = usePrevious(currentSlide);
-  const [nextKey, setNextKey] = useState<number | undefined>(SLIDES.settings);
+  const [nextKey, setNextKey] = useState<SLIDES | undefined>(SLIDES.settings);
   const [passwordError, setPasswordError] = useState<string>();
   const [password, setPassword] = useState<string>();
   const [backupType, setBackupType] = useState<'key' | 'words' | undefined>(undefined);
@@ -193,8 +207,9 @@ function SettingsSecurity({
   });
 
   useLayoutEffect(() => {
-    if (password === undefined && isActive) setCurrentSlide(SLIDES.password);
-    else if (!isActive) cleanup();
+    if (password === undefined && isActive) {
+      setCurrentSlide(SLIDES.password);
+    } else if (!isActive) cleanup();
   }, [password, isActive]);
 
   useHistoryBack({ isActive, onBack: handleBackToSettingsClick });
@@ -203,15 +218,12 @@ function SettingsSecurity({
     const result = await callApi('verifyPassword', enteredPassword);
 
     if (!result) {
-      setPasswordError('Wrong password, please try again.');
+      const error = getDoesUsePinPad() ? 'Wrong passcode, please try again.' : 'Wrong password, please try again.';
+      setPasswordError(error);
       return;
     }
 
-    const mnemonic = await callApi('fetchMnemonic', currentAccountId!, enteredPassword);
-
-    setHasMnemonicWallet(Boolean(mnemonic && !isMnemonicPrivateKey(mnemonic)));
-
-    if (IS_CAPACITOR) {
+    if (getDoesUsePinPad()) {
       setIsPinAccepted();
       await vibrateOnSuccess(true);
     }
@@ -224,11 +236,12 @@ function SettingsSecurity({
     await callApi('changePassword', password!, enteredPassword);
     setIsAuthLoading({ isLoading: true });
     setPassword(enteredPassword);
+    setInMemoryPassword({ password: enteredPassword });
     if (isNativeBiometricAuthEnabled) {
       disableNativeBiometrics();
-      await enableNativeBiometrics({ password: enteredPassword });
+      enableNativeBiometrics({ password: enteredPassword });
     }
-    if (IS_CAPACITOR) {
+    if (getDoesUsePinPad()) {
       openSettingsSlide();
     } else {
       openPasswordChangedSlide();
@@ -247,7 +260,7 @@ function SettingsSecurity({
     if (enteredPassword === pinValue) {
       setPasswordError(lang('New code set successfully'));
       await pause(CHANGE_PASSWORD_PAUSE_MS);
-      handleNewPasswordSubmit(enteredPassword);
+      await handleNewPasswordSubmit(enteredPassword);
     } else {
       setPasswordError(lang('Codes don’t match'));
       await pause(CHANGE_PASSWORD_PAUSE_MS);
@@ -275,8 +288,11 @@ function SettingsSecurity({
 
   const handleOpenBackupWallet = useLastCallback(() => {
     if (!isMultichainAccount) {
-      if (hasMnemonicWallet) handleOpenSecretWordsSafetyRules();
-      else handleOpenPrivateKeySafetyRules();
+      if (hasMnemonicWallet) {
+        handleOpenSecretWordsSafetyRules();
+      } else {
+        handleOpenPrivateKeySafetyRules();
+      }
       return;
     }
 
@@ -299,8 +315,16 @@ function SettingsSecurity({
     setAppLockValue({ value: autolockValue, isEnabled: !isAppLockEnabled });
   });
 
-  const handleAutolockChange = useLastCallback((value: string) => {
-    setAppLockValue({ value: value as AutolockValueType, isEnabled: true });
+  const handleAutolockChange = useLastCallback((value: AutolockValueType) => {
+    setAppLockValue({ value, isEnabled: true });
+  });
+
+  const handleAutoConfirmToggle = useLastCallback(() => {
+    setIsAutoConfirmEnabled({ isEnabled: !isAutoConfirmEnabled });
+  });
+
+  const handleAllowSuspiciousActionsToggle = useLastCallback(() => {
+    setIsAllowSuspiciousActions({ isEnabled: !isAllowSuspiciousActions });
   });
 
   // Biometrics
@@ -311,7 +335,7 @@ function SettingsSecurity({
       openBiometricsTurnOn();
     }
   });
-  const handleNativeBiometricsTurnOnOpen = useLastCallback(() => {
+  const handleNativeBiometricsTurnOnOpen = useLastCallback(async () => {
     if (getIsNativeBiometricAuthSupported()) {
       setSettingsState({ state: SettingsState.NativeBiometricsTurnOn });
       return;
@@ -320,23 +344,38 @@ function SettingsSecurity({
     const warningDescription = IS_IOS
       ? 'To use this feature, first enable Face ID in your phone settings.'
       : 'To use this feature, first enable biometrics in your phone settings.';
-    Dialog.confirm({
+
+    const { value } = await Dialog.confirm({
       title: lang('Warning!'),
       message: lang(warningDescription),
       okButtonTitle: lang('Open Settings'),
       cancelButtonTitle: lang('Cancel'),
-    })
-      .then(({ value }) => {
-        if (value) {
-          NativeSettings.open({
-            optionAndroid: AndroidSettings.ApplicationDetails,
-            optionIOS: IOSSettings.App,
-          });
-        }
+    });
+    if (value) {
+      await NativeSettings.open({
+        optionAndroid: AndroidSettings.ApplicationDetails,
+        optionIOS: IOSSettings.App,
       });
+    }
   });
-  const shouldRenderNativeBiometrics = isPasswordPresent && (getIsNativeBiometricAuthSupported() || IS_IOS_APP);
-  const shouldRenderMinifiedPinPad = isInsideModal && IS_CAPACITOR;
+
+  useEffect(() => {
+    if (!password) return;
+
+    void callApi('fetchMnemonic', currentAccountId, password).then((mnemonic) => {
+      setHasMnemonicWallet(Boolean(mnemonic && !isMnemonicPrivateKey(mnemonic)));
+    });
+  }, [hasMnemonicWallet, currentAccountId, password]);
+
+  // The `getIsTelegramBiometricsRestricted` case is required to display a toggle switch.
+  // When activated, it will show a warning to the user indicating that they need to grant
+  // the appropriate permissions for biometric authentication to function properly.
+  const shouldRenderNativeBiometrics = (
+    getIsNativeBiometricAuthSupported() || IS_IOS_APP || getIsTelegramBiometricsRestricted()
+  );
+  const shouldRenderMinifiedPinPad = isInsideModal && getDoesUsePinPad();
+
+  const isAutoConfirmAvailable = !isBiometricAuthEnabled;
 
   function renderSettings() {
     return (
@@ -361,21 +400,23 @@ function SettingsSecurity({
           className={buildClassName(styles.content, 'custom-scroll')}
           onScroll={handleContentScroll}
         >
-          <div className={styles.settingsBlock}>
-            <div className={buildClassName(styles.item)} onClick={handleOpenBackupWallet}>
-              <img className={styles.menuIcon} src={backupImg} alt={lang('$back_up_security')} />
-              {lang('$back_up_security')}
+          {shouldShowBackup && (
+            <div className={styles.settingsBlock}>
+              <div className={buildClassName(styles.item)} onClick={handleOpenBackupWallet}>
+                <img className={styles.menuIcon} src={backupImg} alt={lang('$back_up_security')} />
+                {lang('$back_up_security')}
 
-              <i className={buildClassName(styles.iconChevronRight, 'icon-chevron-right')} aria-hidden />
+                <i className={buildClassName(styles.iconChevronRight, 'icon-chevron-right')} aria-hidden />
+              </div>
             </div>
-          </div>
+          )}
 
           {shouldRenderNativeBiometrics && (
             <NativeBiometricsToggle
               onEnable={handleNativeBiometricsTurnOnOpen}
             />
           )}
-          {isPasswordPresent && IS_BIOMETRIC_AUTH_SUPPORTED && (
+          {IS_BIOMETRIC_AUTH_SUPPORTED && (
             <>
               <div className={buildClassName(styles.block, styles.settingsBlockWithDescription)}>
                 <div className={styles.item} onClick={handleBiometricAuthToggle}>
@@ -390,7 +431,9 @@ function SettingsSecurity({
                 </div>
               </div>
               <p className={styles.blockDescription}>{
-                lang('To avoid entering the passcode every time, you can use biometrics.')
+                lang(getDoesUsePinPad()
+                  ? 'To avoid entering the passcode every time, you can use biometrics.'
+                  : 'To avoid entering the password every time, you can use biometrics.')
               }
               </p>
             </>
@@ -404,40 +447,71 @@ function SettingsSecurity({
                   isSimple
                   onClick={handleChangePasswordClick}
                 >
-                  {isPasswordNumeric ? lang('Change Passcode') : lang('Change Password')}
+                  {getDoesUsePinPad() ? lang('Change Passcode') : lang('Change Password')}
                 </Button>
               </div>
-              <p className={styles.blockDescription}>{lang('The passcode will be changed for all your wallets.')}</p>
+              <p className={styles.blockDescription}>{
+                lang(getDoesUsePinPad()
+                  ? 'The passcode will be changed for all your wallets.'
+                  : 'The password will be changed for all your wallets.')
+              }
+              </p>
             </>
           )}
 
-          {isPasswordPresent && (
-            <>
-              <div className={buildClassName(styles.block, styles.settingsBlockWithDescription)}>
-                <div className={buildClassName(styles.item, styles.itemSmall)} onClick={handleAppLockToggle}>
-                  {lang('App Lock')}
+          <>
+            <div className={buildClassName(styles.block, styles.settingsBlockWithDescription)}>
+              <div className={buildClassName(styles.item, styles.itemSmall)} onClick={handleAppLockToggle}>
+                {lang('App Lock')}
 
-                  <Switcher
-                    className={styles.menuSwitcher}
-                    label={lang('Allow App Lock')}
-                    checked={isAppLockEnabled}
-                  />
-                </div>
-                <Collapsible isShown={!!isAppLockEnabled}>
-                  <Dropdown
-                    label={lang('Auto-Lock')}
-                    items={AUTOLOCK_OPTIONS_LIST as unknown as DropdownItem[]}
-                    selectedValue={autolockValue}
-                    theme="light"
-                    shouldTranslateOptions
-                    className={buildClassName(styles.item, styles.item_small)}
-                    onChange={handleAutolockChange}
-                  />
-                </Collapsible>
+                <Switcher
+                  className={styles.menuSwitcher}
+                  label={lang('Allow App Lock')}
+                  checked={isAppLockEnabled}
+                />
               </div>
-              <p className={styles.blockDescription}>{lang('$app_lock_description')}</p>
-            </>
-          )}
+              <Collapsible isShown={!!isAppLockEnabled}>
+                <Dropdown
+                  label={lang('Auto-Lock')}
+                  items={AUTOLOCK_OPTIONS_LIST as unknown as DropdownItem<AutolockValueType>[]}
+                  selectedValue={autolockValue}
+                  theme="light"
+                  shouldTranslateOptions
+                  className={buildClassName(styles.item, styles.item_small, styles.itemAutoLock)}
+                  onChange={handleAutolockChange}
+                />
+              </Collapsible>
+            </div>
+            <p className={styles.blockDescription}>{lang('$app_lock_description', { app_name: APP_NAME })}</p>
+
+            <div className={buildClassName(styles.block, styles.settingsBlockWithDescription)}>
+              <div
+                className={buildClassName(
+                  styles.item,
+                  styles.itemSmall,
+                  !isAutoConfirmAvailable && styles.itemDisabled,
+                )}
+                onClick={isAutoConfirmAvailable ? handleAutoConfirmToggle : undefined}
+              >
+                {getDoesUsePinPad() ? lang('Remember Passcode') : lang('Remember Password')}
+
+                <Switcher
+                  className={styles.menuSwitcher}
+                  label={getDoesUsePinPad() ? lang('Remember Passcode') : lang('Remember Password')}
+                  checked={isAutoConfirmAvailable && isAutoConfirmEnabled}
+                />
+              </div>
+            </div>
+            <p className={styles.blockDescription}>
+              {
+                lang(
+                  'App will not ask for signature for %1$d minutes after last entry.',
+                  AUTO_CONFIRM_DURATION_MINUTES,
+                )
+              }
+              {!isAutoConfirmAvailable && ` ${lang('Not available with biometrics.')}`}
+            </p>
+          </>
 
           {IS_ELECTRON && (
             <>
@@ -457,17 +531,42 @@ function SettingsSecurity({
               </p>
             </>
           )}
+
+          <>
+            <div className={buildClassName(styles.block, styles.settingsBlockWithDescription)}>
+              <div
+                className={buildClassName(styles.item, styles.itemSmall)}
+                onClick={handleAllowSuspiciousActionsToggle}
+              >
+                {lang('Allow Suspicious Actions')}
+
+                <Switcher
+                  className={styles.menuSwitcher}
+                  label={lang('Allow Suspicious Actions')}
+                  checked={isAllowSuspiciousActions}
+                />
+              </div>
+            </div>
+            <p className={styles.blockDescription}>
+              {lang('$allow_suspicious_actions_description')}
+            </p>
+          </>
         </div>
       </div>
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isSlideActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isSlideActive: boolean, isFrom: boolean, currentKey: SLIDES) {
     switch (currentKey) {
       case SLIDES.settings:
         return renderSettings();
       case SLIDES.password:
+        if (getHasInMemoryPassword()) {
+          setCurrentSlide(SLIDES.settings);
+          void getInMemoryPassword().then((memoizedPassword) => setPassword(memoizedPassword));
+
+          return undefined;
+        }
         return (
           <>
             {isInsideModal ? (
@@ -492,6 +591,7 @@ function SettingsSecurity({
               forceBiometricsInMain={!isInsideModal}
               placeholder={lang('Enter your current password')}
               submitLabel={lang('Continue')}
+              noAutoConfirm
               onCancel={handleBackToSettingsClick}
               onSubmit={handlePasswordSubmit}
               onUpdate={clearPasswordError}
@@ -516,7 +616,12 @@ function SettingsSecurity({
                 <span className={styles.headerTitle}>{lang('Change Password')}</span>
               </div>
             )}
-            <div className={buildClassName(modalStyles.transitionContent, styles.content)}>
+            <div className={buildClassName(
+              modalStyles.transitionContent,
+              styles.content,
+              isInsideModal && styles.contentInModal,
+            )}
+            >
               <AnimatedIconWithPreview
                 tgsUrl={ANIMATED_STICKERS_PATHS.guard}
                 previewUrl={ANIMATED_STICKERS_PATHS.guardPreview}
@@ -671,7 +776,7 @@ function SettingsSecurity({
       case SLIDES.backup:
         return (
           <Backup
-            isActive={isSlideActive}
+            isActive={isActive && isSlideActive}
             isMultichainAccount={isMultichainAccount}
             openSettingsSlide={openSettingsSlide}
             isInsideModal={isInsideModal}
@@ -684,7 +789,7 @@ function SettingsSecurity({
       case SLIDES.safetyRules:
         return (
           <BackupSafetyRules
-            isActive={isSlideActive}
+            isActive={isActive && isSlideActive}
             isInsideModal={isInsideModal}
             backupType={backupType!}
             onBackClick={openBackupPage}
@@ -698,11 +803,11 @@ function SettingsSecurity({
       case SLIDES.secretWords:
         return (
           <BackupSecretWords
-            isActive={isSlideActive}
+            isActive={isActive && isSlideActive}
             isBackupSlideActive={currentKey === SLIDES.secretWords || currentKey === SLIDES.safetyRules}
             isInsideModal={isInsideModal}
             enteredPassword={password}
-            currentAccountId={currentAccountId!}
+            currentAccountId={currentAccountId}
             onBackClick={openBackupPage}
             onSubmit={onSettingsClose}
           />
@@ -710,11 +815,11 @@ function SettingsSecurity({
       case SLIDES.privateKey:
         return (
           <BackupPrivateKey
-            isActive={isSlideActive}
+            isActive={isActive && isSlideActive}
             isBackupSlideActive={currentKey === SLIDES.privateKey || currentKey === SLIDES.safetyRules}
             isInsideModal={isInsideModal}
             enteredPassword={password}
-            currentAccountId={currentAccountId!}
+            currentAccountId={currentAccountId}
             onBackClick={openBackupPage}
             onSubmit={onSettingsClose}
           />
@@ -739,22 +844,27 @@ function SettingsSecurity({
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
   const {
-    isPasswordNumeric, authConfig, autolockValue, isAppLockEnabled,
+    isPasswordNumeric, autolockValue, isAppLockEnabled, isAutoConfirmEnabled,
   } = global.settings;
-  const isBiometricAuthEnabled = !!authConfig && authConfig.kind !== 'password';
-  const isNativeBiometricAuthEnabled = !!authConfig && authConfig.kind === 'native-biometrics';
-  const isPasswordPresent = selectIsPasswordPresent(global);
-  const isMultichainAccount = selectIsMultichainAccount(global, global.currentAccountId!);
+
+  const currentAccountId = selectCurrentAccountId(global)!;
+  const isBiometricAuthEnabled = selectIsBiometricAuthEnabled(global);
+  const isNativeBiometricAuthEnabled = selectIsNativeBiometricAuthEnabled(global);
+  const isAllowSuspiciousActions = selectIsAllowSuspiciousActions(global, currentAccountId);
+  const isMultichainAccount = selectIsMultichainAccount(global, currentAccountId);
+  const isMnemonicAccount = selectIsMnemonicAccount(global);
 
   return {
     isBiometricAuthEnabled,
     isNativeBiometricAuthEnabled,
     isMultichainAccount,
     isPasswordNumeric,
-    isPasswordPresent,
     isAppLockEnabled,
     autolockValue,
+    isAutoConfirmEnabled,
+    isAllowSuspiciousActions,
+    shouldShowBackup: isMnemonicAccount,
     isLoading: global.auth.isLoading,
-    currentAccountId: global.currentAccountId!,
+    currentAccountId,
   };
 })(SettingsSecurity));

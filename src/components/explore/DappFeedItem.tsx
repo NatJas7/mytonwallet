@@ -1,4 +1,4 @@
-import React, { memo } from '../../lib/teact/teact';
+import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions } from '../../global';
 
 import buildClassName from '../../util/buildClassName';
@@ -18,12 +18,12 @@ interface OwnProps {
   name: string;
   url: string;
   mode: 'pill' | 'tile';
-  origin: string;
+  isExternal: boolean;
 }
 
 const RERENDER_DAPPS_FEED_DELAY_MS = SECOND;
 
-const POPULAR_DAPP_ORIGIN_REPLACEMENTS = [{
+const POPULAR_DAPP_URL_REPLACEMENTS = [{
   name: 'Fanzee Battles',
   manifestUrl: 'https://battles-tg-app.fanz.ee/tc-manifest.json',
   originalUrl: 'https://t.me/fanzeebattlesbot',
@@ -45,7 +45,7 @@ const POPULAR_DAPP_ORIGIN_REPLACEMENTS = [{
   replacementUrl: 'https://t.me/earn?startapp',
 }];
 
-const ORIGIN_REPLACEMENTS_BY_ORIGIN = POPULAR_DAPP_ORIGIN_REPLACEMENTS.reduce(
+const REPLACEMENTS_BY_URL = POPULAR_DAPP_URL_REPLACEMENTS.reduce(
   (acc: Record<string, string>, { originalUrl, replacementUrl }) => {
     acc[originalUrl] = replacementUrl;
 
@@ -58,7 +58,7 @@ function DappFeedItem({
   name,
   url,
   mode,
-  origin,
+  isExternal,
 }: OwnProps) {
   const { updateDappLastOpenedAt } = getActions();
 
@@ -67,36 +67,27 @@ function DappFeedItem({
   function renderIcon() {
     const iconClassName = mode === 'pill' ? styles.iconPill : styles.iconTile;
 
-    if (!iconUrl) {
-      return (
-        <div className={buildClassName(dappStyles.dappLogo, dappStyles.dappLogo_icon, iconClassName)}>
-          <i className={buildClassName(dappStyles.dappIcon, 'icon-laptop')} aria-hidden />
-        </div>
-      );
-    }
+    const fallbackIcon = useMemo(() => (
+      <div className={buildClassName(dappStyles.dappLogo, dappStyles.dappLogoIcon, iconClassName)}>
+        <i className={buildClassName(styles.fallbackIcon, 'icon-laptop')} aria-hidden />
+      </div>
+    ), [iconClassName]);
 
     return (
-      <div className={iconClassName}>
-        <Image
-          url={iconUrl}
-          className={iconClassName}
-          imageClassName={styles.icon}
-          alt={lang('Icon')}
-        />
-      </div>
+      <Image
+        url={iconUrl}
+        className={iconClassName}
+        imageClassName={styles.icon}
+        alt={lang('Icon')}
+        fallback={fallbackIcon}
+      />
     );
   }
 
   const openDapp = useLastCallback(async () => {
-    const matchedUrl = ORIGIN_REPLACEMENTS_BY_ORIGIN[url];
+    await openUrl(REPLACEMENTS_BY_URL[url] || url, { isExternal });
 
-    if (matchedUrl || isTelegramUrl(url)) {
-      await openUrl(matchedUrl, true);
-    } else {
-      await openUrl(url);
-    }
-
-    setTimeout(() => void updateDappLastOpenedAt({ origin }), RERENDER_DAPPS_FEED_DELAY_MS);
+    setTimeout(() => void updateDappLastOpenedAt({ url }), RERENDER_DAPPS_FEED_DELAY_MS);
   });
 
   return (
@@ -112,7 +103,3 @@ function DappFeedItem({
 }
 
 export default memo(DappFeedItem);
-
-function isTelegramUrl(url: string) {
-  return url.startsWith('https://t.me/');
-}

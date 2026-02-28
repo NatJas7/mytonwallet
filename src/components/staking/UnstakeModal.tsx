@@ -1,77 +1,72 @@
 import type { TeactNode } from '../../lib/teact/teact';
-import React, {
-  memo, useEffect, useMemo, useState,
-} from '../../lib/teact/teact';
+import React, { memo, useCallback, useEffect, useMemo, useState } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { ApiBaseCurrency, ApiStakingState } from '../../api/types';
-import type {
-  GlobalState, HardwareConnectState, Theme, UserToken,
-} from '../../global/types';
+import type { GlobalState, Theme, UserToken } from '../../global/types';
+import { ApiTransactionDraftError } from '../../api/types';
 import { StakingState } from '../../global/types';
 
 import {
   ANIMATED_STICKER_TINY_ICON_PX,
+  DEFAULT_PRICE_CURRENCY,
   IS_CAPACITOR,
-  STAKING_CYCLE_DURATION_MS,
   TONCOIN,
+  VALIDATION_PERIOD_MS,
 } from '../../config';
-import { Big } from '../../lib/big.js';
+import renderText from '../../global/helpers/renderText';
 import {
   selectAccountStakingState,
+  selectCurrentAccountId,
   selectCurrentAccountTokens,
+  selectIsCurrentAccountViewMode,
   selectIsMultichainAccount,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import { formatRelativeHumanDateTime } from '../../util/dateFormat';
-import { fromDecimal, toBig, toDecimal } from '../../util/decimals';
+import { toBig, toDecimal } from '../../util/decimals';
 import { getTonStakingFees } from '../../util/fee/getTonOperationFees';
-import {
-  formatCurrency,
-  formatCurrencySimple,
-  getShortCurrencySymbol,
-} from '../../util/formatNumber';
+import { formatCurrency } from '../../util/formatNumber';
 import resolveSlideTransitionName from '../../util/resolveSlideTransitionName';
+import { getIsLongUnstake, getUnstakeTime } from '../../util/staking';
+import { getIsMobileTelegramApp } from '../../util/windowEnvironment';
 import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
-import { ASSET_LOGO_PATHS } from '../ui/helpers/assetLogos';
 
 import useAppTheme from '../../hooks/useAppTheme';
-import useCurrentOrPrev from '../../hooks/useCurrentOrPrev';
 import useForceUpdate from '../../hooks/useForceUpdate';
 import useInterval from '../../hooks/useInterval';
 import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
-import useShowTransition from '../../hooks/useShowTransition';
 import useSyncEffect from '../../hooks/useSyncEffect';
+import { useAmountInputState } from '../ui/hooks/useAmountInputState';
 
 import TransactionBanner from '../common/TransactionBanner';
 import TransferResult from '../common/TransferResult';
 import LedgerConfirmOperation from '../ledger/LedgerConfirmOperation';
 import LedgerConnect from '../ledger/LedgerConnect';
+import AmountInput from '../ui/AmountInput';
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
 import Button from '../ui/Button';
 import Fee from '../ui/Fee';
 import Modal from '../ui/Modal';
 import ModalHeader from '../ui/ModalHeader';
 import PasswordForm from '../ui/PasswordForm';
-import RichNumberInput from '../ui/RichNumberInput';
 import Transition from '../ui/Transition';
 
 import modalStyles from '../ui/Modal.module.scss';
 import styles from './Staking.module.scss';
 
 type StateProps = GlobalState['currentStaking'] & {
+  isViewMode: boolean;
   tokens?: UserToken[];
-  stakingInfo: GlobalState['stakingInfo'];
-  baseCurrency?: ApiBaseCurrency;
+  baseCurrency: ApiBaseCurrency;
   isNominators?: boolean;
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
   theme: Theme;
   isMultichainAccount: boolean;
   stakingState?: ApiStakingState;
+  isSensitiveDataHidden?: true;
 };
 
 const IS_OPEN_STATES = new Set([
@@ -82,37 +77,28 @@ const IS_OPEN_STATES = new Set([
   StakingState.UnstakeComplete,
 ]);
 
-const FULL_SIZE_NBS_STATES = new Set([
-  StakingState.UnstakePassword,
-  StakingState.UnstakeConnectHardware,
-  StakingState.UnstakeConfirmHardware,
-]);
-
 const UPDATE_UNSTAKE_DATE_INTERVAL_MS = 30000; // 30 sec
 
 function UnstakeModal({
   state,
+  isViewMode,
   isLoading,
   error,
   tokens,
-  stakingInfo,
   baseCurrency,
   isNominators,
-  hardwareState,
-  isLedgerConnected,
-  isTonAppConnected,
   isMultichainAccount,
   theme,
   amount,
   stakingState,
+  isSensitiveDataHidden,
 }: StateProps) {
   const {
     setStakingScreen,
     cancelStaking,
     clearStakingError,
     submitStakingInitial,
-    submitStakingPassword,
-    submitStakingHardware,
+    submitStaking,
     fetchStakingHistory,
   } = getActions();
 
@@ -122,93 +108,52 @@ function UnstakeModal({
     balance: stakingBalance,
   } = stakingState ?? {};
 
-  const endOfStakingCycle = stakingState?.type === 'nominators'
-    ? stakingState.end
-    : stakingInfo?.round?.end;
-
   const lang = useLang();
   const isOpen = IS_OPEN_STATES.has(state);
 
-  const { gas: networkFee, real: realFee } = getTonStakingFees(stakingState?.type).stake;
+  const { gas: networkFee, real: realFee } = getTonStakingFees(stakingState?.type).unstake;
 
   const nativeToken = useMemo(() => tokens?.find(({ slug }) => slug === TONCOIN.slug), [tokens]);
   const isNativeEnough = nativeToken && nativeToken.amount >= networkFee;
-  const instantAvailable = stakingType === 'liquid' ? stakingInfo?.liquid?.available ?? 0n : 0n;
+  const instantAvailable = stakingState?.type === 'liquid' ? stakingState.instantAvailable : undefined;
 
   const token = useMemo(() => {
     return tokenSlug ? tokens?.find(({ slug }) => slug === tokenSlug) : undefined;
   }, [tokenSlug, tokens]);
 
-  const logoPath = token
-    && (ASSET_LOGO_PATHS[token.symbol.toLowerCase() as keyof typeof ASSET_LOGO_PATHS] || token.image);
-
-  const [hasAmountError, setHasAmountError] = useState<boolean>(false);
-
-  const [isLongUnstake, setIsLongUnstake] = useState(false);
-
-  const [isInsufficientBalance, setIsInsufficientBalance] = useState(false);
-
-  const [unstakeAmount, setUnstakeAmount] = useState(isNominators ? stakingBalance : undefined);
+  const isOnlyFullAmount = isNominators;
+  const [unstakeAmount, setUnstakeAmount] = useState(isOnlyFullAmount ? stakingBalance : undefined);
   const [successUnstakeAmount, setSuccessUnstakeAmount] = useState<bigint | undefined>(undefined);
 
-  const shortBaseSymbol = getShortCurrencySymbol(baseCurrency);
+  const unstakeTime = getUnstakeTime(stakingState);
+  const isLongUnstake = stakingState ? getIsLongUnstake(stakingState, unstakeAmount) : undefined;
 
-  useEffect(() => {
-    if (!stakingState) return;
-
-    let isInstantUnstake = true;
-
-    switch (stakingState.type) {
-      case 'nominators': {
-        isInstantUnstake = false;
-        break;
-      }
-      case 'liquid': {
-        isInstantUnstake = amount ? amount < instantAvailable : true;
-        break;
-      }
-      case 'jetton': {
-        isInstantUnstake = true;
-        break;
-      }
-    }
-
-    setIsLongUnstake(!isInstantUnstake);
-  }, [instantAvailable, amount, stakingState]);
-
-  const [unstakeDate, setUnstakeDate] = useState<number>(endOfStakingCycle ?? Date.now() + STAKING_CYCLE_DURATION_MS);
+  const [unstakeDate, setUnstakeDate] = useState<number>(unstakeTime ?? Date.now() + VALIDATION_PERIOD_MS);
   const forceUpdate = useForceUpdate();
   const appTheme = useAppTheme(theme);
 
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, isOpen);
 
-  const amountInCurrency = token && token.price && unstakeAmount
-    ? toBig(unstakeAmount, token.decimals)
-      .mul(token.price)
-      .round(token.decimals, Big.roundHalfUp)
-      .toString()
-    : undefined;
-  const renderingAmountInCurrency = useCurrentOrPrev(amountInCurrency, true);
-  const isUnstakeDisabled = !isNativeEnough || isInsufficientBalance || !unstakeAmount;
+  const hasAmountError = unstakeAmount !== undefined
+    && (unstakeAmount < 0 || !stakingBalance || unstakeAmount > stakingBalance);
 
-  const { shouldRender: shouldRenderCurrency, transitionClassNames: currencyClassNames } = useShowTransition(
-    Boolean(amountInCurrency),
-  );
+  const isInsufficientBalance = error === ApiTransactionDraftError.InsufficientBalance
+    || (unstakeAmount !== undefined && (!stakingBalance || unstakeAmount > stakingBalance));
+
+  const isUnstakeDisabled = !isNativeEnough || isInsufficientBalance || !unstakeAmount;
 
   useEffect(() => {
     if (isOpen) {
       fetchStakingHistory();
-      setUnstakeAmount(isNominators ? stakingBalance : undefined);
-      setHasAmountError(false);
-      setIsInsufficientBalance(false);
+      setUnstakeAmount(isOnlyFullAmount ? stakingBalance : undefined);
     }
-  }, [isOpen, fetchStakingHistory, isNominators, stakingBalance]);
+  }, [isOpen, fetchStakingHistory, isOnlyFullAmount, stakingBalance]);
 
   useSyncEffect(() => {
-    if (endOfStakingCycle) {
-      setUnstakeDate(endOfStakingCycle);
+    if (unstakeTime) {
+      setUnstakeDate(unstakeTime);
     }
-  }, [endOfStakingCycle]);
+  }, [unstakeTime]);
 
   const refreshUnstakeDate = useLastCallback(() => {
     if (unstakeDate < Date.now()) {
@@ -232,12 +177,12 @@ function UnstakeModal({
   const handleTransferSubmit = useLastCallback((password: string) => {
     setSuccessUnstakeAmount(amount);
 
-    submitStakingPassword({ password, isUnstaking: true });
+    submitStaking({ password, isUnstaking: true });
   });
 
   const handleLedgerConnect = useLastCallback(() => {
     setSuccessUnstakeAmount(amount);
-    submitStakingHardware({ isUnstaking: true });
+    submitStaking({ isUnstaking: true });
   });
 
   function renderTransactionBanner() {
@@ -249,83 +194,25 @@ function UnstakeModal({
         withChainIcon={isMultichainAccount}
         color="green"
         text={formatCurrency(toDecimal(unstakeAmount, token.decimals), token.symbol)}
-        className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
+        className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
       />
     );
   }
 
-  const validateAndSetAmount = useLastCallback(
-    (newAmount: bigint | undefined, noReset = false) => {
-      if (!noReset) {
-        setHasAmountError(false);
-        setIsInsufficientBalance(false);
-      }
-
-      if (newAmount === undefined) {
-        setUnstakeAmount(undefined);
-        return;
-      }
-
-      if (newAmount < 0) {
-        setHasAmountError(true);
-        return;
-      }
-
-      if (!stakingBalance || newAmount > stakingBalance) {
-        setHasAmountError(true);
-        setIsInsufficientBalance(true);
-      }
-
-      setUnstakeAmount(newAmount);
-    },
-  );
-
-  const handleMaxAmountClick = useLastCallback(
-    (e: React.MouseEvent<HTMLElement>) => {
-      e.preventDefault();
-
-      if (!stakingBalance) {
-        return;
-      }
-
-      validateAndSetAmount(stakingBalance);
-    },
-  );
-
-  const handleAmountChange = useLastCallback((stringValue?: string) => {
-    const value = stringValue ? fromDecimal(stringValue, token?.decimals) : undefined;
-    validateAndSetAmount(value);
+  const amountInputProps = useAmountInputState({
+    amount: unstakeAmount,
+    token,
+    baseCurrency,
+    isAmountReadonly: isOnlyFullAmount,
+    onAmountChange: setUnstakeAmount,
   });
 
-  function renderBalance() {
-    return (
-      <div className={styles.balanceContainer}>
-        <span className={styles.balance}>
-          {lang('$all_balance', {
-            balance: (
-              <a href="#" onClick={handleMaxAmountClick} className={styles.balanceLink}>
-                {
-                  stakingBalance !== undefined
-                    ? formatCurrencySimple(stakingBalance, token?.symbol!, token?.decimals!)
-                    : lang('Loading...')
-                }
-              </a>
-            ),
-          })}
-        </span>
-      </div>
-    );
-  }
+  // Wa want to render just the token name, not a token select button. To achieve that, we rely on the fact that
+  // `Dropdown` renders with no button border when there is only 1 item.
+  const selectableTokens = useMemo(() => token && [token], [token]);
 
-  function renderCurrencyValue() {
-    return (
-      <span className={buildClassName(styles.amountInCurrency, currencyClassNames)}>
-        ≈&thinsp;{formatCurrency(renderingAmountInCurrency || '0', shortBaseSymbol)}
-      </span>
-    );
-  }
-
-  function renderBottomRight() {
+  // It is necessary to use useCallback instead of useLastCallback here
+  const renderBottomRight = useCallback((className?: string) => {
     const activeKey = isInsufficientBalance ? 0
       : !isNativeEnough ? 1
         : instantAvailable ? 2
@@ -355,17 +242,25 @@ function UnstakeModal({
 
     return (
       <Transition
-        className={styles.amountBottomRight}
+        className={buildClassName(styles.amountBottomRight, className)}
         slideClassName={styles.amountBottomRight_slide}
-        name="fade"
+        name="semiFade"
         activeKey={activeKey}
       >
         {content}
       </Transition>
     );
-  }
+  }, [instantAvailable, isInsufficientBalance, isNativeEnough, lang, nativeToken?.symbol, networkFee, realFee, token]);
 
   function renderUnstakeTimer() {
+    const unstakeDateText = stakingType === 'ethena'
+      ? renderText(lang('$unstaking_when_receive_ethena'))
+      : lang('$unstaking_when_receive', {
+        time: (
+          <strong>{formatRelativeHumanDateTime(lang.code, unstakeDate)}</strong>
+        ),
+      });
+
     return (
       <div className={buildClassName(styles.unstakeTime)}>
         <AnimatedIconWithPreview
@@ -374,18 +269,10 @@ function UnstakeModal({
           className={styles.unstakeTimeIcon}
           nonInteractive
           noLoop={false}
-          tgsUrl={ANIMATED_STICKERS_PATHS[appTheme].iconClockGrayWhite}
-          previewUrl={ANIMATED_STICKERS_PATHS[appTheme].preview.iconClockGrayWhite}
+          tgsUrl={ANIMATED_STICKERS_PATHS[appTheme].iconClockGray}
+          previewUrl={ANIMATED_STICKERS_PATHS[appTheme].preview.iconClockGray}
         />
-        <div>
-          {lang('$unstaking_when_receive', {
-            time: (
-              <strong>
-                {formatRelativeHumanDateTime(lang.code, unstakeDate)}
-              </strong>
-            ),
-          })}
-        </div>
+        <div>{unstakeDateText}</div>
       </div>
     );
   }
@@ -394,7 +281,11 @@ function UnstakeModal({
     const shouldShowInfo = !isInsufficientBalance && unstakeAmount;
 
     return (
-      <Transition name="fade" activeKey={!shouldShowInfo ? 0 : !isLongUnstake ? 1 : 2}>
+      <Transition
+        name="fade"
+        activeKey={!shouldShowInfo ? 0 : !isLongUnstake ? 1 : 2}
+        className={styles.unstakeInfoTransition}
+      >
         {!shouldShowInfo ? undefined
           : (
             !isLongUnstake
@@ -414,59 +305,55 @@ function UnstakeModal({
       <>
         <ModalHeader title={lang('$unstake_asset', { symbol: token?.symbol })} onClose={cancelStaking} />
         <div className={modalStyles.transitionContent}>
-          {!isNominators && renderBalance()}
-          <RichNumberInput
-            key="unstaking_amount"
-            id="unstaking_amount"
-            hasError={hasAmountError}
-            value={unstakeAmount === undefined ? undefined : toDecimal(unstakeAmount, token?.decimals)}
+          <AmountInput
+            {...amountInputProps}
             labelText={lang('Amount to unstake')}
-            onChange={handleAmountChange}
-            className={styles.amountInput}
-            decimals={token?.decimals}
-            disabled={isNominators}
-          >
-            <div className={styles.ton}>
-              <img src={logoPath} alt="" className={styles.tonIcon} />
-              <span className={styles.tonName}>{token?.symbol}</span>
-            </div>
-          </RichNumberInput>
-
-          <div className={styles.amountBottomWrapper}>
-            <div className={styles.amountBottom}>
-              {shouldRenderCurrency && renderCurrencyValue()}
-              {renderBottomRight()}
-            </div>
-          </div>
+            maxAmount={stakingBalance}
+            token={token}
+            allTokens={selectableTokens}
+            hasError={hasAmountError}
+            isMaxAmountLoading={stakingBalance === undefined || !token}
+            isMaxAmountAllMode
+            isSensitiveDataHidden={isSensitiveDataHidden}
+            renderBottomRight={renderBottomRight}
+          />
 
           {renderUnstakeInfo()}
 
-          <div className={modalStyles.buttons}>
-            <Button
-              isPrimary
-              isLoading={isLoading}
-              isDisabled={isUnstakeDisabled}
-              onClick={handleStartUnstakeClick}
-            >
-              {lang('Unstake')}
-            </Button>
-          </div>
+          {!isViewMode && (
+            <div className={modalStyles.buttons}>
+              <Button
+                isPrimary
+                isLoading={isLoading}
+                isDisabled={isUnstakeDisabled}
+                onClick={handleStartUnstakeClick}
+              >
+                {lang('Unstake')}
+              </Button>
+            </div>
+          )}
         </div>
       </>
     );
   }
 
   function renderPassword(isActive: boolean) {
+    const placeholder = getDoesUsePinPad()
+      ? 'Confirm action with your passcode'
+      : 'Confirm action with your password';
+
     return (
       <>
-        {!IS_CAPACITOR && <ModalHeader title={lang('Confirm Unstaking')} onClose={cancelStaking} />}
+        {!getDoesUsePinPad() && (
+          <ModalHeader title={lang('Confirm Unstaking')} onClose={cancelStaking} />
+        )}
         <PasswordForm
           isActive={isActive}
           isLoading={isLoading}
           withCloseButton={IS_CAPACITOR}
           operationType="unstaking"
           error={error}
-          placeholder="Confirm operation with your password"
+          placeholder={lang(placeholder)}
           submitLabel={lang('Confirm')}
           cancelLabel={lang('Back')}
           onSubmit={handleTransferSubmit}
@@ -480,19 +367,26 @@ function UnstakeModal({
   }
 
   function renderComplete(isActive: boolean) {
+    const title = getIsMobileTelegramApp()
+      ? lang('Request is sent!')
+      : isLongUnstake
+        ? lang('Request for unstaking is sent!')
+        : lang('Coins have been unstaked!');
+
     return (
       <>
         <ModalHeader
-          title={lang('Request for unstaking is sent!')}
+          title={title}
           onClose={cancelStaking}
         />
 
         <div className={modalStyles.transitionContent}>
           <TransferResult
-            color="green"
+            color={!isLongUnstake ? 'green' : undefined}
             playAnimation={isActive}
             amount={successUnstakeAmount}
             tokenSymbol={token?.symbol}
+            decimals={token?.decimals}
             noSign
           />
 
@@ -506,8 +400,7 @@ function UnstakeModal({
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: StakingState) {
     switch (currentKey) {
       case StakingState.UnstakeInitial:
         return renderInitial();
@@ -519,9 +412,6 @@ function UnstakeModal({
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isLedgerConnected={isLedgerConnected}
-            isTonAppConnected={isTonAppConnected}
             onConnected={handleLedgerConnect}
             onClose={cancelStaking}
           />
@@ -530,7 +420,7 @@ function UnstakeModal({
       case StakingState.UnstakeConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm operation on your Ledger')}
+            text={lang('Please confirm action on your Ledger')}
             error={error}
             onClose={cancelStaking}
             onTryAgain={handleLedgerConnect}
@@ -548,8 +438,6 @@ function UnstakeModal({
       hasCloseButton
       noBackdropClose
       dialogClassName={styles.modalDialog}
-      nativeBottomSheetKey="unstake"
-      forceFullNative={FULL_SIZE_NBS_STATES.has(renderingKey)}
       onClose={cancelStaking}
       onCloseAnimationEnd={updateNextKey}
     >
@@ -568,30 +456,22 @@ function UnstakeModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const accountId = global.currentAccountId!;
+  const accountId = selectCurrentAccountId(global)!;
   const tokens = selectCurrentAccountTokens(global);
-  const baseCurrency = global.settings.baseCurrency;
+  const { baseCurrency = DEFAULT_PRICE_CURRENCY, isSensitiveDataHidden } = global.settings;
   const isMultichainAccount = selectIsMultichainAccount(global, accountId);
   const stakingState = selectAccountStakingState(global, accountId);
   const isNominators = stakingState?.type === 'nominators';
 
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
-
   return {
     ...global.currentStaking,
     tokens,
-    stakingInfo: global.stakingInfo,
     baseCurrency,
     isNominators,
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
     theme: global.settings.theme,
     isMultichainAccount,
     stakingState,
+    isSensitiveDataHidden,
+    isViewMode: selectIsCurrentAccountViewMode(global),
   };
 })(UnstakeModal));

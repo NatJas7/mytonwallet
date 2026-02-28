@@ -1,62 +1,61 @@
 import type { ApiTonWalletVersion } from '../chains/ton/types';
-import type { ApiLedgerDriver } from './misc';
+import type { ApiChain, ApiLedgerDriver } from './misc';
 
 type ApiBaseWallet = {
   address: string;
-  publicKey: string;
+  /** Misses in view wallets. Though, it is presented in TON view wallets that are initialized wallet contracts. */
+  publicKey?: string;
   index: number;
 };
 
-export type ApiBip39Account = {
-  type: 'bip39';
-  mnemonicEncrypted: string;
-  tron: ApiTronWallet;
-  ton: ApiTonWallet;
-};
-
-export type ApiTonAccount = {
-  type: 'ton';
-  mnemonicEncrypted: string;
-  ton: ApiTonWallet;
-};
-
-export type ApiLedgerAccount = {
-  type: 'ledger';
-  ton: ApiTonWallet;
-  driver: ApiLedgerDriver;
-  deviceId?: string;
-  deviceName?: string;
-};
-
 export type ApiTonWallet = ApiBaseWallet & {
-  type: 'ton';
   version: ApiTonWalletVersion;
   isInitialized?: boolean;
   authToken?: string;
 };
 
-export type ApiTronWallet = ApiBaseWallet & {
-  type: 'tron';
+export type ApiTronWallet = ApiBaseWallet;
+
+export type ApiSolanaWallet = ApiBaseWallet;
+
+/** A helper type that converts the chain names to the corresponding wallet types */
+export type ApiWalletByChain = {
+  ton: ApiTonWallet;
+  tron: ApiTronWallet;
+  solana: ApiSolanaWallet;
 };
 
-export type ApiAccountAny = ApiBip39Account | ApiTonAccount | ApiLedgerAccount;
-export type ApiAccountWithMnemonic = ApiBip39Account | ApiTonAccount;
-export type ApiAccountWithTon = ApiTonAccount | ApiLedgerAccount;
-export type ApiAccountWithTron = ApiBip39Account;
-export type ApiWalletAny = ApiTonWallet | ApiTronWallet;
+type ApiBaseAccount = {
+  byChain: {
+    [K in ApiChain]?: ApiWalletByChain[K];
+  };
+};
 
-export interface ApiDappMetadata {
-  origin: string;
-  url: string;
-  name: string;
-  iconUrl: string;
-  manifestUrl: string;
-}
+/** Also accounts based on a private key */
+export type ApiBip39Account = ApiBaseAccount & {
+  type: 'bip39';
+  mnemonicEncrypted: string;
+};
 
-export interface ApiDapp extends ApiDappMetadata {
-  connectedAt: number;
-  sse?: ApiSseOptions;
-}
+export type ApiTonAccount = ApiBaseAccount & {
+  type: 'ton';
+  mnemonicEncrypted: string;
+};
+
+export type ApiLedgerAccount = ApiBaseAccount & {
+  type: 'ledger';
+  driver: ApiLedgerDriver;
+  deviceId?: string;
+  deviceName?: string;
+};
+
+export type ApiViewAccount = ApiBaseAccount & {
+  type: 'view';
+};
+
+export type ApiAccountAny = ApiBip39Account | ApiTonAccount | ApiLedgerAccount | ApiViewAccount;
+export type ApiAccountWithMnemonic = Extract<ApiAccountAny, { mnemonicEncrypted: string }>;
+export type ApiAccountWithChain<T extends ApiChain> = ApiAccountAny & { byChain: Record<T, ApiWalletByChain[T]> };
 
 export interface ApiSseOptions {
   clientId: string;
@@ -64,5 +63,3 @@ export interface ApiSseOptions {
   secretKey: string;
   lastOutputId: number;
 }
-
-export type ApiDappsState = Record<string, Record<string, ApiDapp>>;

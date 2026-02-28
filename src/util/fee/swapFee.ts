@@ -1,4 +1,4 @@
-import type { ApiToken } from '../../api/types';
+import type { ApiSwapEstimateVariant, ApiToken } from '../../api/types';
 import type { GlobalState } from '../../global/types';
 import type { FeePrecision, FeeTerms } from './types';
 import { SwapType } from '../../global/types';
@@ -7,13 +7,13 @@ import { DEFAULT_OUR_SWAP_FEE } from '../../config';
 import { Big } from '../../lib/big.js';
 import { bigintDivideToNumber, bigintMax } from '../bigint';
 import { bigMax, bigMin } from '../bigNumber';
-import { findChainConfig } from '../chain';
 import { fromDecimal, toBig } from '../decimals';
-import { getChainBySlug, getIsNativeToken } from '../tokens';
+import { findNativeToken, getChainBySlug, getIsNativeToken } from '../tokens';
 
 type ExplainSwapFeeInput = Pick<GlobalState['currentSwap'],
-'swapType' | 'tokenInSlug' | 'networkFee' | 'realNetworkFee' | 'ourFee' | 'dieselStatus' | 'dieselFee'
+'tokenInSlug' | 'networkFee' | 'realNetworkFee' | 'ourFee' | 'dieselStatus' | 'dieselFee'
 > & {
+  swapType: SwapType;
   /** The balance of the "in" token blockchain's native token. Undefined means that it's unknown. */
   nativeTokenInBalance: bigint | undefined;
 };
@@ -47,26 +47,40 @@ export type ExplainedSwapFee = {
   shouldShowOurFee: boolean;
 };
 
-type MaxSwapAmountInput = Pick<GlobalState['currentSwap'], 'swapType' | 'ourFeePercent'> & {
+type MaxSwapAmountInput = Pick<GlobalState['currentSwap'], 'ourFeePercent'> & {
+  swapType: SwapType;
   /** The balance of the "in" token. Undefined means that it's unknown. */
   tokenInBalance: bigint | undefined;
   tokenIn: Pick<ApiToken, 'slug' | 'decimals'> | undefined;
   /** The full network fee terms calculated by `explainSwapFee`. Undefined means that they're unknown. */
   fullNetworkFee: FeeTerms<string> | undefined;
+  /** The maximum amount available for swap, as calculated by the backend. Undefined means it's unknown. */
+  maxAmountFromBackend: bigint | undefined;
 };
 
-type BalanceSufficientForSwapInput = Omit<MaxSwapAmountInput, never> & {
+type BalanceSufficientForSwapInput = MaxSwapAmountInput & {
   /** The wallet balance of the native token of the "in" token chain. Undefined means that it's unknown. */
   nativeTokenInBalance: bigint | undefined;
   /** The "in" amount to swap. Undefined means that it's unspecified. */
   amountIn: string | undefined;
+  /** The maximum amount available for swap, as calculated by the backend. Undefined means it's unknown. */
+  maxAmountFromBackend: bigint | undefined;
+};
+
+type CanAffordSwapVariant = {
+  variant: ApiSwapEstimateVariant;
+  tokenIn: Pick<ApiToken, 'slug' | 'decimals'> | undefined;
+  /** The balance of the "in" token. Undefined means that it's unknown. */
+  tokenInBalance: bigint | undefined;
+  /** The wallet balance of the native token of the "in" token chain. Undefined means that it's unknown. */
+  nativeTokenInBalance: bigint | undefined;
 };
 
 /**
  * Converts the swap fee data returned from API into data that is ready to be displayed in the swap form UI.
  */
 export function explainSwapFee(input: ExplainSwapFeeInput): ExplainedSwapFee {
-  return shouldBeGasless(input)
+  return shouldSwapBeGasless(input)
     ? explainGaslessSwapFee(input)
     : explainGasfullSwapFee(input);
 }
@@ -81,7 +95,12 @@ export function getMaxSwapAmount({
   tokenIn,
   fullNetworkFee,
   ourFeePercent,
+  maxAmountFromBackend,
 }: MaxSwapAmountInput): bigint | undefined {
+  if (maxAmountFromBackend) {
+    return maxAmountFromBackend;
+  }
+
   if (swapType === SwapType.CrosschainToWallet || tokenInBalance === undefined) {
     return undefined;
   }
@@ -136,7 +155,7 @@ export function isBalanceSufficientForSwap(input: BalanceSufficientForSwapInput)
     return undefined;
   }
 
-  const nativeTokenIn = findChainConfig(getChainBySlug(tokenIn.slug))?.nativeToken;
+  const nativeTokenIn = findNativeToken(getChainBySlug(tokenIn.slug));
   if (!nativeTokenIn) {
     return undefined;
   }
@@ -152,7 +171,43 @@ export function isBalanceSufficientForSwap(input: BalanceSufficientForSwapInput)
   return swapAmountInBigint <= maxAmount && networkNativeFeeBigint <= nativeTokenInBalance;
 }
 
-function shouldBeGasless(input: ExplainSwapFeeInput) {
+/**
+ * Decides whether the balance is sufficient for the given swap estimate variant (DEX).
+ * Returns undefined when it can't be calculated because of insufficient input data.
+ */
+export function canAffordSwapEstimateVariant(input: CanAffordSwapVariant) {
+  if (!input.tokenIn || input.nativeTokenInBalance === undefined) {
+    return undefined;
+  }
+
+  const nativeTokenIn = findNativeToken(getChainBySlug(input.tokenIn.slug));
+  if (!nativeTokenIn) {
+    return undefined;
+  }
+
+  // Try to pay with gas
+  const networkFeeBigint = fromDecimal(input.variant.networkFee, nativeTokenIn.decimals);
+  if (input.nativeTokenInBalance >= networkFeeBigint) {
+    return true;
+  }
+
+  // Otherwise, try to pay with diesel
+  if (input.variant.dieselFee) {
+    if (input.tokenInBalance === undefined) {
+      return undefined;
+    }
+    const dieselFeeBigint = fromDecimal(input.variant.dieselFee, input.tokenIn.decimals);
+    if (input.tokenInBalance >= dieselFeeBigint) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function shouldSwapBeGasless(
+  input: Pick<ExplainSwapFeeInput, 'tokenInSlug' | 'nativeTokenInBalance' | 'networkFee' | 'dieselStatus' | 'swapType'>,
+) {
   const isNativeIn = getIsNativeToken(input.tokenInSlug);
   const nativeTokenBalance = getBigNativeTokenInBalance(input);
   const isInsufficientNative = input.networkFee !== undefined && nativeTokenBalance !== undefined
@@ -162,7 +217,7 @@ function shouldBeGasless(input: ExplainSwapFeeInput) {
     input.swapType === SwapType.OnChain
     && isInsufficientNative
     && !isNativeIn
-    && input.dieselStatus && input.dieselStatus !== 'not-available'
+    && Boolean(input.dieselStatus) && input.dieselStatus !== 'not-available'
   );
 }
 
@@ -260,7 +315,7 @@ function getBigNativeTokenInBalance(input: Pick<ExplainSwapFeeInput, 'tokenInSlu
     return undefined;
   }
 
-  const nativeToken = findChainConfig(getChainBySlug(input.tokenInSlug))?.nativeToken;
+  const nativeToken = findNativeToken(getChainBySlug(input.tokenInSlug));
   return nativeToken ? toBig(input.nativeTokenInBalance, nativeToken.decimals) : undefined;
 }
 

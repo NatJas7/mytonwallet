@@ -1,16 +1,23 @@
+import type { ElementRef } from '../../../../lib/teact/teact';
 import React, { memo, useMemo, useRef } from '../../../../lib/teact/teact';
 import { withGlobal } from '../../../../global';
 
 import type { ApiNft } from '../../../../api/types';
 import type { IAnchorPosition } from '../../../../global/types';
+import type { Layout } from '../../../../hooks/useMenuPosition';
 
-import { selectCurrentAccountSettings, selectCurrentAccountState } from '../../../../global/selectors';
+import {
+  selectCurrentAccountSettings,
+  selectCurrentAccountState,
+  selectIsCurrentAccountViewMode,
+  selectTonDnsLinkedAddress,
+} from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
-import stopEvent from '../../../../util/stopEvent';
+import { stopEvent } from '../../../../util/domEvents';
+import { vibrate } from '../../../../util/haptics';
 
 import useLang from '../../../../hooks/useLang';
 import useLastCallback from '../../../../hooks/useLastCallback';
-import useMenuPosition from '../../../../hooks/useMenuPosition';
 import { usePrevDuringAnimationSimple } from '../../../../hooks/usePrevDuringAnimationSimple';
 import useNftMenu from '../../../mediaViewer/hooks/useNftMenu';
 
@@ -21,27 +28,45 @@ import styles from './NftMenu.module.scss';
 
 interface OwnProps {
   nft: ApiNft;
-  menuPosition?: IAnchorPosition;
+  ref?: ElementRef<HTMLButtonElement>;
+  isContextMenuMode?: boolean;
+  dnsExpireInDays?: number;
+  menuAnchor?: IAnchorPosition;
+  className?: string;
   onOpen: NoneToVoidFunction;
   onClose: NoneToVoidFunction;
+  onCloseAnimationEnd?: NoneToVoidFunction;
 }
 
 interface StateProps {
+  isViewMode: boolean;
+  isTestnet?: boolean;
   blacklistedNftAddresses?: string[];
   whitelistedNftAddresses?: string[];
   cardBackgroundNft?: ApiNft;
   accentColorNft?: ApiNft;
+  linkedAddress?: string;
 }
 
+const CONTEXT_MENU_VERTICAL_SHIFT_PX = 4;
+
 function NftMenu({
+  isViewMode,
+  isTestnet,
+  isContextMenuMode,
   nft,
-  menuPosition,
-  onOpen,
-  onClose,
+  ref,
+  dnsExpireInDays,
+  linkedAddress,
+  menuAnchor,
   blacklistedNftAddresses,
   whitelistedNftAddresses,
   cardBackgroundNft,
   accentColorNft,
+  className,
+  onOpen,
+  onClose,
+  onCloseAnimationEnd,
 }: OwnProps & StateProps) {
   const isNftBlacklisted = useMemo(() => {
     return blacklistedNftAddresses?.includes(nft.address);
@@ -57,28 +82,33 @@ function NftMenu({
   );
 
   const { menuItems, handleMenuItemSelect } = useNftMenu({
-    nft, isNftBlacklisted, isNftWhitelisted, isNftInstalled, isNftAccentColorInstalled,
+    nft,
+    isViewMode,
+    dnsExpireInDays,
+    linkedAddress,
+    isNftBlacklisted,
+    isNftWhitelisted,
+    isNftInstalled,
+    isNftAccentColorInstalled,
+    isTestnet,
   });
-  // eslint-disable-next-line no-null/no-null
-  const ref = useRef<HTMLButtonElement>(null);
-  const isOpen = Boolean(menuPosition);
+  let buttonRef = useRef<HTMLButtonElement>();
+  const menuRef = useRef<HTMLDivElement>();
+  const isOpen = Boolean(menuAnchor);
+  if (ref) {
+    buttonRef = ref;
+  }
 
-  const getTriggerElement = useLastCallback(() => ref.current);
+  const getTriggerElement = useLastCallback(() => buttonRef.current);
   const getRootElement = useLastCallback(() => document.body);
-  const getMenuElement = useLastCallback(() => document.querySelector('#portals .menu-bubble'));
-  const getLayout = useLastCallback(() => ({ withPortal: true }));
+  const getMenuElement = useLastCallback(() => menuRef.current);
+  const getLayout = useLastCallback((): Layout => ({
+    withPortal: true,
+    topShiftY: isContextMenuMode ? CONTEXT_MENU_VERTICAL_SHIFT_PX : 0,
+    preferredPositionX: isContextMenuMode ? 'left' : 'right',
+  }));
 
   const lang = useLang();
-
-  const {
-    positionY, transformOriginX, transformOriginY, style: menuStyle,
-  } = useMenuPosition(
-    menuPosition,
-    getTriggerElement,
-    getRootElement,
-    getMenuElement,
-    getLayout,
-  );
 
   const handleButtonClick = (e: React.MouseEvent) => {
     stopEvent(e);
@@ -86,6 +116,7 @@ function NftMenu({
     if (isOpen) {
       onClose();
     } else {
+      void vibrate();
       onOpen();
     }
   };
@@ -93,9 +124,9 @@ function NftMenu({
   return (
     <>
       <button
-        ref={ref}
+        ref={buttonRef}
         type="button"
-        className={styles.button}
+        className={buildClassName(styles.button, className)}
         aria-label={lang('NFT Menu')}
         onClick={handleButtonClick}
       >
@@ -103,29 +134,41 @@ function NftMenu({
       </button>
       <DropdownMenu
         isOpen={isOpen}
+        ref={menuRef}
         withPortal
-        menuPositionHorizontal="right"
-        menuPosition={positionY}
-        menuStyle={menuStyle}
-        transformOriginX={transformOriginX}
-        transformOriginY={transformOriginY}
+        menuAnchor={menuAnchor}
+        menuPositionX="right"
+        getTriggerElement={!isContextMenuMode ? getTriggerElement : undefined}
+        getRootElement={getRootElement}
+        getMenuElement={getMenuElement}
+        getLayout={getLayout}
         items={menuItems}
         shouldTranslateOptions
-        className={styles.menu}
+        className={isContextMenuMode ? styles.contextMenu : styles.menu}
+        bubbleClassName={styles.menuBubble}
         buttonClassName={styles.item}
+        itemDescriptionClassName={styles.menuItemDescription}
         shouldCleanup
         onClose={onClose}
+        onCloseAnimationEnd={onCloseAnimationEnd}
         onSelect={handleMenuItemSelect}
       />
     </>
   );
 }
 
-export default memo(withGlobal<OwnProps>((global): StateProps => {
+export default memo(withGlobal<OwnProps>((global, { nft }): StateProps => {
   const { blacklistedNftAddresses, whitelistedNftAddresses } = selectCurrentAccountState(global) || {};
   const { cardBackgroundNft, accentColorNft } = selectCurrentAccountSettings(global) || {};
+  const linkedAddress = selectTonDnsLinkedAddress(global, nft);
 
   return {
-    blacklistedNftAddresses, whitelistedNftAddresses, cardBackgroundNft, accentColorNft,
+    blacklistedNftAddresses,
+    whitelistedNftAddresses,
+    cardBackgroundNft,
+    accentColorNft,
+    isViewMode: selectIsCurrentAccountViewMode(global),
+    isTestnet: global.settings.isTestnet,
+    linkedAddress,
   };
 })(NftMenu));

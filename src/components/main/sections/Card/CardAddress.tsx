@@ -1,176 +1,191 @@
-import React, { memo, type TeactNode, useMemo } from '../../../../lib/teact/teact';
+import React, { memo, useMemo, useRef } from '../../../../lib/teact/teact';
 import { getActions, withGlobal } from '../../../../global';
 
 import type { ApiChain } from '../../../../api/types';
-import type { Account } from '../../../../global/types';
+import type { AccountChain, AccountType } from '../../../../global/types';
 
-import { selectAccount } from '../../../../global/selectors';
+import { selectAccount, selectCurrentAccountId, selectCurrentAccountTokens } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
+import { getChainConfig, getChainTitle, getSupportedChains } from '../../../../util/chain';
 import { copyTextToClipboard } from '../../../../util/clipboard';
+import { toDecimal } from '../../../../util/decimals';
 import { openUrl } from '../../../../util/openUrl';
 import { shortenAddress } from '../../../../util/shortenAddress';
 import getChainNetworkIcon from '../../../../util/swap/getChainNetworkIcon';
 import { getExplorerAddressUrl, getExplorerName } from '../../../../util/url';
+import { IS_TOUCH_ENV } from '../../../../util/windowEnvironment';
 
-import useFlag from '../../../../hooks/useFlag';
 import useLang from '../../../../hooks/useLang';
 import useLastCallback from '../../../../hooks/useLastCallback';
+import useAddressMenu from './hooks/useAddressMenu';
 
-import Menu from '../../../ui/Menu';
+import AddressMenu from './AddressMenu';
+import AddressMenuButton from './AddressMenuButton';
+import ViewModeIcon from './ViewModeIcon';
 
-import menuStyles from '../../../ui/Dropdown.module.scss';
 import styles from './Card.module.scss';
 
+interface OwnProps {
+  isMinimized?: boolean;
+}
+
 interface StateProps {
-  addressByChain?: Account['addressByChain'];
+  accountType?: AccountType;
+  byChain: Map<ApiChain, AccountChain & {
+    balance: number;
+  }>;
   isTestnet?: boolean;
-  isHardwareAccount?: boolean;
+  isTemporary?: boolean;
   withTextGradient?: boolean;
+  selectedExplorerIds?: Partial<Record<ApiChain, string>>;
 }
 
 function CardAddress({
-  addressByChain, isTestnet, isHardwareAccount, withTextGradient,
-}: StateProps) {
-  const { showNotification } = getActions();
-
+  byChain,
+  isTestnet,
+  accountType,
+  withTextGradient,
+  isMinimized,
+  isTemporary,
+  selectedExplorerIds,
+}: StateProps & OwnProps) {
   const lang = useLang();
-  const [isMenuOpen, openMenu, closeMenu] = useFlag(false);
-  const chains = useMemo(() => Object.keys(addressByChain || {}) as ApiChain[], [addressByChain]);
-  const explorerTitle = useMemo(() => {
-    return chains.length !== 1
-      ? undefined
-      : (lang('View address on %ton_explorer_name%', {
-        ton_explorer_name: getExplorerName(chains[0]),
-      }) as TeactNode[]
-      ).join('');
-  }, [chains, lang]);
-  const chainDropdownItems = useMemo(() => {
-    if (chains.length < 2) return undefined;
 
-    return chains.map((key) => ({
-      value: addressByChain![key],
-      name: shortenAddress(addressByChain![key])!,
-      icon: getChainNetworkIcon(key),
-      fontIcon: 'copy',
-      chain: key,
-      label: (lang('View address on %ton_explorer_name%', {
-        ton_explorer_name: getExplorerName(key),
-      }) as TeactNode[]
-      ).join(''),
-    }));
-  }, [addressByChain, chains, lang]);
+  const ref = useRef<HTMLDivElement>();
+  const menuRef = useRef<HTMLDivElement>();
 
-  const handleCopyAddress = useLastCallback((address: string) => {
-    showNotification({ message: lang('Address was copied!') as string, icon: 'icon-copy' });
-    void copyTextToClipboard(address);
-  });
+  const {
+    menuAnchor,
+    isMenuOpen,
+    openMenu,
+    closeMenu,
+    getTriggerElement,
+    getRootElement,
+    getMenuElement,
+    getLayout,
+    handleMouseEnter,
+    handleMouseLeave,
+  } = useAddressMenu(ref, menuRef);
 
-  const handleItemClick = useLastCallback((e: React.MouseEvent, address: string) => {
-    handleCopyAddress(address);
+  const chains = useMemo(() => {
+    const dynamicOrder: ApiChain[] = [];
+    const staticOrder: ApiChain[] = [];
+
+    [...byChain].map((e) => {
+      if (e[1].balance > 0) {
+        dynamicOrder.push(e[0]);
+      } else {
+        staticOrder.push(e[0]);
+      }
+    });
+
+    return [
+      ...dynamicOrder,
+      ...getSupportedChains().filter((chain) => staticOrder.includes(chain)),
+    ];
+  }, [byChain]);
+
+  const isHardwareAccount = accountType === 'hardware';
+  const isViewAccount = accountType === 'view';
+  const menuItems = useMemo(() => {
+    return chains.map((chain) => {
+      const accountChain = byChain.get(chain)!;
+
+      return {
+        value: accountChain.address,
+        address: shortenAddress(accountChain.address)!,
+        ...(accountChain.domain && { domain: accountChain.domain }),
+        icon: getChainNetworkIcon(chain),
+        fontIcon: 'copy',
+        chain,
+        label: (lang('View address on %explorer_name%', {
+          explorer_name: getExplorerName(chain),
+        }) as string[]
+        ).join(''),
+      };
+    });
+  }, [byChain, chains, lang]);
+
+  const handleExplorerClick = useLastCallback((chain: ApiChain, address: string) => {
+    void openUrl(getExplorerAddressUrl(chain, address, isTestnet, selectedExplorerIds?.[chain])!);
     closeMenu();
   });
 
-  const handleExplorerClick = useLastCallback((e: React.MouseEvent, chain: ApiChain, address: string) => {
-    openUrl(getExplorerAddressUrl(chain, address, isTestnet)!);
-    closeMenu();
+  const { showToast } = getActions();
+
+  const handleLongPress = useLastCallback((chain: ApiChain, address: string, domain?: string) => {
+    void copyTextToClipboard(domain ?? address);
+    const message = domain
+      ? lang('%chain% Domain Copied', { chain: getChainTitle(chain) }) as string
+      : lang('%chain% Address Copied', { chain: getChainTitle(chain) }) as string;
+    showToast({ message, icon: 'icon-copy' });
   });
-
-  function renderAddressMenu() {
-    return (
-      <Menu
-        isOpen={isMenuOpen}
-        type="dropdown"
-        onClose={closeMenu}
-      >
-        {chainDropdownItems!.map((item, index) => {
-          const fullButtonClassName = buildClassName(
-            menuStyles.button,
-            index > 0 && menuStyles.separator,
-            styles.menuItem,
-          );
-
-          return (
-            <div key={item.value} className={fullButtonClassName}>
-              <img src={item.icon} alt="" className={buildClassName('icon', menuStyles.itemIcon, styles.menuIcon)} />
-              <span
-                className={buildClassName(menuStyles.itemName, styles.menuItemName)}
-                tabIndex={0}
-                role="button"
-                onClick={(e) => handleItemClick(e, item.value)}
-              >
-                {item.name}
-                <i
-                  className={buildClassName(`icon icon-${item.fontIcon}`, menuStyles.fontIcon, styles.menuFontIcon)}
-                  aria-hidden
-                />
-              </span>
-              <i
-                tabIndex={0}
-                role="button"
-                className={buildClassName(menuStyles.close, 'icon icon-tonexplorer-small', styles.menuExplorerIcon)}
-                aria-label={item.label}
-                onClick={(e) => handleExplorerClick(e, item.chain, item.value)}
-              />
-            </div>
-          );
-        })}
-      </Menu>
-    );
-  }
-
-  if (chainDropdownItems) {
-    return (
-      <div className={styles.addressContainer}>
-        <button
-          type="button"
-          className={buildClassName(styles.address, withTextGradient && 'gradientText')}
-          onClick={() => openMenu()}
-        >
-          <span className={buildClassName(styles.itemName, 'itemName')}>
-            {lang('Multichain')}
-          </span>
-          <i className={buildClassName(styles.icon, 'icon-caret-down')} aria-hidden />
-        </button>
-        {renderAddressMenu()}
-      </div>
-    );
-  }
-
-  const chain = chains[0];
-  if (!chain) return undefined;
 
   return (
-    <div className={styles.addressContainer}>
+    <div ref={ref} className={buildClassName(styles.addressContainer, isMinimized && styles.minimized)}>
+      {isViewAccount && <ViewModeIcon isTemporary={isTemporary} isMinimized={isMinimized} />}
       {isHardwareAccount && <i className={buildClassName(styles.icon, 'icon-ledger')} aria-hidden />}
-      <button
-        type="button"
-        className={buildClassName(styles.address, withTextGradient && 'gradientText')}
-        aria-label={lang('Copy wallet address')}
-        onClick={() => handleCopyAddress(addressByChain![chain])}
-      >
-        {shortenAddress(addressByChain![chain])}
-        <i className={buildClassName(styles.icon, 'icon-copy')} aria-hidden />
-      </button>
-      <a
-        href={getExplorerAddressUrl(chain, addressByChain![chain], isTestnet)}
-        className={styles.explorerButton}
-        title={explorerTitle}
-        aria-label={explorerTitle}
-        target="_blank"
-        rel="noreferrer noopener"
-      >
-        <i className={buildClassName(styles.icon, 'icon-tonexplorer-small')} aria-hidden />
-      </a>
+      <AddressMenuButton
+        chains={chains}
+        byChain={byChain}
+        withTextGradient={withTextGradient}
+        isMinimized={isMinimized}
+        openMenu={openMenu}
+        onLongPress={handleLongPress}
+        onMouseEnter={!IS_TOUCH_ENV ? handleMouseEnter : undefined}
+        onMouseLeave={!IS_TOUCH_ENV ? handleMouseLeave : undefined}
+      />
+      {!isMinimized && (
+        <AddressMenu
+          isOpen={isMenuOpen}
+          anchor={menuAnchor}
+          items={menuItems}
+          menuRef={menuRef}
+          isTestnet={isTestnet}
+          onClose={closeMenu}
+          onExplorerClick={handleExplorerClick}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          getTriggerElement={getTriggerElement}
+          getRootElement={getRootElement}
+          getMenuElement={getMenuElement}
+          getLayout={getLayout}
+        />
+      )}
     </div>
   );
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const { addressByChain, isHardware } = selectAccount(global, global.currentAccountId!) || {};
+  const accountId = selectCurrentAccountId(global);
+  const account = accountId ? selectAccount(global, accountId) : undefined;
+  const { type: accountType, byChain, isTemporary } = account || {};
+
+  const accountTokens = selectCurrentAccountTokens(global);
+
+  // Maps preserve an order
+  const byChainWithBalances = new Map(Object.entries(byChain || {}).map(([chain, account]) => {
+    const token = accountTokens?.filter((token) =>
+      token.chain === chain
+      && (
+        token.slug === getChainConfig(chain).nativeToken.slug
+        || token.slug === getChainConfig(chain).usdtSlug.mainnet
+      ),
+    ).reduce((acc, token) => acc + token.priceUsd * Number(toDecimal(token.amount || 0n, token.decimals || 0)), 0);
+
+    return [
+      chain,
+      {
+        ...account,
+        balance: token,
+      }] as [ApiChain, AccountChain & { balance: number }];
+  }).sort((a, b) => b[1].balance - a[1].balance));
 
   return {
-    addressByChain,
+    byChain: byChainWithBalances,
     isTestnet: global.settings.isTestnet,
-    isHardwareAccount: isHardware,
+    accountType,
+    isTemporary,
+    selectedExplorerIds: global.settings.selectedExplorerIds,
   };
 })(CardAddress));

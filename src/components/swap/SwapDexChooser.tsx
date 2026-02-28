@@ -43,6 +43,7 @@ interface OwnProps {
 
 interface StateProps {
   currentSwap: GlobalState['currentSwap'];
+  swapVersion: GlobalState['swapVersion'];
 }
 
 const IS_WHOLE_PART_BIG_REGEX = /^\d{5,}([.,]|$)/;
@@ -60,6 +61,7 @@ function SwapDexChooser({
     inputSource,
     ourFeePercent = DEFAULT_OUR_SWAP_FEE,
   },
+  swapVersion,
 }: OwnProps & StateProps) {
   const { setSwapDex } = getActions();
 
@@ -68,6 +70,8 @@ function SwapDexChooser({
   const [isModalOpen, openModal, closeModal] = useFlag(false);
   const [selectedDexLabel, setSelectedDexLabel] = useState<ApiSwapDexLabel | undefined>(currentDexLabel);
   const renderedDexItems = useCurrentOrPrev(estimates?.length ? estimates : undefined, true);
+  const renderedCurrentDexLabel = useCurrentOrPrev(currentDexLabel, true);
+  const renderedBestRateDexLabel = useCurrentOrPrev(bestRateDexLabel, true);
   const isBestRateSelected = Boolean(bestRateDexLabel && bestRateDexLabel === selectedDexLabel);
   const confirmLabel = isBestRateSelected
     ? lang('Use Best Rate')
@@ -75,9 +79,12 @@ function SwapDexChooser({
       dex_name: selectedDexLabel ? SWAP_DEX_LABELS[selectedDexLabel] : '',
     });
 
-  const { shouldRender, transitionClassNames } = useShowTransition(
-    !!estimates?.length && !!tokenOut && !!amountOut && !!amountIn,
-  );
+  const shouldRenderForSwapV2 = !!estimates?.length && !!tokenOut && !!amountOut && !!amountIn;
+
+  const { shouldRender, ref: rootRef } = useShowTransition({
+    isOpen: swapVersion === 2 && shouldRenderForSwapV2,
+    withShouldRender: true,
+  });
 
   const handleDexConfirm = useLastCallback(() => {
     if (selectedDexLabel) {
@@ -101,9 +108,9 @@ function SwapDexChooser({
       decimals: inputSource === SwapInputSource.In ? tokenOut?.decimals : tokenIn?.decimals,
       estimates,
       inputSource,
-      bestRateDexLabel,
+      bestRateDexLabel: renderedBestRateDexLabel,
     });
-  }, [bestRateDexLabel, estimates, inputSource, ourFeePercent, tokenIn?.decimals, tokenOut?.decimals]);
+  }, [renderedBestRateDexLabel, estimates, inputSource, ourFeePercent, tokenIn?.decimals, tokenOut?.decimals]);
 
   const renderedAmounts = useMemo<Record<ApiSwapDexLabel, TeactNode> | undefined>(() => {
     if (!renderedDexItems?.length || renderedDexItems.length < 2) return undefined;
@@ -131,11 +138,11 @@ function SwapDexChooser({
 
   const buttonContent = (
     <>
-      {bestRateDexLabel === currentDexLabel && renderedDexItems.length > 1 && (
+      {renderedBestRateDexLabel === renderedCurrentDexLabel && renderedDexItems.length > 1 && (
         <span className={styles.label}><span className={styles.labelText}>{lang('Best Rate')}</span></span>
       )}
       {lang('via %dex_name%', {
-        dex_name: <strong>{SWAP_DEX_LABELS[currentDexLabel!]}</strong>,
+        dex_name: <strong>{SWAP_DEX_LABELS[renderedCurrentDexLabel!]}</strong>,
       })}
       {renderedDexItems.length > 1 && (
         <i className={buildClassName('icon-chevron-right', styles.iconArrowRight)} aria-hidden />
@@ -145,7 +152,7 @@ function SwapDexChooser({
 
   if (renderedDexItems.length === 1) {
     return (
-      <div className={buildClassName(styles.root, transitionClassNames)}>
+      <div ref={rootRef} className={styles.root}>
         <div className={styles.container}>
           <span className={buildClassName(styles.content, isStatic && styles.static)}>{buttonContent}</span>
         </div>
@@ -163,7 +170,7 @@ function SwapDexChooser({
         role="button"
         className={buildClassName(
           styles.dexItem,
-          bestRateDexLabel === item.dexLabel && styles.bestRate,
+          renderedBestRateDexLabel === item.dexLabel && styles.bestRate,
           selectedDexLabel === item.dexLabel && styles.current,
         )}
         onClick={() => { setSelectedDexLabel(item.dexLabel); }}
@@ -180,7 +187,7 @@ function SwapDexChooser({
         <div className={styles.dexExchangeRate}>
           {rate ? <>{rate.firstCurrencySymbol}&nbsp;≈ {rate.price}&nbsp;{rate.secondCurrencySymbol}</> : undefined}
         </div>
-        {item.dexLabel === bestRateDexLabel && (
+        {item.dexLabel === renderedBestRateDexLabel && (
           <span className={styles.bestLabel}>{lang('Best')}</span>
         )}
       </div>
@@ -208,7 +215,7 @@ function SwapDexChooser({
   }
 
   return (
-    <div className={buildClassName(styles.root, transitionClassNames)}>
+    <div ref={rootRef} className={styles.root}>
       <div className={styles.container}>
         <button
           type="button"
@@ -257,6 +264,7 @@ function SwapDexChooser({
 export default memo(withGlobal((global): StateProps => {
   return {
     currentSwap: global.currentSwap,
+    swapVersion: global.swapVersion,
   };
 })(SwapDexChooser));
 
@@ -311,7 +319,7 @@ function formatDexItemAmount(toAmount: string, tokenOut: UserSwapToken): TeactNo
   return (
     <>
       {formattedWholePart}
-      <span className={styles.dexValueFractional}>{fractionStr}&thinsp;{tokenOut!.symbol}</span>
+      <span className={styles.dexValueFractional}>{fractionStr}&thinsp;{tokenOut.symbol}</span>
     </>
   );
 }

@@ -1,202 +1,33 @@
-@import "../../styles/mixins";
+@use "../../styles/mixins";
 
 .modalDialog {
-  height: 35.5rem;
+  height: 40.5rem;
 
   @supports (height: var(--safe-area-bottom)) {
-    height: calc(35.5rem + var(--safe-area-bottom));
+    height: calc(40.5rem + var(--safe-area-bottom));
   }
 
-  :global(.is-native-bottom-sheet) & {
-    height: calc(35.5rem + var(--safe-area-bottom, 0rem));
-  }
-}
-
-.inputButton {
-  position: absolute;
-  right: 0.5rem;
-  bottom: 0.5rem;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  width: 2rem;
-  height: 2rem;
-
-  font-size: 1.25rem;
-  color: var(--color-gray-3);
-
-  border-radius: var(--border-radius-small) !important;
-
-  &:active {
-    color: var(--color-input-button-text);
-
-    background-color: var(--color-input-button-background);
-
-    // Optimization
-    transition: none;
-  }
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      color: var(--color-input-button-text);
-
-      background-color: var(--color-input-button-background);
-    }
-  }
-}
-
-.inputButtonClear {
-  color: var(--color-gray-2);
-
-  &:active {
-    color: var(--color-gray-2);
-
-    opacity: 0.85;
-    background-color: unset;
-
-    // Optimization
-    transition: none;
-  }
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      color: var(--color-gray-2);
-
-      opacity: 0.85;
-      background-color: unset;
-    }
-  }
-}
-
-.inputButtonTransition {
-  width: auto;
-  height: auto;
-}
-
-.inputButtonShifted {
-  right: 2.5rem;
-}
-
-.amountInput {
-  margin-bottom: 2rem;
 }
 
 .help,
 .label {
   padding: 0 0.5rem;
-
   font-size: 0.8125rem;
   line-height: 0.875rem;
-}
-
-.amountBottomWrapper {
-  position: relative;
-}
-
-.amountBottom {
-  position: absolute;
-  top: -1.75rem;
-
-  display: flex;
-  justify-content: space-between;
-
-  width: 100%;
-  min-height: 1rem;
-  padding: 0 0.5rem;
-
-  font-size: 0.75rem;
-  line-height: 1rem;
-  color: var(--color-gray-3);
-}
-
-.amountBottomRight {
-  flex: 1;
-
-  font-weight: 600;
-  white-space: nowrap;
-
-  &_slide {
-    text-align: right;
-
-    background: var(--color-background-window);
-  }
-
-  &.Transition {
-    > .Transition_slide-from {
-      animation-duration: 150ms !important;
-    }
-
-    > .Transition_slide-to {
-      animation-duration: 150ms !important;
-    }
-  }
-
-  &_static &_slide {
-    background: var(--color-background-first);
-  }
 }
 
 .balanceError {
   color: var(--color-red);
 }
 
-.balanceContainer {
-  position: relative;
-  z-index: 1;
-
-  width: 100%;
-}
-
-.balance {
-  position: absolute;
-  top: -0.125rem;
-  right: 0.5rem;
-
-  display: flex;
-  gap: 0.25rem;
-
-  font-size: 0.8125rem;
-  color: var(--color-gray-1);
-}
-
-.balanceLink {
-  cursor: var(--custom-cursor, pointer);
-
-  font-weight: 600;
-  color: var(--color-accent);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-
-  @media (hover: hover) {
-    &:hover,
-    &:focus-visible {
-      text-decoration: none;
-    }
-  }
-}
-
-.amountInCurrency {
-  font-weight: 600;
-}
-
 .help {
   margin-top: -0.5rem;
   margin-bottom: 1rem;
-
   color: var(--color-gray-1);
 }
 
 .label {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-
   margin-bottom: 0.5rem;
-
   font-weight: 700;
   color: var(--color-gray-2);
 }
@@ -222,6 +53,8 @@
   box-sizing: border-box;
   margin-bottom: 1.25rem;
   padding: 0.875rem 0.75rem;
+  border: none;
+  border-radius: var(--border-radius-default);
 
   font-size: 1rem;
   font-weight: 600;
@@ -231,12 +64,11 @@
   word-break: break-all;
 
   background: var(--color-background-first);
-  border: none;
-  border-radius: var(--border-radius-default);
   outline: none;
 
   &_words {
-    word-break: break-word !important;
+    word-break: normal !important;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -273,7 +105,6 @@
   width: 1rem;
   height: 1rem;
   margin: auto;
-
   border: 0.25rem solid transparent;
   border-top-color: var(--color-white);
   border-radius: 50%;
@@ -295,10 +126,9 @@
   display: flex;
   align-items: center;
 
-  height: 2.25rem;
-  padding: 0 0.625rem;
+  padding: 0.75rem 1rem;
 
-  border-radius: var(--border-radius-small);
+  font-size: 0.9375rem;
 
   &:active {
     transition: none;
@@ -307,8 +137,18 @@
   &:hover,
   &:focus-visible {
     text-decoration: none;
-
     background-color: var(--color-interactive-drop-down-menu-hover);
+  }
+
+  &[aria-selected="true"] {
+    background-color: var(--color-interactive-drop-down-menu-hover);
+  }
+
+  @include mixins.separator();
+
+  @media (pointer: coarse) {
+    padding: 0.875rem 1rem;
+    font-size: 1rem;
   }
 }
 
@@ -316,14 +156,12 @@
   overflow: hidden;
   display: flex;
   align-items: baseline;
-
   margin-inline-end: auto;
 }
 
 .savedAddressNameText {
   overflow: hidden;
 
-  font-size: 1rem;
   font-weight: 600;
   color: var(--color-black);
   text-overflow: ellipsis;
@@ -342,19 +180,18 @@
 
 .savedAddressAddress {
   padding-inline-start: 0.5rem;
-
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   color: var(--color-gray-3);
   white-space: nowrap;
 
-  transition: opacity 150ms;
+  @include mixins.transition(opacity 150ms);
 
   .savedAddressDelete:hover + & {
     opacity: 0;
   }
 
-  :global(html.animation-level-0) & {
-    transition: none !important;
+  @media (pointer: coarse) {
+    font-size: 0.8125rem;
   }
 }
 
@@ -373,25 +210,20 @@
 
   opacity: 0;
 
-  transition: opacity 150ms, color 150ms;
+  @include mixins.transition("opacity 150ms, color 150ms");
 
   &:hover {
     opacity: 1;
   }
 
-  :global(html.animation-level-0) & {
-    transition: none !important;
-  }
-
   /* stylelint-disable-next-line order/order, at-rule-empty-line-before */
-  @include respond-below(xs) {
+  @include mixins.respond-below(xs) {
     display: none;
   }
 }
 
 .savedAddressDeleteInner {
   cursor: var(--custom-cursor, pointer);
-
   color: var(--color-gray-3);
 
   &:hover,
@@ -409,88 +241,32 @@
   display: none;
 
   /* stylelint-disable-next-line order/order, at-rule-empty-line-before */
-  @include respond-below(xs) {
+  @include mixins.respond-below(xs) {
     display: block;
-
     margin-inline-start: 0.25rem;
-
     font-size: 1.25rem;
   }
 }
 
 .chainIcon {
   margin-right: 0.0625rem;
-
-  vertical-align: -0.125rem;
-}
-
-.tokenDropdown {
-  --offset-y-value: calc(100% - 3.25rem);
-  --offset-x-value: 0;
-
-  position: relative;
-  top: 0.375rem;
-  right: 0.375rem;
-
-  :global(.itemName) {
-    overflow: hidden;
-
-    max-width: 5rem;
-    height: 1.25rem;
-    margin-bottom: -0.125rem;
-
-    line-height: 1.25rem;
-    text-overflow: ellipsis;
-  }
-
-  :global(.menuItemName) {
-    overflow: hidden;
-
-    max-width: 15rem;
-    height: 1.25rem;
-    margin-bottom: -0.125rem;
-
-    line-height: 1.25rem;
-    text-overflow: ellipsis;
-  }
-}
-
-.tokenDropdownItem :global(.menuItemName), .tokenDropdownItem :global(.itemName) {
-  font-weight: 700;
-}
-
-.inputStatic,
-.inputRichStatic {
-  background: transparent;
-  border: 1px solid var(--color-separator-input-stroke);
+  vertical-align: -0.1875rem;
 }
 
 .inputStatic {
   /* Default input padding minus 1px accounted for border width */
   padding: 0.5rem 0.6875rem 0.375rem;
+  border: 1px solid var(--color-separator-input-stroke);
+  background: transparent;
 }
 
 .inputWithIcon {
-  padding-right: 2.375rem;
+  padding-right: 3.625rem;
 }
 
 textarea.inputStatic {
   /* default input padding minus 1px accounted for border width */
   padding: 0.875rem 0.75rem 0.8125rem;
-}
-
-.commentLabel :global(.itemName) {
-  position: relative;
-
-  padding-left: 0.5rem;
-
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--color-accent);
-}
-
-.commentLabel :global(.menuItemName) {
-  margin: unset;
 }
 
 .footer {
@@ -509,16 +285,23 @@ textarea.inputStatic {
 
 .buttons {
   display: grid;
-  grid-auto-columns: minmax(max-content, auto);
   grid-auto-flow: column;
+  grid-template-columns: repeat(auto-fit, minmax(max-content, 1fr));
   gap: 1rem;
 }
 
 .button {
+  overflow: hidden;
+  // The default value for the button in this component is `flex`,
+  // but with `flex` doesn't work `text-overflow: ellipsis`.
+  display: inline-block !important;
+
   width: 100%;
   min-width: 4rem !important;
   max-width: 100% !important;
   padding: 0.5rem !important;
+
+  text-overflow: ellipsis;
 }
 
 @keyframes button-loading-spinner {
@@ -532,15 +315,16 @@ textarea.inputStatic {
 }
 
 .warningTooltipContainer {
-  z-index: 1;
-
-  width: 18.9375rem;
+  max-width: 18.9375rem !important;
 }
 
 .transactionBanner {
   align-self: center;
-
   margin-bottom: 2rem;
+
+  @media (max-height: 43.5rem) {
+    margin-bottom: 1rem;
+  }
 }
 
 .infoBox, .burnWarning, .error {
@@ -548,6 +332,7 @@ textarea.inputStatic {
 
   width: 100%;
   padding: 0.5rem 0.75rem;
+  border-radius: var(--border-radius-buttons);
 
   font-size: 0.9375rem;
   font-weight: 600;
@@ -555,7 +340,6 @@ textarea.inputStatic {
   text-align: center;
 
   background-color: var(--color-background-first);
-  border-radius: var(--border-radius-buttons);
 }
 
 .infoBox {
@@ -568,10 +352,26 @@ textarea.inputStatic {
 
 .burnWarning, .error {
   color: var(--color-transaction-amount-red-text);
-
   background-color: var(--color-transaction-amount-red-bg);
 }
 
 .spinner {
   margin: 2rem auto;
+}
+
+.formSlide {
+  display: flex;
+  flex-direction: column;
+  background: var(--background-color); // To ensure a glitch-free "semiFade" transition
+
+  &_static {
+    height: auto !important;
+  }
+}
+
+.closeButton {
+  position: absolute;
+  z-index: 3;
+  top: 1rem;
+  right: 0;
 }

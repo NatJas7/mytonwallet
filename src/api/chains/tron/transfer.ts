@@ -1,32 +1,41 @@
 // Importing from `tronweb/lib/commonjs/types` breaks eslint (eslint doesn't like any of import placement options)
 // eslint-disable-next-line simple-import-sort/imports
 import type { TronWeb } from 'tronweb';
+import { DIESEL_NOT_AVAILABLE } from '../../common/other';
 
-import type { ApiSubmitTransferOptions, CheckTransactionDraftOptions } from '../../methods/types';
-import type { ApiCheckTransactionDraftResult } from '../ton/types';
 import { ApiTransactionDraftError, ApiTransactionError } from '../../types';
-import type { ApiAccountWithMnemonic, ApiBip39Account, ApiNetwork } from '../../types';
+import type {
+  ApiCheckTransactionDraftOptions,
+  ApiCheckTransactionDraftResult,
+  ApiFetchEstimateDieselResult,
+  ApiNetwork,
+  ApiSubmitGasfullTransferOptions,
+  ApiSubmitGasfullTransferResult,
+} from '../../types';
 
 import { parseAccountId } from '../../../util/account';
 import { logDebugError } from '../../../util/logs';
+import { fetchPrivateKeyString } from './auth';
 import { getChainParameters, getTronClient } from './util/tronweb';
-import { fetchStoredAccount, fetchStoredTronWallet } from '../../common/accounts';
-import { getMnemonic } from '../../common/mnemonic';
+import { fetchStoredChainAccount, fetchStoredWallet } from '../../common/accounts';
 import { handleServerError } from '../../errors';
 import { getTrc20Balance, getWalletBalance } from './wallet';
-import type { ApiSubmitTransferTronResult } from './types';
 import { hexToString } from '../../../util/stringFormat';
-import { TRON_GAS } from './constants';
+import { ONE_TRX, TRON_GAS } from './constants';
 
 const SIGNATURE_SIZE = 65;
 
 export async function checkTransactionDraft(
-  options: CheckTransactionDraftOptions,
+  options: ApiCheckTransactionDraftOptions,
 ): Promise<ApiCheckTransactionDraftResult> {
   const {
-    accountId, amount, toAddress, tokenAddress,
+    accountId, amount, toAddress, tokenAddress, payload,
   } = options;
   const { network } = parseAccountId(accountId);
+
+  if (payload) {
+    throw new Error('Transfer payload is not supported in TRON');
+  }
 
   const tronWeb = getTronClient(network);
   const result: ApiCheckTransactionDraftResult = {};
@@ -38,7 +47,7 @@ export async function checkTransactionDraft(
 
     result.resolvedAddress = toAddress;
 
-    const { address } = await fetchStoredTronWallet(accountId);
+    const { address } = await fetchStoredWallet(accountId, 'tron');
     const [trxBalance, bandwidth, { energyUnitFee, bandwidthUnitFee }] = await Promise.all([
       getWalletBalance(network, address),
       tronWeb.trx.getBandwidth(address),
@@ -59,10 +68,18 @@ export async function checkTransactionDraft(
     } else {
       // This call throws "Error: Invalid amount provided" when the amount is 0.
       // It doesn't throw when the amount is > than the balance.
-      const transaction = await tronWeb.transactionBuilder.sendTrx(toAddress, Number(amount ?? 1), address);
+      const [transaction, account] = await Promise.all([
+        tronWeb.transactionBuilder.sendTrx(toAddress, Number(amount ?? 1), address),
+        tronWeb.trx.getAccount(toAddress),
+      ]);
 
       const size = 9 + 60 + Buffer.from(transaction.raw_data_hex, 'hex').byteLength + SIGNATURE_SIZE;
       fee = bandwidth > size ? 0n : BigInt(size) * BigInt(bandwidthUnitFee);
+
+      // If the account is not activated, we pay an extra 1 TRX and 100 bandwidth fees for activation
+      if (account.balance === undefined) {
+        fee += ONE_TRX + 100n * BigInt(bandwidthUnitFee);
+      }
     }
 
     result.fee = fee;
@@ -87,31 +104,40 @@ export async function checkTransactionDraft(
   }
 }
 
-export async function submitTransfer(options: ApiSubmitTransferOptions): Promise<ApiSubmitTransferTronResult> {
+export async function submitGasfullTransfer(
+  options: ApiSubmitGasfullTransferOptions,
+): Promise<ApiSubmitGasfullTransferResult | { error: string }> {
   const {
-    accountId, password, toAddress, amount, fee = 0n, tokenAddress,
+    accountId, password = '', toAddress, amount, fee = 0n, tokenAddress, payload, noFeeCheck,
   } = options;
-
   const { network } = parseAccountId(accountId);
+
+  if (payload) {
+    throw new Error('Transfer payload is not supported in TRON');
+  }
 
   try {
     const tronWeb = getTronClient(network);
 
-    const account = await fetchStoredAccount<ApiAccountWithMnemonic>(accountId);
-    const { address } = (account as ApiBip39Account).tron;
-    const trxBalance = await getWalletBalance(network, address);
+    const account = await fetchStoredChainAccount(accountId, 'tron');
+    if (account.type === 'ledger') throw new Error('Not supported by Ledger accounts');
+    if (account.type === 'view') throw new Error('Not supported by View accounts');
 
-    const trxAmount = tokenAddress ? fee : fee + amount;
-    const isEnoughTrx = trxBalance >= trxAmount;
+    const { address } = account.byChain.tron;
 
-    if (!isEnoughTrx) {
-      return { error: ApiTransactionError.InsufficientBalance };
+    if (!noFeeCheck) {
+      const trxBalance = await getWalletBalance(network, address);
+      const trxAmount = tokenAddress ? fee : fee + amount;
+      const isEnoughTrx = trxBalance >= trxAmount;
+
+      if (!isEnoughTrx) {
+        return { error: ApiTransactionError.InsufficientBalance };
+      }
+
+      // todo: Check that the amount ≤ the token balance (in case of a token transfer)
     }
 
-    // todo: Check that the amount ≤ the token balance (in case of a token transfer)
-
-    const mnemonic = await getMnemonic(accountId, password, account);
-    const privateKey = tronWeb.fromMnemonic(mnemonic!.join(' ')).privateKey.slice(2);
+    const privateKey = (await fetchPrivateKeyString(accountId, password, account))!;
 
     if (tokenAddress) {
       const { transaction } = await buildTrc20Transfer(tronWeb, {
@@ -121,7 +147,7 @@ export async function submitTransfer(options: ApiSubmitTransferOptions): Promise
       const signedTx = await tronWeb.trx.sign(transaction, privateKey);
       const result = await tronWeb.trx.sendRawTransaction(signedTx);
 
-      return { amount, toAddress, txId: result.transaction.txID };
+      return { txId: result.transaction.txID };
     } else {
       const result = await tronWeb.trx.sendTransaction(toAddress, Number(amount), {
         privateKey,
@@ -137,12 +163,16 @@ export async function submitTransfer(options: ApiSubmitTransferOptions): Promise
         return { error };
       }
 
-      return { amount, toAddress, txId: result.transaction.txID };
+      return { txId: result.transaction.txID };
     }
   } catch (err: any) {
     logDebugError('submitTransfer', err);
     return { error: ApiTransactionError.UnsuccesfulTransfer };
   }
+}
+
+export function fetchEstimateDiesel(accountId: string, tokenAddress: string): ApiFetchEstimateDieselResult {
+  return DIESEL_NOT_AVAILABLE;
 }
 
 async function estimateTrc20TransferFee(tronWeb: TronWeb, options: {

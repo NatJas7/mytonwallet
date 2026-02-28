@@ -1,4 +1,4 @@
-import type { FC } from '../../lib/teact/teact';
+import type { FC, TeactNode } from '../../lib/teact/teact';
 import React, {
   memo, useEffect, useRef,
 } from '../../lib/teact/teact';
@@ -6,7 +6,7 @@ import React, {
 import type { EmojiIcon } from './Emoji';
 
 import buildClassName from '../../util/buildClassName';
-import stopEvent from '../../util/stopEvent';
+import { stopEvent } from '../../util/domEvents';
 import { IS_TOUCH_ENV, REM } from '../../util/windowEnvironment';
 
 import useFlag from '../../hooks/useFlag';
@@ -20,31 +20,45 @@ import Portal from './Portal';
 import styles from './IconWithTooltip.module.scss';
 
 type OwnProps = {
-  message: React.ReactNode;
+  message: TeactNode;
   emoji?: EmojiIcon;
+  size?: 'small' | 'medium';
+  type?: 'hint' | 'warning';
+  direction?: 'top' | 'bottom';
   iconClassName?: string;
   tooltipClassName?: string;
+  canHoverOnTooltip?: boolean;
 };
 
 const ARROW_WIDTH = 0.6875 * REM;
 const GAP = 2 * REM;
+const CLOSE_TIMER_DELAY = 150;
 
+/** The component is designed to be positioned inline in text. Use a space symbol to create a gap on the left. */
 const IconWithTooltip: FC<OwnProps> = ({
   message,
   emoji,
+  size = 'medium',
+  type = 'hint',
+  direction = 'top',
   iconClassName,
   tooltipClassName,
+  canHoverOnTooltip = false,
 }) => {
   const [isOpen, open, close] = useFlag();
-  const { transitionClassNames, shouldRender } = useShowTransition(isOpen);
+  const { shouldRender, ref: tooltipContainerRef } = useShowTransition({
+    isOpen,
+    withShouldRender: true,
+  });
+  const colorClassName = type === 'warning' && styles[`color-${type}`];
 
-  // eslint-disable-next-line no-null/no-null
-  const iconRef = useRef<HTMLDivElement | null>(null);
-  // eslint-disable-next-line no-null/no-null
-  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const iconRef = useRef<HTMLDivElement>();
+  const tooltipRef = useRef<HTMLDivElement>();
 
-  const tooltipStyle = useRef<string | undefined>();
-  const arrowStyle = useRef<string | undefined>();
+  const tooltipStyle = useRef<string>();
+  const arrowStyle = useRef<string>();
+
+  const closeTimerRef = useRef<number | undefined>();
 
   const randomTooltipKey = useUniqueId();
 
@@ -66,7 +80,9 @@ const IconWithTooltip: FC<OwnProps> = ({
   useEffect(() => {
     if (!iconRef.current || !tooltipRef.current) return;
 
-    const { top, left, width } = iconRef.current.getBoundingClientRect();
+    const {
+      top, left, width, height: iconHeight,
+    } = iconRef.current.getBoundingClientRect();
     const {
       width: tooltipWidth,
       height: tooltipHeight,
@@ -76,53 +92,95 @@ const IconWithTooltip: FC<OwnProps> = ({
     const arrowPosition = left - tooltipCenter + width / 2 - ARROW_WIDTH / 2;
     const horizontalOffset = arrowPosition < GAP ? GAP - arrowPosition : 0;
 
-    const tooltipVerticalStyle = `top: ${top - tooltipHeight - ARROW_WIDTH}px;`;
+    const isTop = direction === 'top';
+    const tooltipTop = isTop
+      ? top - tooltipHeight - ARROW_WIDTH
+      : top + iconHeight + ARROW_WIDTH;
+    const arrowTop = isTop
+      ? tooltipHeight - ARROW_WIDTH / 2 - 1
+      : -ARROW_WIDTH / 2 + 1;
+
+    const tooltipVerticalStyle = `top: ${tooltipTop}px;`;
     const tooltipHorizontalStyle = `left: ${tooltipCenter - horizontalOffset}px;`;
     const arrowHorizontalStyle = `left: ${arrowPosition + horizontalOffset}px;`;
-    const arrowVerticalStyle = `top: ${tooltipHeight - ARROW_WIDTH / 2 - 1}px;`;
+    const arrowVerticalStyle = `top: ${arrowTop}px;`;
 
     tooltipStyle.current = `${tooltipVerticalStyle} ${tooltipHorizontalStyle}`;
     arrowStyle.current = `${arrowVerticalStyle} ${arrowHorizontalStyle}`;
-  }, [shouldRender]);
+  }, [shouldRender, direction]);
+
+  function startCloseTimer() {
+    closeTimerRef.current = window.setTimeout(() => close(), CLOSE_TIMER_DELAY);
+  }
+
+  function clearCloseTimer() {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = undefined;
+    }
+  }
+
+  useEffect(() => {
+    return clearCloseTimer;
+  }, [isOpen]);
+
+  const handleTooltipClick = useLastCallback((e: React.MouseEvent) => {
+    // Allow click events on links
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'A' || target.closest('a')) return;
+    stopEvent(e);
+  });
 
   function renderIcon() {
+    const commonClassName = buildClassName(styles.icon, iconClassName, styles[size], colorClassName);
+    const onClick = IS_TOUCH_ENV ? stopEvent : undefined;
+
     if (emoji) {
       return (
-        <div
+        <span
           ref={iconRef}
-          className={buildClassName(styles.icon, iconClassName)}
-          onClick={IS_TOUCH_ENV ? stopEvent : undefined}
+          className={commonClassName}
+          data-tooltip-key={randomTooltipKey}
+          onClick={onClick}
           onMouseEnter={open}
-          onMouseLeave={close}
+          onMouseLeave={canHoverOnTooltip ? startCloseTimer : close}
         >
           <Emoji from={emoji} />
-        </div>
+        </span>
       );
     }
 
     return (
       <i
         ref={iconRef}
-        className={buildClassName(styles.icon, 'icon-question', iconClassName)}
-        onClick={IS_TOUCH_ENV ? stopEvent : undefined}
+        className={buildClassName(
+          commonClassName,
+          styles.fontIcon,
+          type === 'warning' ? 'icon-exclamation' : 'icon-question',
+        )}
+        data-tooltip-key={randomTooltipKey}
+        onClick={onClick}
         onMouseEnter={open}
-        onMouseLeave={close}
+        onMouseLeave={canHoverOnTooltip ? startCloseTimer : close}
       />
     );
   }
 
   return (
-    <div className={styles.wrapper} data-tooltip-key={randomTooltipKey}>
+    <>
       {shouldRender && (
         <Portal>
           <div
-            className={buildClassName(styles.container, transitionClassNames)}
-            onClick={stopEvent}
+            ref={tooltipContainerRef}
+            className={buildClassName(styles.container, styles[direction])}
             style={tooltipStyle.current}
+            onMouseEnter={canHoverOnTooltip ? clearCloseTimer : undefined}
+            onMouseLeave={canHoverOnTooltip ? startCloseTimer : close}
+            onClick={handleTooltipClick}
           >
             <div
               ref={tooltipRef}
-              className={buildClassName(styles.tooltip, tooltipClassName)}
+              className={buildClassName(styles.tooltip, styles[size], colorClassName, tooltipClassName)}
             >
               {message}
             </div>
@@ -131,7 +189,7 @@ const IconWithTooltip: FC<OwnProps> = ({
         </Portal>
       )}
       {renderIcon()}
-    </div>
+    </>
   );
 };
 

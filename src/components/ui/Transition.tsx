@@ -1,10 +1,6 @@
-import type { RefObject } from 'react';
-import React, {
-  beginHeavyAnimation, useEffect, useLayoutEffect, useRef,
-} from '../../lib/teact/teact';
-import {
-  addExtraClass, removeExtraClass, setExtraStyles, toggleExtraClass,
-} from '../../lib/teact/teact-dom';
+import type { ElementRef, TeactNode } from '../../lib/teact/teact';
+import React, { beginHeavyAnimation, useEffect, useLayoutEffect, useRef } from '../../lib/teact/teact';
+import { addExtraClass, removeExtraClass, setExtraStyles, toggleExtraClass } from '../../lib/teact/teact-dom';
 import { getGlobal } from '../../global';
 
 import { ANIMATION_LEVEL_MIN } from '../../config';
@@ -25,9 +21,9 @@ type AnimationName = (
   | 'fade' | 'pushSlide' | 'reveal' | 'slideOptimized' | 'slideOptimizedRtl' | 'semiFade'
   | 'slideVertical' | 'slideVerticalFade' | 'slideFadeAndroid'
   );
-export type ChildrenFn = (isActive: boolean, isFrom: boolean, currentKey: number, activeKey: number) => React.ReactNode;
+export type ChildrenFn = (isActive: boolean, isFrom: boolean, currentKey: number, activeKey: number) => TeactNode;
 export type TransitionProps = {
-  ref?: RefObject<HTMLDivElement>;
+  ref?: ElementRef<HTMLDivElement>;
   activeKey: number;
   prevKey?: number;
   nextKey?: number;
@@ -40,6 +36,7 @@ export type TransitionProps = {
   // Used by async components which are usually remounted during first animation
   shouldWrap?: boolean;
   wrapExceptionKey?: number;
+  isScrollOnWrap?: boolean;
   id?: string;
   className?: string;
   slideClassName?: string;
@@ -47,8 +44,9 @@ export type TransitionProps = {
   onStart?: NoneToVoidFunction;
   onStop?: NoneToVoidFunction;
   onContainerClick?: NoneToVoidFunction;
+  onScroll?: (e: React.UIEvent<HTMLDivElement>) => void;
   // Should be not a falsy value, otherwise some transitions will be delayed
-  children: React.ReactNode | ChildrenFn;
+  children: TeactNode | ChildrenFn;
 };
 
 const FALLBACK_ANIMATION_END = SECOND;
@@ -76,6 +74,7 @@ function Transition({
   cleanupExceptionKey,
   shouldWrap,
   wrapExceptionKey,
+  isScrollOnWrap,
   id,
   className,
   slideClassName,
@@ -83,6 +82,7 @@ function Transition({
   onStart,
   onStop,
   onContainerClick,
+  onScroll,
   children,
 }: TransitionProps) {
   const currentKeyRef = useRef<number>();
@@ -90,13 +90,12 @@ function Transition({
   const { animationLevel } = getGlobal().settings;
   const shouldDisableAnimation = animationLevel === ANIMATION_LEVEL_MIN;
 
-  // eslint-disable-next-line no-null/no-null
-  let containerRef = useRef<HTMLDivElement>(null);
+  let containerRef = useRef<HTMLDivElement>();
   if (ref) {
     containerRef = ref;
   }
 
-  const rendersRef = useRef<Record<number, React.ReactNode | ChildrenFn>>({});
+  const rendersRef = useRef<Record<number, TeactNode | ChildrenFn>>({});
   const prevActiveKey = usePrevious<any>(activeKey);
   const forceUpdate = useForceUpdate();
   const isAnimatingRef = useRef(false);
@@ -151,7 +150,9 @@ function Transition({
       addExtraClass(el, CLASSES.slide);
 
       if (slideClassName) {
-        addExtraClass(el, slideClassName);
+        slideClassName.split(/\s+/).forEach((token) => {
+          addExtraClass(el, token);
+        });
       }
     });
 
@@ -360,13 +361,14 @@ function Transition({
       : render;
 
     return (shouldWrap && key !== wrapExceptionKey) || asFastList
-      ? <div key={key} teactOrderKey={key}>{rendered}</div>
+      ? <div key={key} teactOrderKey={key} onScroll={isScrollOnWrap ? onScroll : undefined}>{rendered}</div>
       : rendered;
   });
 
   return (
     <div
       ref={containerRef}
+      onScroll={!isScrollOnWrap ? onScroll : undefined}
       onClick={onContainerClick}
       id={id}
       className={buildClassName('Transition', className)}

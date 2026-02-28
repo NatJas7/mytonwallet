@@ -1,13 +1,14 @@
+import type { TeactNode } from '../../lib/teact/teact';
 import React, { memo, useState } from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
-import { vibrate } from '../../util/capacitor';
+import { vibrate } from '../../util/haptics';
 
 import styles from './PinPad.module.scss';
 
 interface OwnProps {
   value?: any;
-  children?: React.ReactNode;
+  children?: TeactNode;
   className?: string;
   isDisabled?: boolean;
   onClick?: (value?: any) => void;

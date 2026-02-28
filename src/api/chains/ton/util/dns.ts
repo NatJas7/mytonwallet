@@ -4,16 +4,14 @@ import { Address, Builder } from '@ton/core';
 
 import type { TonClient } from './TonClient';
 
-import { sha256 } from '../../../common/utils';
 import { DnsCategory } from '../constants';
+import { sha256BigInt } from './other';
 
 export type DnsResult = Cell | Address | string | undefined;
 
-async function categoryToBigInt(category?: string) {
+export function dnsCategoryToBigInt(category?: string) {
   if (!category) return 0n; // all categories
-  const categoryBytes = new TextEncoder().encode(category);
-  const categoryHashHex = Buffer.from(await sha256(categoryBytes)).toString('hex');
-  return BigInt(`0x${categoryHashHex}`);
+  return sha256BigInt(category);
 }
 
 function parseSmartContractAddressImpl(cell: Cell, prefix0: number, prefix1: number): Address | undefined {
@@ -78,20 +76,20 @@ function parseAdnlAddressRecord(cell: Cell): string {
 async function dnsResolveImpl(
   client: TonClient,
   dnsAddress: string,
-  rawDomainBytes: Uint8Array,
+  rawDomainBytes: Buffer,
   category?: DnsCategory,
   oneStep?: boolean,
 ): Promise<DnsResult> {
   const len = rawDomainBytes.length * 8;
 
   const domainCell = new Builder()
-    .storeBuffer(Buffer.from(rawDomainBytes))
+    .storeBuffer(rawDomainBytes)
     .asCell();
 
-  const categoryBN = await categoryToBigInt(category);
+  const categoryBigInt = dnsCategoryToBigInt(category);
   const { stack } = await client.callGetMethod(Address.parse(dnsAddress), 'dnsresolve', [
     { type: 'slice', cell: domainCell },
-    { type: 'int', value: BigInt(categoryBN.toString()) },
+    { type: 'int', value: categoryBigInt },
   ]);
 
   const resultLen = stack.readNumber();
@@ -144,12 +142,13 @@ async function dnsResolveImpl(
   }
 }
 
-function domainToBytes(domain: string): Uint8Array {
+/** Encodes the domain in accordance with the TEP-81 standard */
+export function encodeDomain(domain: string): string {
   if (!domain || !domain.length) {
     throw new Error('empty domain');
   }
   if (domain === '.') {
-    return new Uint8Array([0]);
+    return '';
   }
 
   domain = domain.toLowerCase();
@@ -177,12 +176,7 @@ function domainToBytes(domain: string): Uint8Array {
     }
   });
 
-  let rawDomain = `${arr.reverse().join('\0')}\0`;
-  if (rawDomain.length < 126) {
-    rawDomain = `\0${rawDomain}`;
-  }
-
-  return new TextEncoder().encode(rawDomain);
+  return `${arr.reverse().join('\0')}\0`;
 }
 
 export function dnsResolve(
@@ -192,9 +186,12 @@ export function dnsResolve(
   category?: DnsCategory,
   oneStep?: boolean,
 ): Promise<DnsResult> {
-  const rawDomainBytes = domainToBytes(domain);
+  let rawDomain = encodeDomain(domain);
+  if (rawDomain.length < 126) {
+    rawDomain = `\0${rawDomain}`;
+  }
 
-  return dnsResolveImpl(client, rootDnsAddress, rawDomainBytes, category, oneStep);
+  return dnsResolveImpl(client, rootDnsAddress, Buffer.from(rawDomain), category, oneStep);
 }
 
 function parseAddress(slice: Slice): Address | undefined {

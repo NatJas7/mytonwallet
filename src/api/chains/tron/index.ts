@@ -1,23 +1,53 @@
-import type { ApiNetwork, ApiTronWallet } from '../../types';
+import type { ChainSdk } from '../../types/chains';
 
-import { getTronClient } from './util/tronweb';
+import { fetchActivityDetails, fetchActivitySlice } from './activities';
+import { normalizeAddress } from './address';
+import {
+  fetchPrivateKeyString,
+  getWalletFromAddress,
+  getWalletFromBip39Mnemonic,
+  getWalletFromPrivateKey,
+} from './auth';
+import { setupActivePolling, setupInactivePolling } from './polling';
+import { fetchTransactionById } from './transactionInfo';
+import { checkTransactionDraft, fetchEstimateDiesel, submitGasfullTransfer } from './transfer';
+import { getAddressInfo } from './wallet';
 
-export { setupPolling } from './polling';
-export { checkTransactionDraft, submitTransfer } from './transfer';
-export { getWalletBalance } from './wallet';
-export { getAllTransactionSlice, getTokenTransactionSlice } from './transactions';
-
-export function getWalletFromBip39Mnemonic(network: ApiNetwork, mnemonic: string[]): ApiTronWallet {
-  const { address, publicKey } = getTronClient(network).fromMnemonic(mnemonic.join(' '));
-  return {
-    type: 'tron',
-    address,
-    publicKey,
-    index: 0,
-  };
+function notSupported(): never {
+  throw new Error('Not supported in Tron');
 }
 
-export function checkApiAvailability(network: ApiNetwork) {
-  const isConnected = getTronClient(network).isConnected();
-  return Boolean(isConnected);
-}
+const tronSdk: ChainSdk<'tron'> = {
+  fetchActivitySlice,
+  fetchActivityDetails,
+  decryptComment: notSupported,
+  normalizeAddress,
+  getWalletFromBip39Mnemonic,
+  getWalletFromPrivateKey,
+  getWalletFromAddress,
+  // A note for the future implementation:
+  // In contrast to TON, Tron doesn't allow loading balances of multiple wallets in 1 request. Loading a wallet from
+  // Ledger is relatively slow. So, to parallelize and speed up the loading, each balance should be loaded as soon as
+  // the corresponding wallet is loaded from Ledger.
+  getWalletsFromLedgerAndLoadBalance: notSupported,
+  setupActivePolling,
+  setupInactivePolling,
+  fetchToken: notSupported,
+  importToken: notSupported,
+  checkTransactionDraft,
+  fetchEstimateDiesel,
+  submitGasfullTransfer,
+  submitGaslessTransfer: notSupported,
+  getAddressInfo,
+  verifyLedgerWalletAddress: notSupported,
+  fetchPrivateKeyString,
+  getIsLedgerAppOpen: notSupported,
+  fetchTransactionById,
+  getAccountNfts: notSupported,
+  streamAllAccountNfts: notSupported,
+  checkNftTransferDraft: notSupported,
+  submitNftTransfers: notSupported,
+  checkNftOwnership: notSupported,
+};
+
+export default tronSdk;

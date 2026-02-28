@@ -1,49 +1,71 @@
 import React, { memo, useRef } from '../../lib/teact/teact';
 
-import buildClassName from '../../util/buildClassName';
 import { preloadedImageUrls } from '../../util/preloadImage';
 
 import useFlag from '../../hooks/useFlag';
 import useMediaTransition from '../../hooks/useMediaTransition';
 
 interface OwnProps {
-  url: string;
+  url?: string;
   alt?: string;
   loading?: 'lazy' | 'eager';
+  isSlow?: boolean;
   className?: string;
   imageClassName?: string;
+  children?: TeactJsx;
+  fallback?: TeactJsx;
+  onLoad?: NoneToVoidFunction;
+  onError?: NoneToVoidFunction;
 }
 
 function ImageComponent({
   url,
-  alt,
+  alt = '',
   loading,
+  isSlow,
   className,
   imageClassName,
+  children,
+  fallback,
+  onLoad,
+  onError,
 }: OwnProps) {
-  // eslint-disable-next-line no-null/no-null
-  const ref = useRef<HTMLImageElement>(null);
+  const ref = useRef<HTMLImageElement>();
   const [isLoaded, markIsLoaded] = useFlag(preloadedImageUrls.has(url));
+  const [hasError, markHasError] = useFlag();
 
-  const handleLoad = () => {
+  function handleLoad() {
     markIsLoaded();
     preloadedImageUrls.add(url);
-  };
+    onLoad?.();
+  }
 
-  const transitionClassNames = useMediaTransition(isLoaded);
+  function handleError() {
+    markHasError();
+    onError?.();
+  }
+
+  const shouldShowFallback = (hasError || !url) && !!fallback;
+
+  const divRef = useMediaTransition(isLoaded || shouldShowFallback);
 
   return (
-    <div className={buildClassName(transitionClassNames, className)}>
-      <img
-        ref={ref}
-        src={url}
-        alt={alt}
-        loading={loading}
-        className={imageClassName}
-        draggable={false}
-        referrerPolicy="same-origin"
-        onLoad={!isLoaded ? handleLoad : undefined}
-      />
+    <div ref={divRef} className={className} style={isSlow ? 'transition-duration: 0.5s;' : undefined}>
+      {!shouldShowFallback ? (
+        <img
+          ref={ref}
+          src={url}
+          alt={alt}
+          loading={loading}
+          className={imageClassName}
+          style="width: 100%;"
+          draggable={false}
+          referrerPolicy="same-origin"
+          onLoad={!isLoaded ? handleLoad : undefined}
+          onError={handleError}
+        />
+      ) : fallback}
+      {children}
     </div>
   );
 }

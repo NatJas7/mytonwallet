@@ -1,4 +1,4 @@
-@import "../../../../styles/mixins";
+@use "../../../../styles/mixins";
 
 $tab-0-height: 229;
 $tab-1-height: 348;
@@ -9,6 +9,7 @@ $tab-1-height: 348;
   display: flex;
   flex-direction: column;
 
+  margin-top: 1rem;
   border-radius: var(--border-radius-default);
 }
 
@@ -17,9 +18,9 @@ $tab-1-height: 348;
   grid-template-columns: 1fr 1fr 1fr 1fr;
 
   width: 100%;
+  border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
   background: var(--color-background-first-disabled);
-  border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 }
 
 .notAllTabs {
@@ -40,6 +41,7 @@ $tab-1-height: 348;
 
   width: 100%;
   padding: 0.125rem 0.5rem 0.5625rem;
+  border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
   font-size: 0.8125rem;
   font-weight: 600;
@@ -47,7 +49,6 @@ $tab-1-height: 348;
   color: var(--color-black);
 
   background: transparent;
-  border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
   transition: color 150ms;
 
@@ -73,7 +74,6 @@ $tab-1-height: 348;
     --color-accent: --color-purple-1;
 
     color: var(--color-purple-1);
-
     background-color: var(--color-background-purple-2) !important;
   }
 
@@ -88,11 +88,12 @@ $tab-1-height: 348;
   }
 
   &.active {
-    pointer-events: none;
-
     font-weight: 700;
-
     background: var(--color-background-first);
+
+    &:not(.withContextMenu) {
+      pointer-events: none;
+    }
 
     &::before,
     &::after,
@@ -124,7 +125,6 @@ $tab-1-height: 348;
     .tabDecoration::before,
     .tabDecoration::after {
       z-index: 1;
-
       background: var(--color-background-first-disabled);
     }
 
@@ -175,6 +175,15 @@ $tab-1-height: 348;
   z-index: 2;
 }
 
+.name {
+  white-space: nowrap;
+}
+
+.divider {
+  margin: 0 0.25rem;
+  color: var(--color-gray-4);
+}
+
 .tabDelimiter {
   position: absolute;
   top: 50%;
@@ -184,7 +193,6 @@ $tab-1-height: 348;
   width: 0.0625rem;
   height: 2rem;
 
-  /* stylelint-disable-next-line plugin/whole-pixel */
   box-shadow: inset 0.025rem 0 0 0 var(--color-separator);
 }
 
@@ -202,9 +210,7 @@ $tab-1-height: 348;
 
 .contentHeaderInner {
   height: 1rem;
-
   background: var(--color-background-first);
-
   transition: opacity 100ms;
 }
 
@@ -243,7 +249,6 @@ $tab-1-height: 348;
 
 .contentFooter {
   height: 1rem;
-
   border-bottom-right-radius: var(--border-radius-default);
   border-bottom-left-radius: var(--border-radius-default);
 
@@ -260,11 +265,12 @@ $tab-1-height: 348;
 .transitionContent {
   display: flex;
   flex-direction: column;
-
   min-height: 0;
 }
 
 .slideContent {
+  --background-color: var(--color-background-first);
+
   height: auto !important;
   padding: 0 1rem;
 }
@@ -273,12 +279,16 @@ $tab-1-height: 348;
   padding: 0;
 }
 
-.transferSlideContent {
-  height: auto !important;
-
-  background-color: var(--color-background-first);
-}
-
 .spinner {
   align-self: center;
+}
+
+.menu {
+  --offset-y-value: 0;
+  --offset-y-bottom-value: 0;
+  --offset-x-value: 0;
+
+  right: auto !important;
+  left: 0 !important;
+  max-height: max(70vh, 20rem);
 }

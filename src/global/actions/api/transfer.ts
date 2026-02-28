@@ -1,76 +1,85 @@
-import type { ApiCheckTransactionDraftResult, ApiSubmitMultiTransferResult } from '../../../api/chains/ton/types';
-import type { ApiSubmitTransferOptions, ApiSubmitTransferResult } from '../../../api/methods/types';
-import { type ApiDappTransfer, ApiTransactionDraftError, type ApiTransactionError } from '../../../api/types';
-import { TransferState } from '../../types';
+import type {
+  ApiChain,
+  ApiCheckTransactionDraftResult,
+  ApiSubmitTransferOptions,
+  ApiTransferPayload,
+} from '../../../api/types';
+import type { GlobalState } from '../../types';
+import { ApiCommonError } from '../../../api/types';
+import { ApiTransactionDraftError } from '../../../api/types';
+import { ScamWarningType, TransferState } from '../../types';
 
-import { IS_CAPACITOR, NFT_BATCH_SIZE } from '../../../config';
+import { DEFAULT_CHAIN, NFT_BATCH_SIZE } from '../../../config';
 import { bigintDivideToNumber } from '../../../util/bigint';
-import { vibrateOnError, vibrateOnSuccess } from '../../../util/capacitor';
+import { getDoesUsePinPad } from '../../../util/biometrics';
+import { getChainConfig } from '../../../util/chain';
 import { explainApiTransferFee, getDieselTokenAmount } from '../../../util/fee/transferFee';
-import { callActionInNative } from '../../../util/multitab';
-import { IS_DELEGATING_BOTTOM_SHEET } from '../../../util/windowEnvironment';
+import { split } from '../../../util/iteratees';
+import { getTranslation } from '../../../util/langProvider';
+import { shouldShowDomainScamWarning, shouldShowSeedPhraseScamWarning } from '../../../util/scamDetection';
 import { callApi } from '../../../api';
-import { NFT_TRANSFER_AMOUNT } from '../../../api/chains/ton/constants';
-import { ApiHardwareBlindSigningNotEnabled, ApiUserRejectsError } from '../../../api/errors';
+import { handleTransferResult, isErrorTransferResult, prepareTransfer } from '../../helpers/transfer';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
   clearCurrentTransfer,
   clearIsPinAccepted,
   preserveMaxTransferAmount,
-  setIsPinAccepted,
   updateAccountState,
   updateCurrentTransfer,
   updateCurrentTransferByCheckResult,
   updateCurrentTransferLoading,
 } from '../../reducers';
-import { selectAccountState, selectToken, selectTokenAddress } from '../../selectors';
+import {
+  selectAccountState,
+  selectCurrentAccount,
+  selectCurrentAccountId,
+  selectCurrentAccountTokens,
+  selectCurrentNetwork,
+  selectIsHardwareAccount,
+  selectToken,
+} from '../../selectors';
 
 addActionHandler('submitTransferInitial', async (global, actions, payload) => {
-  if (IS_DELEGATING_BOTTOM_SHEET) {
-    callActionInNative('submitTransferInitial', payload);
-    return;
-  }
-
   const {
     tokenSlug,
     toAddress,
+    amount,
     comment,
     shouldEncrypt,
     nfts,
-    withDiesel,
+    isGasless,
     stateInit,
     isGaslessWithStars,
     binPayload,
+    isNftBurn,
   } = payload;
-  let { amount } = payload;
+
+  const currentAccountId = selectCurrentAccountId(global)!;
+  const isNftTransfer = Boolean(nfts?.length);
 
   setGlobal(updateCurrentTransferLoading(global, true));
 
-  const isNftTransfer = Boolean(nfts?.length);
   let result: ApiCheckTransactionDraftResult | undefined;
 
   if (isNftTransfer) {
-    // This assignment is needed only for the amount checking hack in the 'newLocalTransaction' handler in
-    // `src/global/actions/apiUpdates/activities.ts` to work.
-    amount = NFT_TRANSFER_AMOUNT;
+    const chain = nfts?.[0]?.chain || DEFAULT_CHAIN;
 
-    result = await callApi('checkNftTransferDraft', {
-      accountId: global.currentAccountId!,
+    result = await callApi('checkNftTransferDraft', chain, {
+      accountId: currentAccountId,
       nfts,
       toAddress,
       comment,
+      isNftBurn,
     });
   } else {
     const { tokenAddress, chain } = selectToken(global, tokenSlug);
     result = await callApi('checkTransactionDraft', chain, {
-      accountId: global.currentAccountId!,
+      accountId: currentAccountId,
       tokenAddress,
       toAddress,
       amount,
-      data: binPayload ?? comment,
-      shouldEncrypt,
+      payload: getTransferPayload(chain, binPayload, comment, shouldEncrypt),
       stateInit,
-      isBase64Data: Boolean(binPayload),
       allowGasless: true,
     });
   }
@@ -104,8 +113,9 @@ addActionHandler('submitTransferInitial', async (global, actions, payload) => {
     shouldEncrypt,
     tokenSlug,
     isToNewAddress: result.isToAddressNew,
-    withDiesel,
+    isGasless,
     isGaslessWithStars,
+    isNftBurn,
   }));
 });
 
@@ -114,26 +124,24 @@ addActionHandler('fetchTransferFee', async (global, actions, payload) => {
   setGlobal(global);
 
   const {
-    tokenSlug, toAddress, comment, shouldEncrypt, binPayload, stateInit,
+    tokenSlug, toAddress, amount, comment, shouldEncrypt, binPayload, stateInit,
   } = payload;
 
   const { tokenAddress, chain } = selectToken(global, tokenSlug);
+  const accountId = selectCurrentAccountId(global)!;
 
   const result = await callApi('checkTransactionDraft', chain, {
-    accountId: global.currentAccountId!,
+    accountId,
     toAddress,
-    data: binPayload ?? comment,
+    amount,
+    payload: getTransferPayload(chain, binPayload, comment, shouldEncrypt),
     tokenAddress,
-    shouldEncrypt,
-    isBase64Data: Boolean(binPayload),
     stateInit,
     allowGasless: true,
   });
 
   global = getGlobal();
-
-  if (tokenSlug !== global.currentTransfer.tokenSlug || global.currentTransfer.nfts?.length) {
-    // For cases when the user switches the token before the result arrives
+  if (hasCurrentTokenChanged(global, tokenSlug)) {
     return;
   }
 
@@ -146,6 +154,24 @@ addActionHandler('fetchTransferFee', async (global, actions, payload) => {
   if (result?.error && result.error !== ApiTransactionDraftError.InsufficientBalance) {
     actions.showError({ error: result.error });
   }
+
+  if (result?.error === ApiTransactionDraftError.InsufficientBalance) {
+    const currentAccount = selectCurrentAccount(global)!;
+    const accountTokens = selectCurrentAccountTokens(global)!;
+    const { chain } = selectToken(global, tokenSlug);
+
+    if (shouldShowSeedPhraseScamWarning(currentAccount, accountTokens, chain)) {
+      global = getGlobal();
+      global = updateCurrentTransfer(global, { scamWarningType: ScamWarningType.SeedPhrase });
+      setGlobal(global);
+    }
+  }
+
+  if (result?.error !== ApiCommonError.DomainNotResolved && shouldShowDomainScamWarning(toAddress)) {
+    global = getGlobal();
+    global = updateCurrentTransfer(global, { scamWarningType: ScamWarningType.DomainLike });
+    setGlobal(global);
+  }
 });
 
 addActionHandler('fetchNftFee', async (global, actions, payload) => {
@@ -154,11 +180,13 @@ addActionHandler('fetchNftFee', async (global, actions, payload) => {
   global = updateCurrentTransfer(global, { isLoading: true, error: undefined });
   setGlobal(global);
 
-  const result = await callApi('checkNftTransferDraft', {
-    accountId: global.currentAccountId!,
+  const chain = nfts?.[0]?.chain || DEFAULT_CHAIN;
+
+  const result = await callApi('checkNftTransferDraft', chain, {
+    accountId: selectCurrentAccountId(global)!,
     nfts,
     toAddress,
-    comment,
+    comment: getNftTransferComment(chain, comment),
   });
 
   global = getGlobal();
@@ -172,18 +200,21 @@ addActionHandler('fetchNftFee', async (global, actions, payload) => {
   if (result) {
     global = updateCurrentTransferByCheckResult(global, result);
   }
+  if (shouldShowDomainScamWarning(toAddress)) {
+    global = updateCurrentTransfer(global, { scamWarningType: ScamWarningType.DomainLike });
+  }
   setGlobal(global);
 
   if (result?.error) {
     actions.showError({
       error: result?.error === ApiTransactionDraftError.InsufficientBalance
-        ? 'Insufficient TON for fee.'
+        ? getTranslation('Insufficient %token% for fee.', { token: getChainConfig(chain).nativeToken.slug })
         : result.error,
     });
   }
 });
 
-addActionHandler('submitTransferPassword', async (global, actions, { password }) => {
+addActionHandler('submitTransfer', async (global, actions, { password } = {}) => {
   const {
     resolvedAddress,
     comment,
@@ -193,64 +224,45 @@ addActionHandler('submitTransferPassword', async (global, actions, { password })
     shouldEncrypt,
     binPayload,
     nfts,
-    withDiesel,
+    isGasless,
     diesel,
     stateInit,
     isGaslessWithStars,
+    isNftBurn,
   } = global.currentTransfer;
 
-  if (!(await callApi('verifyPassword', password))) {
-    setGlobal(updateCurrentTransfer(getGlobal(), { error: 'Wrong password, please try again.' }));
+  if (!await prepareTransfer(TransferState.ConfirmHardware, updateCurrentTransfer, password)) {
+    return;
+  }
 
+  // This is a part of the legacy dapp transaction mechanism. See `promiseId` in `src/global/types.ts` for more details.
+  if (promiseId) {
+    await callApi('confirmDappRequest', promiseId, password);
     return;
   }
 
   global = getGlobal();
-  global = updateCurrentTransfer(getGlobal(), {
-    isLoading: true,
-    error: undefined,
-  });
-  if (IS_CAPACITOR) {
-    global = setIsPinAccepted(global);
-  }
-  setGlobal(global);
-
-  if (IS_CAPACITOR) {
-    await vibrateOnSuccess(true);
-  }
-
-  if (promiseId) {
-    if (IS_CAPACITOR) {
-      global = getGlobal();
-      global = setIsPinAccepted(global);
-      setGlobal(global);
-    }
-
-    void callApi('confirmDappRequest', promiseId, password);
-    return;
-  }
-
   const explainedFee = explainApiTransferFee(global.currentTransfer);
   const fullNativeFee = explainedFee.fullFee?.nativeSum;
   const realNativeFee = explainedFee.realFee?.nativeSum;
 
-  let result: ApiSubmitTransferResult | ApiSubmitMultiTransferResult | undefined;
+  let result: { activityId: string } | { activityIds: string[] } | { error: string } | undefined;
 
   if (nfts?.length) {
-    const chunks = [];
-    for (let i = 0; i < nfts.length; i += NFT_BATCH_SIZE) {
-      chunks.push(nfts.slice(i, i + NFT_BATCH_SIZE));
-    }
+    const chain = nfts?.[0]?.chain || DEFAULT_CHAIN;
+    const chunks = split(nfts, selectIsHardwareAccount(global) ? 1 : NFT_BATCH_SIZE);
 
     for (const chunk of chunks) {
       const batchResult = await callApi(
         'submitNftTransfers',
-        global.currentAccountId!,
+        chain,
+        selectCurrentAccountId(global)!,
         password,
         chunk,
         resolvedAddress!,
-        comment,
+        getNftTransferComment(chain, comment),
         realNativeFee && bigintDivideToNumber(realNativeFee, nfts.length / chunk.length),
+        isNftBurn,
       );
 
       global = getGlobal();
@@ -265,151 +277,36 @@ addActionHandler('submitTransferPassword', async (global, actions, { password })
     const { tokenAddress, chain } = selectToken(global, tokenSlug);
 
     const options: ApiSubmitTransferOptions = {
-      accountId: global.currentAccountId!,
+      accountId: selectCurrentAccountId(global)!,
       password,
       toAddress: resolvedAddress!,
       amount: amount!,
-      comment: binPayload ?? comment,
+      payload: getTransferPayload(chain, binPayload, comment, shouldEncrypt),
       tokenAddress,
       fee: fullNativeFee,
       realFee: realNativeFee,
-      shouldEncrypt,
-      isBase64Data: Boolean(binPayload),
-      withDiesel,
+      isGasless,
       dieselAmount: diesel && getDieselTokenAmount(diesel),
       stateInit,
       isGaslessWithStars,
+      noFeeCheck: true,
     };
 
     result = await callApi('submitTransfer', chain, options);
   }
 
-  global = getGlobal();
-  global = updateCurrentTransfer(global, {
-    isLoading: false,
-  });
-  setGlobal(global);
-
-  if (!result || 'error' in result) {
-    if (IS_CAPACITOR) {
-      global = getGlobal();
-      global = clearIsPinAccepted(global);
-      setGlobal(global);
-      void vibrateOnError();
-    }
-    actions.showError({ error: result?.error });
-  } else if (IS_CAPACITOR) {
-    void vibrateOnSuccess();
-  }
-});
-
-addActionHandler('submitTransferHardware', async (global, actions) => {
-  const {
-    toAddress,
-    resolvedAddress,
-    comment,
-    amount,
-    promiseId,
-    tokenSlug,
-    rawPayload,
-    parsedPayload,
-    stateInit,
-    nfts,
-  } = global.currentTransfer;
-
-  const accountId = global.currentAccountId!;
-
-  setGlobal(updateCurrentTransfer(getGlobal(), {
-    isLoading: true,
-    error: undefined,
-    state: TransferState.ConfirmHardware,
-  }));
-
-  const ledgerApi = await import('../../../util/ledger');
-
-  if (promiseId) {
-    const message: ApiDappTransfer = {
-      toAddress: toAddress!,
-      amount: amount!,
-      rawPayload,
-      payload: parsedPayload,
-      stateInit,
-    };
-
-    try {
-      const signedMessage = await ledgerApi.signLedgerTransactions(accountId, [message]);
-      void callApi('confirmDappRequest', promiseId, signedMessage);
-    } catch (err) {
-      if (err instanceof ApiUserRejectsError) {
-        setGlobal(updateCurrentTransfer(getGlobal(), {
-          isLoading: false,
-          error: 'Canceled by the user',
-        }));
-      } else {
-        void callApi('cancelDappRequest', promiseId, 'Unknown error.');
-      }
-    }
+  if (!handleTransferResult(result, updateCurrentTransfer)) {
     return;
   }
 
-  const explainedFee = explainApiTransferFee(global.currentTransfer);
-  const realNativeFee = explainedFee.realFee?.nativeSum;
-
-  let result: string | { error: ApiTransactionError } | undefined;
-  let error: string | undefined;
-
-  if (nfts?.length) {
-    for (const nft of nfts) {
-      const currentResult = await ledgerApi.submitLedgerNftTransfer({
-        accountId: global.currentAccountId!,
-        nftAddress: nft.address,
-        password: '',
-        toAddress: resolvedAddress!,
-        comment,
-        nft,
-        realFee: realNativeFee && bigintDivideToNumber(realNativeFee, nfts.length),
-      });
-
-      global = getGlobal();
-      global = updateCurrentTransfer(global, {
-        sentNftsCount: (global.currentTransfer.sentNftsCount || 0) + 1,
-      });
-      setGlobal(global);
-      result = currentResult;
-    }
-  } else {
-    const tokenAddress = selectTokenAddress(global, tokenSlug);
-    const options = {
-      accountId: global.currentAccountId!,
-      password: '',
-      toAddress: resolvedAddress!,
-      amount: amount!,
-      comment,
-      tokenAddress,
-      realFee: realNativeFee,
-    };
-
-    try {
-      result = await ledgerApi.submitLedgerTransfer(options, tokenSlug);
-    } catch (err: any) {
-      if (err instanceof ApiHardwareBlindSigningNotEnabled) {
-        error = '$hardware_blind_sign_not_enabled';
-      }
-    }
-  }
-
-  if (!error && result === undefined) {
-    error = 'Declined';
-  } else if (typeof result === 'object' && 'error' in result) {
-    actions.showError({
-      error: result.error,
-    });
-  }
-
   setGlobal(updateCurrentTransfer(getGlobal(), {
-    isLoading: false,
-    error,
+    state: TransferState.Complete,
+    txId: ('activityIds' in result && result.activityIds[0])
+      || ('activityId' in result && result.activityId)
+      || undefined,
   }));
+
+  actions.fetchTransferDieselState({ tokenSlug });
 });
 
 addActionHandler('cancelTransfer', (global, actions, { shouldReset } = {}) => {
@@ -427,7 +324,7 @@ addActionHandler('cancelTransfer', (global, actions, { shouldReset } = {}) => {
     return;
   }
 
-  if (IS_CAPACITOR) {
+  if (getDoesUsePinPad()) {
     global = clearIsPinAccepted(global);
   }
   global = updateCurrentTransfer(global, { state: TransferState.None });
@@ -435,17 +332,70 @@ addActionHandler('cancelTransfer', (global, actions, { shouldReset } = {}) => {
 });
 
 addActionHandler('fetchTransferDieselState', async (global, actions, { tokenSlug }) => {
-  const tokenAddress = selectTokenAddress(global, tokenSlug);
+  const { tokenAddress, chain } = selectToken(global, tokenSlug);
   if (!tokenAddress) return;
 
-  const diesel = await callApi('fetchEstimateDiesel', global.currentAccountId!, tokenAddress);
+  const diesel = await callApi('fetchEstimateDiesel', selectCurrentAccountId(global)!, chain, tokenAddress);
   if (!diesel) return;
 
   global = getGlobal();
-  const accountState = selectAccountState(global, global.currentAccountId!);
+  if (hasCurrentTokenChanged(global, tokenSlug)) {
+    return;
+  }
+
+  const currentAccountId = selectCurrentAccountId(global)!;
+  const accountState = selectAccountState(global, currentAccountId);
   global = preserveMaxTransferAmount(global, updateCurrentTransfer(global, { diesel }));
   if (accountState?.isDieselAuthorizationStarted && diesel.status !== 'not-authorized') {
-    global = updateAccountState(global, global.currentAccountId!, { isDieselAuthorizationStarted: undefined });
+    global = updateAccountState(global, currentAccountId, { isDieselAuthorizationStarted: undefined });
   }
   setGlobal(global);
 });
+
+addActionHandler('checkTransferAddress', async (global, actions, { address, chain }) => {
+  if (!address || !chain) {
+    global = updateCurrentTransfer(global, { toAddressName: undefined, resolvedAddress: undefined });
+    setGlobal(global);
+
+    return;
+  }
+
+  const network = selectCurrentNetwork(global);
+  const result = await callApi('getAddressInfo', chain, network, address);
+
+  global = getGlobal();
+  if (isErrorTransferResult(result)) {
+    global = updateCurrentTransfer(global, { toAddressName: undefined, resolvedAddress: undefined });
+  } else {
+    global = updateCurrentTransfer(global, {
+      toAddressName: result.addressName,
+      resolvedAddress: result.resolvedAddress,
+    });
+  }
+  setGlobal(global);
+});
+
+function getTransferPayload(
+  chain: ApiChain,
+  binPayload?: string,
+  comment?: string,
+  shouldEncryptComment?: boolean,
+): ApiTransferPayload | undefined {
+  if (!getChainConfig(chain).isTransferPayloadSupported) {
+    return undefined;
+  }
+
+  if (binPayload) return { type: 'base64', data: binPayload };
+  if (comment) return { type: 'comment', text: comment, shouldEncrypt: shouldEncryptComment };
+  return undefined;
+}
+
+function getNftTransferComment(chain: ApiChain, comment?: string) {
+  return getChainConfig(chain).isTransferPayloadSupported ? comment : undefined;
+}
+
+/** For cases when the user switches the token before the API result arrives */
+function hasCurrentTokenChanged(currentGlobal: GlobalState, oldSlug: string) {
+  const { tokenSlug, nfts } = currentGlobal.currentTransfer;
+  return oldSlug !== tokenSlug || nfts?.length;
+}

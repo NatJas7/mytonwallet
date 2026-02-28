@@ -1,10 +1,18 @@
-@import "../../styles/mixins";
+@use "../../styles/mixins";
+
+// It's necessary to use `transform: none` instead of `transform: translateY(0)`, because the latter cancels
+// `background-attachment: fixed` in the child elements. Fixed background attachment is used, for example, to
+// synchronize the shimmer animation in the skeletons.
 
 .modal {
   --transition: 350ms cubic-bezier(0.2, 0.9, 0.42, 1);
 
   position: relative;
   z-index: var(--z-modal);
+
+  &.inAppLock {
+    z-index: var(--z-modal-in-autolock);
+  }
 
   &.error {
     .dialog {
@@ -14,21 +22,17 @@
 
   .dialog {
     transform: translateY(-1rem);
-
     opacity: 0;
-
     transition: transform var(--transition), opacity var(--transition);
 
     :global(html.animation-level-0) & {
-      transform: translateY(0);
-
+      transform: none;
       transition: var(--no-animation-transition);
     }
   }
 
   &:global(.open) .dialog {
-    transform: translateY(0);
-
+    transform: none;
     opacity: 1;
   }
 
@@ -38,7 +42,6 @@
 
   .backdrop {
     opacity: 0;
-
     transition: opacity var(--transition);
 
     :global(html.animation-level-0) & {
@@ -51,17 +54,12 @@
   }
 }
 
-.delegatingToNative {
-  display: none;
-}
-
 .slideUpAnimation {
   --transition: 500ms cubic-bezier(0.3, 0.8, 0.2, 1);
 
   .container {
     overflow: hidden;
     align-items: flex-end;
-
     padding: 0;
   }
 
@@ -76,9 +74,9 @@
     max-width: 28rem;
     max-height: calc(95 * var(--vh, 1vh));
     margin: 0;
+    border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
     background: var(--color-background-window);
-    border-radius: var(--border-radius-default) var(--border-radius-default) 0 0;
 
     transition: transform var(--transition);
 
@@ -97,7 +95,7 @@
   }
 
   &:global(.open) .dialog {
-    transform: translateY(0);
+    transform: none;
   }
 
   &:global(.closing) .dialog {
@@ -119,6 +117,7 @@
   }
 
   // Mimic the animation from the system Settings section on Android
+  :global(html.is-telegram-app) &:not(.forceBottomSheet),
   :global(html.is-android) &:not(.forceBottomSheet) {
     --transition: 500ms cubic-bezier(0.16, 1, 0.3, 1);
 
@@ -127,9 +126,9 @@
 
       height: 100%;
       max-height: calc(100% - var(--safe-area-top));
+      border-radius: 0;
 
       opacity: 0;
-      border-radius: 0;
 
       > :global(.Transition-slideLayers),
       > :global(.Transition-slideLayersBackwards) {
@@ -138,17 +137,14 @@
     }
 
     &:global(.open) .dialog {
-      transform: translateY(0);
-
+      transform: none;
       opacity: 1;
-
       transition: transform var(--transition), opacity var(--transition);
     }
 
     &:global(.closing) {
       .dialog {
         transform: translateY(3%);
-
         transition: transform 200ms ease-in, opacity 100ms 100ms ease-out !important;
       }
     }
@@ -161,30 +157,16 @@
     padding-bottom: var(--safe-area-bottom);
   }
 
-  :global(html.is-native-bottom-sheet) & {
-    .container {
-      align-items: flex-start;
-
-      background: var(--color-background-window);
-    }
-
+  :global(html.is-mobile-telegram-app.is-fullscreen) &:not(.forceBottomSheet) {
     .dialog {
-      max-height: none;
-
-      border-radius: 0;
-      box-shadow: none;
-
-      transition: none;
+      max-height: 100%;
     }
 
-    &:global(.closing) .dialog {
-      transform: translateY(0);
-    }
-
-    .backdrop {
-      display: none;
+    .content {
+      padding-top: var(--tg-safe-area-inset-top);
     }
   }
+
 }
 
 .container {
@@ -227,15 +209,14 @@
   max-width: 26rem;
   max-height: 100%;
   margin: 2rem auto;
+  border-radius: var(--border-radius-default);
 
   background-color: var(--color-background-window);
-  border-radius: var(--border-radius-default);
   box-shadow: var(--default-shadow);
 
   .content > :global(.Transition-slideLayers),
   .content > :global(.Transition-slideLayersBackwards) {
     overflow: hidden;
-
     border-radius: var(--border-radius-default);
   }
 
@@ -251,7 +232,7 @@
   position: relative;
 
   display: grid;
-  grid-template-areas: "back title close";
+  grid-template-areas: "back title button";
   grid-template-columns: 0.5fr 1fr 0.5fr;
   align-items: center;
 
@@ -259,61 +240,123 @@
 
   color: var(--color-black);
 
-  &_noClose {
-    grid-template-areas: "title title title";
-
-    padding-top: 1.125rem;
-    padding-bottom: 0.5rem;
-
-    .title {
-      position: static;
-      transform: none;
-    }
+  :global(html.is-mobile-telegram-app.is-fullscreen) & {
+    padding-top: 0.625rem;
   }
 
   &_wideContent {
     grid-template-columns: 0.25fr 1.5fr 0.25fr;
   }
 
-  &_back {
+  &_back,
+  &_share {
     cursor: var(--custom-cursor, pointer);
+
+    z-index: 1;
 
     display: flex;
     grid-area: back;
     align-items: center;
+  }
 
+  &_back {
     margin-left: -0.875rem;
     padding: 0 0.5rem;
-
     font-size: 1.0625rem;
     color: var(--color-accent);
+
+    :global(html.is-mobile-telegram-app) & {
+      visibility: hidden;
+    }
   }
 
   &_backIcon {
     font-size: 1.5rem;
   }
+
+  &_share {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+
+    font-size: 2rem;
+    color: var(--color-gray-3);
+
+    @include mixins.transition('color 200ms');
+
+    &:hover,
+    &:focus-visible {
+      color: var(--color-accent);
+    }
+  }
+}
+
+.menuButton {
+  grid-area: button;
+
+  width: auto !important;
+  max-width: none !important;
+  height: auto !important;
+  margin-right: 0.5rem;
+  margin-left: auto;
+  padding: 0.5rem !important;
+
+  color: var(--color-gray-3) !important;
+
+  background: none !important;
+
+  transition: color 150ms;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--color-text) !important;
+  }
+
+  &:active {
+    // Optimization
+    transition: none;
+  }
+
+  :global(html.animation-level-0) & {
+    transition: var(--no-animation-transition) !important;
+  }
+
+  @include mixins.respond-below(xs) {
+    :global(html.is-telegram-app) & {
+      visibility: hidden;
+    }
+  }
+}
+
+.menuIcon {
+  font-size: 1.125rem;
+  line-height: 1;
+  transition: color 150ms;
+
+  :global(html.animation-level-0) & {
+    transition: none !important;
+  }
 }
 
 .closeButton {
-  grid-area: close;
+  grid-area: button;
 
-  width: 1.875rem !important;
+  width: 2rem !important;
   max-width: none !important;
-  height: 1.875rem !important;
+  height: 2rem !important;
   margin-left: auto;
   padding: 0 !important;
+  border-radius: 50% !important;
 
   color: var(--color-close-button-text) !important;
 
   background-color: var(--color-close-button-background) !important;
-  border-radius: 50% !important;
 
   transition: background-color 150ms;
 
   &:hover,
   &:focus-visible {
     color: var(--color-close-button-text-hover) !important;
-
     background-color: var(--color-close-button-background-hover) !important;
   }
 
@@ -325,12 +368,17 @@
   :global(html.animation-level-0) & {
     transition: var(--no-animation-transition) !important;
   }
+
+  @include mixins.respond-below(xs) {
+    :global(html.is-telegram-app) & {
+      visibility: hidden;
+    }
+  }
 }
 
 .closeIcon {
   font-size: 1.875rem;
   line-height: 1;
-
   transition: color 150ms;
 
   :global(html.animation-level-0) & {
@@ -348,7 +396,11 @@
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
+
+  &FullWidth {
+    grid-column: 1 / 4;
+  }
+};
 
 .singleTitle {
   line-height: 1.875rem;
@@ -365,7 +417,7 @@
   font-size: 0.9375rem;
 
   b, strong {
-    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -377,7 +429,6 @@
   margin-right: 0.5rem;
   margin-bottom: 1.25rem;
   margin-left: 0.5rem;
-
   font-size: 0.9375rem;
 
   &_centered {
@@ -416,10 +467,17 @@
 
   margin-top: auto;
   padding-top: 2rem;
+
+  &.footerButtonsVertical,
   &.footerButtonFullWidth {
     width: 100%;
     margin-top: initial;
     padding-top: initial;
+  }
+
+  &.footerButtonsVertical {
+    flex-direction: column;
+    gap: 0.75rem;
   }
 }
 
@@ -462,7 +520,6 @@
 
   display: flex;
   flex-direction: column;
-
   min-width: 0;
   max-width: 100%;
 }
@@ -470,7 +527,6 @@
 .transitionContentWrapper {
   display: flex;
   flex-direction: column;
-
   height: 100%;
   min-height: 0;
 }
@@ -491,13 +547,11 @@
     padding-top: 5.5rem;
   }
 
-  @supports (padding-bottom: var(--safe-area-bottom)) {
-    :global(html:not(.is-android-app)) & {
-      padding-bottom: max(var(--safe-area-bottom), 1rem);
-    }
+  :global(html:not(.is-android-app)) & {
+    padding-bottom: max(var(--safe-area-bottom, 1rem), 1rem);
+  }
 
-    :global(.is-native-bottom-sheet) & {
-      padding-bottom: max(var(--safe-area-bottom, 1rem), 1rem);
-    }
+  :global(html.with-safe-area-bottom.is-telegram-app) & {
+    padding-bottom: var(--safe-area-bottom) !important;
   }
 }

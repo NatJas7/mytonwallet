@@ -1,20 +1,23 @@
-import { BottomSheet } from 'native-bottom-sheet';
 import React, { memo, useEffect } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
 import type { GlobalState } from '../../global/types';
 
+import { WRONG_ATTEMPTS_BEFORE_LOG_OUT_SUGGESTION } from '../../config';
+import { getIsFaceIdAvailable } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
-import { getIsFaceIdAvailable, vibrateOnError } from '../../util/capacitor';
+import { vibrateOnError } from '../../util/haptics';
 import { disableSwipeToClose, enableSwipeToClose } from '../../util/modalSwipeManager';
 import { SWIPE_DISABLED_CLASS_NAME } from '../../util/swipeController';
-import { IS_DELEGATED_BOTTOM_SHEET } from '../../util/windowEnvironment';
+import { IS_IOS } from '../../util/windowEnvironment';
 
-import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
 import useLastCallback from '../../hooks/useLastCallback';
+import { useMatchCount } from '../../hooks/useMatchCount';
+import { usePrevDuringAnimationSimple } from '../../hooks/usePrevDuringAnimationSimple';
 import usePrevious from '../../hooks/usePrevious';
 
 import PinPadButton from './PinPadButton';
+import Transition from './Transition';
 
 import styles from './PinPad.module.scss';
 
@@ -27,10 +30,12 @@ interface OwnProps {
   resetStateDelayMs?: number;
   className?: string;
   isMinified?: boolean;
+  topContent?: TeactJsx;
   onBiometricsClick?: NoneToVoidFunction;
   onChange: (value: string) => void;
   onClearError?: NoneToVoidFunction;
   onSubmit: (pin: string) => void;
+  onLogOutClick?: NoneToVoidFunction;
 }
 
 type StateProps = Pick<GlobalState['settings'], 'authConfig'> & {
@@ -39,6 +44,8 @@ type StateProps = Pick<GlobalState['settings'], 'authConfig'> & {
 
 const DEFAULT_PIN_LENGTH = 4;
 const RESET_STATE_DELAY_MS = 1500;
+// Should match duration from `--layer-transition` CSS variable
+const STATE_ANIMATION_DURATION_MS = IS_IOS ? 650 : 300;
 
 function PinPad({
   isActive,
@@ -50,16 +57,19 @@ function PinPad({
   isPinAccepted,
   className,
   isMinified,
+  topContent,
   onBiometricsClick,
   onChange,
   onClearError,
   onSubmit,
+  onLogOutClick,
 }: OwnProps & StateProps) {
   const { clearIsPinAccepted } = getActions();
 
   const isFaceId = getIsFaceIdAvailable();
   const canRenderBackspace = value.length > 0;
   const isSuccess = type === 'success' || isPinAccepted;
+  const isSuccessDuringAnimation = usePrevDuringAnimationSimple(isSuccess, STATE_ANIMATION_DURATION_MS);
   const prevIsPinAccepted = usePrevious(isPinAccepted);
   const arePinButtonsDisabled = isSuccess
     || (value.length === length && type !== 'error'); // Allow pincode entry in case of an error
@@ -67,8 +77,10 @@ function PinPad({
   const titleClassName = buildClassName(
     styles.title,
     type === 'error' && styles.error,
-    isSuccess && styles.success,
+    (isSuccess || isSuccessDuringAnimation) && styles.success,
   );
+
+  const shouldSuggestLogout = useMatchCount(type === 'error', WRONG_ATTEMPTS_BEFORE_LOG_OUT_SUGGESTION);
 
   useEffect(() => {
     if (prevIsPinAccepted && !isPinAccepted && length === value.length) {
@@ -76,21 +88,7 @@ function PinPad({
     }
   }, [isPinAccepted, length, onChange, prevIsPinAccepted, value.length]);
 
-  useEffect(() => {
-    return () => {
-      clearIsPinAccepted();
-    };
-  }, []);
-
-  // Fix for iOS, enable fast pinpad button presses
-  useEffectWithPrevDeps(([prevIsActive]) => {
-    if (!IS_DELEGATED_BOTTOM_SHEET) return;
-    if (isActive) {
-      void BottomSheet.clearScrollPatch();
-    } else if (prevIsActive) {
-      void BottomSheet.applyScrollPatch();
-    }
-  }, [isActive]);
+  useEffect(() => clearIsPinAccepted, []);
 
   useEffect(() => {
     if (type !== 'error') return undefined;
@@ -148,7 +146,7 @@ function PinPad({
     const dotsClassName = buildClassName(
       styles.dots,
       type === 'error' && styles.dotsError,
-      isSuccess && styles.dotsLoading,
+      (isSuccess || isSuccessDuringAnimation) && styles.dotsLoading,
     );
 
     return (
@@ -160,7 +158,7 @@ function PinPad({
               styles.dot,
               i < value.length && styles.dotFilled,
               type === 'error' && styles.error,
-              isSuccess && styles.success,
+              (isSuccess || isSuccessDuringAnimation) && styles.success,
             )}
           />
         ))}
@@ -170,7 +168,7 @@ function PinPad({
 
   return (
     <div className={buildClassName(styles.root, className, SWIPE_DISABLED_CLASS_NAME)}>
-      <div className={titleClassName}>{title}</div>
+      {topContent ?? <div className={titleClassName}>{title}</div>}
       {renderDots()}
 
       <div className={buildClassName(styles.grid, isMinified && styles.minified)}>
@@ -189,13 +187,27 @@ function PinPad({
           </PinPadButton>
         )}
         <PinPadButton value="0" onClick={handleClick} isDisabled={arePinButtonsDisabled} />
-        <PinPadButton
-          className={!canRenderBackspace && styles.buttonHidden}
-          isDisabled={!canRenderBackspace || isSuccess}
-          onClick={handleBackspaceClick}
+        <Transition
+          name="zoomFade"
+          activeKey={shouldSuggestLogout && !value.length ? 0 : 1}
         >
-          <i className="icon icon-backspace" aria-hidden />
-        </PinPadButton>
+          {onLogOutClick && shouldSuggestLogout && !value.length ? (
+            <PinPadButton
+              className={styles.buttonDanger}
+              onClick={onLogOutClick}
+            >
+              <i className="icon icon-exit" aria-hidden />
+            </PinPadButton>
+          ) : (
+            <PinPadButton
+              className={!canRenderBackspace && styles.buttonHidden}
+              isDisabled={!canRenderBackspace || isSuccess}
+              onClick={handleBackspaceClick}
+            >
+              <i className="icon icon-backspace" aria-hidden />
+            </PinPadButton>
+          )}
+        </Transition>
       </div>
     </div>
   );
@@ -208,10 +220,5 @@ export default memo(withGlobal<OwnProps>(
     return {
       isPinAccepted,
     };
-  },
-  (global, _, stickToFirst) => {
-    const { isPinAccepted } = global;
-
-    return stickToFirst(isPinAccepted);
   },
 )(PinPad));

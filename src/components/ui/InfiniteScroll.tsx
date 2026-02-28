@@ -1,5 +1,5 @@
-import type { RefObject, UIEvent } from 'react';
-import type { FC } from '../../lib/teact/teact';
+import type { UIEvent } from 'react';
+import type { ElementRef, FC, TeactNode } from '../../lib/teact/teact';
 import React, {
   useEffect, useLayoutEffect, useMemo, useRef,
 } from '../../lib/teact/teact';
@@ -17,7 +17,7 @@ import useLastCallback from '../../hooks/useLastCallback';
 import useLayoutEffectWithPrevDeps from '../../hooks/useLayoutEffectWithPrevDeps';
 
 type OwnProps = {
-  ref?: RefObject<HTMLDivElement>;
+  ref?: ElementRef<HTMLDivElement>;
   style?: string;
   className?: string;
   items?: any[];
@@ -25,14 +25,15 @@ type OwnProps = {
   preloadBackwards?: number;
   sensitiveArea?: number;
   withAbsolutePositioning?: boolean;
-  maxHeight?: number;
+  /* A CSS value */
+  maxHeight?: string;
   noScrollRestore?: boolean;
   noScrollRestoreOnTop?: boolean;
   noFastList?: boolean;
   cacheBuster?: any;
-  beforeChildren?: React.ReactNode;
+  beforeChildren?: TeactNode;
   scrollContainerClosest?: string;
-  children: React.ReactNode;
+  children: TeactNode;
   onLoadMore?: ({ direction }: { direction: LoadMoreDirection }) => void;
   onScroll?: (e: UIEvent<HTMLDivElement>) => void;
   onWheel?: (e: React.WheelEvent<HTMLDivElement>) => void;
@@ -73,8 +74,7 @@ const InfiniteScroll: FC<OwnProps> = ({
   onDragOver,
   onDragLeave,
 }: OwnProps) => {
-  // eslint-disable-next-line no-null/no-null
-  let containerRef = useRef<HTMLDivElement>(null);
+  let containerRef = useRef<HTMLDivElement>();
   if (ref) {
     containerRef = ref;
   }
@@ -91,13 +91,15 @@ const InfiniteScroll: FC<OwnProps> = ({
       return [];
     }
 
+    const debounceMs = withAbsolutePositioning ? 100 : SECOND;
+
     return [
       debounce(() => {
         onLoadMore({ direction: LoadMoreDirection.Backwards });
-      }, SECOND, true, false),
+      }, debounceMs, true, false),
       debounce(() => {
         onLoadMore({ direction: LoadMoreDirection.Forwards });
-      }, SECOND, true, false),
+      }, debounceMs, true, false),
     ];
     // eslint-disable-next-line react-hooks-static-deps/exhaustive-deps
   }, [onLoadMore, items]);
@@ -123,6 +125,34 @@ const InfiniteScroll: FC<OwnProps> = ({
     }
   }, [items, loadMoreBackwards, preloadBackwards, scrollContainerClosest]);
 
+  // When using absolute positioning, after items change check if the scroll viewport doesn't overlap with
+  // the rendered area. This happens when the user fast-scrolls — the viewport shifts once via the scroll handler
+  // but no more scroll events fire because `scrollTop` doesn't change, leaving the screen blank.
+  // We call `onLoadMore` directly (bypassing `debounce`) so the viewport catches up within a few render cycles.
+  useEffect(() => {
+    if (!withAbsolutePositioning || !onLoadMore) return;
+
+    const scrollContainer = scrollContainerClosest
+      ? containerRef.current?.closest<HTMLDivElement>(scrollContainerClosest)
+      : containerRef.current;
+    if (!scrollContainer) return;
+
+    const listItemElements = scrollContainer.querySelectorAll<HTMLDivElement>(itemSelector);
+    if (!listItemElements.length) return;
+
+    const firstItemTop = listItemElements[0].offsetTop;
+    const lastItem = listItemElements[listItemElements.length - 1];
+    const lastItemBottom = lastItem.offsetTop + lastItem.offsetHeight;
+    const { scrollTop, offsetHeight } = scrollContainer;
+    const scrollBottom = scrollTop + offsetHeight;
+
+    if (scrollBottom < firstItemTop) {
+      onLoadMore({ direction: LoadMoreDirection.Forwards });
+    } else if (scrollTop > lastItemBottom) {
+      onLoadMore({ direction: LoadMoreDirection.Backwards });
+    }
+  }, [items, withAbsolutePositioning, onLoadMore, scrollContainerClosest, itemSelector, cacheBuster]);
+
   // Restore `scrollTop` after adding items
   useLayoutEffectWithPrevDeps(([prevItems]) => {
     const scrollContainer = scrollContainerClosest
@@ -140,7 +170,7 @@ const InfiniteScroll: FC<OwnProps> = ({
 
       if (state.currentAnchor && Array.from(listItemElements).includes(state.currentAnchor)) {
         const { scrollTop } = scrollContainer;
-        const newAnchorTop = state.currentAnchor!.getBoundingClientRect().top;
+        const newAnchorTop = state.currentAnchor.getBoundingClientRect().top;
         newScrollTop = scrollTop + (newAnchorTop - state.currentAnchorTop!);
       } else {
         const nextAnchor = listItemElements[0];
@@ -286,7 +316,7 @@ const InfiniteScroll: FC<OwnProps> = ({
       {withAbsolutePositioning && items?.length ? (
         <div
           teactFastList={!noFastList}
-          style={buildStyle('position: relative', IS_ANDROID && `height: ${maxHeight}px`)}
+          style={buildStyle('position: relative', IS_ANDROID && maxHeight !== undefined && `height: ${maxHeight}`)}
         >
           {children}
         </div>

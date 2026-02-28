@@ -1,31 +1,33 @@
-import type { RefObject } from 'react';
-import type { BottomSheetKeys } from 'native-bottom-sheet';
-import { BottomSheet } from 'native-bottom-sheet';
-import type { TeactNode } from '../../lib/teact/teact';
+import type { ElementRef, RefObject, TeactNode } from '../../lib/teact/teact';
 import React, {
   beginHeavyAnimation,
-  useEffect, useLayoutEffect, useRef, useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
 } from '../../lib/teact/teact';
 
-import { ANIMATION_END_DELAY, IS_EXTENSION } from '../../config';
+import { ANIMATION_END_DELAY, IS_EXTENSION, IS_TELEGRAM_APP } from '../../config';
 import buildClassName from '../../util/buildClassName';
 import { captureEvents, SwipeDirection } from '../../util/captureEvents';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { getIsSwipeToCloseDisabled } from '../../util/modalSwipeManager';
 import { createSignal } from '../../util/signals';
+import {
+  disableTelegramMiniAppSwipeToClose,
+  enableTelegramMiniAppSwipeToClose,
+} from '../../util/telegram';
 import trapFocus from '../../util/trapFocus';
-import { IS_ANDROID, IS_DELEGATED_BOTTOM_SHEET, IS_TOUCH_ENV } from '../../util/windowEnvironment';
+import { IS_ANDROID, IS_TOUCH_ENV } from '../../util/windowEnvironment';
 import windowSize from '../../util/windowSize';
 
 import freezeWhenClosed from '../../hooks/freezeWhenClosed';
-import { useDelegatedBottomSheet } from '../../hooks/useDelegatedBottomSheet';
-import { useDelegatingBottomSheet } from '../../hooks/useDelegatingBottomSheet';
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
-import useEffectWithPrevDeps from '../../hooks/useEffectWithPrevDeps';
 import useHideBrowser from '../../hooks/useHideBrowser';
 import useHistoryBack from '../../hooks/useHistoryBack';
 import useLang from '../../hooks/useLang';
+import useLastCallback from '../../hooks/useLastCallback';
 import useShowTransition from '../../hooks/useShowTransition';
+import useToggleClass from '../../hooks/useToggleClass';
 
 import Button from './Button';
 import { getInAppBrowser } from './InAppBrowser';
@@ -41,19 +43,17 @@ type OwnProps = {
   contentClassName?: string;
   isOpen?: boolean;
   isCompact?: boolean;
-  nativeBottomSheetKey?: BottomSheetKeys;
-  forceFullNative?: boolean; // Always open in "full" size
-  noResetFullNativeOnBlur?: boolean; // Don't reset "full" size on blur
+  isInAppLock?: boolean;
   forceBottomSheet?: boolean;
   noBackdrop?: boolean;
   noBackdropClose?: boolean;
   header?: any;
   hasCloseButton?: boolean;
-  children: React.ReactNode;
+  children: TeactNode;
   onClose: NoneToVoidFunction;
   onCloseAnimationEnd?: NoneToVoidFunction;
   onEnter?: NoneToVoidFunction;
-  dialogRef?: RefObject<HTMLDivElement>;
+  dialogRef?: ElementRef<HTMLDivElement>;
 };
 
 export const CLOSE_DURATION = 350;
@@ -75,59 +75,46 @@ function Modal({
   contentClassName,
   isOpen,
   isCompact,
-  nativeBottomSheetKey,
-  forceFullNative,
   forceBottomSheet,
-  noResetFullNativeOnBlur,
+  isInAppLock,
   noBackdrop,
   noBackdropClose,
   header,
   hasCloseButton,
   children,
-  onClose,
+  onClose: onCloseProp,
   onCloseAnimationEnd,
   onEnter,
 }: OwnProps): TeactJsx {
-  const lang = useLang();
-  // eslint-disable-next-line no-null/no-null
-  const modalRef = useRef<HTMLDivElement>(null);
+  const onClose = useLastCallback(onCloseProp);
 
-  // eslint-disable-next-line no-null/no-null
-  const localDialogRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const swipeDownDateRef = useRef<number>(null);
+  const lang = useLang();
+
+  const modalRef = useRef<HTMLDivElement>();
+  const localDialogRef = useRef<HTMLDivElement>();
+  const swipeDownDateRef = useRef<number>();
   dialogRef ||= localDialogRef;
 
   const { isPortrait } = useDeviceScreen();
 
   useHideBrowser(isOpen, isCompact);
 
-  const animationDuration = isPortrait ? CLOSE_DURATION_PORTRAIT : CLOSE_DURATION;
-  const { shouldRender, transitionClassNames } = useShowTransition(
-    isOpen,
-    onCloseAnimationEnd,
-    undefined,
-    false,
-    undefined,
-    animationDuration + ANIMATION_END_DELAY,
-  );
+  const animationDuration = (isPortrait ? CLOSE_DURATION_PORTRAIT : CLOSE_DURATION) + ANIMATION_END_DELAY;
 
   const isSlideUp = !isCompact && isPortrait;
 
-  useHistoryBack({
-    isActive: isOpen,
-    onBack: onClose,
-  });
-
-  useEffectWithPrevDeps(([prevIsOpen]) => {
-    // Expand NBS to full size for a compact modal inside NBS
-    if (IS_DELEGATED_BOTTOM_SHEET && isCompact && (prevIsOpen || isOpen)) {
-      BottomSheet.toggleSelfFullSize({ isFullSize: !!isOpen });
-    }
-  }, [isOpen, isCompact]);
+  useHistoryBack({ isActive: isOpen, onBack: onClose, shouldIgnoreForTelegram: isCompact });
 
   useEffect(() => {
-    if (IS_DELEGATED_BOTTOM_SHEET || !isOpen) return undefined;
+    if (!IS_TELEGRAM_APP || !isOpen || isCompact) return undefined;
+
+    disableTelegramMiniAppSwipeToClose();
+
+    return enableTelegramMiniAppSwipeToClose;
+  }, [isCompact, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
 
     return getModalCloseSignal.subscribe(onClose);
   }, [isOpen, onClose]);
@@ -140,13 +127,28 @@ function Modal({
     [isOpen, onClose, onEnter],
   );
   useEffect(() => (isOpen && modalRef.current ? trapFocus(modalRef.current) : undefined), [isOpen]);
+  useToggleClass({ className: 'is-modal-open', isActive: !isCompact && isOpen });
 
   useLayoutEffect(() => (
-    isOpen ? beginHeavyAnimation(animationDuration + ANIMATION_END_DELAY) : undefined
+    isOpen ? beginHeavyAnimation(animationDuration) : undefined
   ), [animationDuration, isOpen]);
 
+  // Make sure to hide browser before presenting modals
   useEffect(() => {
-    if (!IS_TOUCH_ENV || !isOpen || !isPortrait || !isSlideUp || IS_DELEGATED_BOTTOM_SHEET) {
+    const browser = getInAppBrowser();
+    if (!isOpen) {
+      // Before showing browser, make sure that closed modals are updated state properly
+      requestAnimationFrame(() => {
+        browser?.show();
+      });
+      return;
+    }
+
+    void browser?.hide();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!IS_TOUCH_ENV || !isOpen || !isPortrait || !isSlideUp) {
       return undefined;
     }
 
@@ -163,32 +165,14 @@ function Modal({
     });
   }, [isOpen, isPortrait, isSlideUp, onClose]);
 
-  // Make sure to hide browser before presenting modals
-  const [isBrowserHidden, setIsBrowserHidden] = useState(false);
-  useEffect(() => {
-    if (!isOpen) {
-      setIsBrowserHidden(false); // Reset to re-hide it next time
-      return;
-    }
-    const browser = getInAppBrowser();
-    browser?.hide().then(() => {
-      setIsBrowserHidden(true);
-    });
-  }, [isOpen]);
-
-  const isDelegatingToNative = useDelegatingBottomSheet(nativeBottomSheetKey,
-    isPortrait,
-    isOpen && (!getInAppBrowser() || isBrowserHidden),
-    onClose);
-
-  useDelegatedBottomSheet(
-    nativeBottomSheetKey,
-    isOpen && (!getInAppBrowser() || isBrowserHidden),
-    onClose,
-    dialogRef,
-    forceFullNative,
-    noResetFullNativeOnBlur,
-  );
+  const { shouldRender } = useShowTransition({
+    ref: modalRef,
+    isOpen,
+    onCloseAnimationEnd,
+    className: false,
+    closeDuration: animationDuration,
+    withShouldRender: true,
+  });
 
   if (!shouldRender) {
     return undefined;
@@ -220,12 +204,11 @@ function Modal({
   const fullClassName = buildClassName(
     styles.modal,
     className,
-    transitionClassNames,
     isSlideUp && styles.slideUpAnimation,
     isCompact && styles.compact,
     isCompact && 'is-compact-modal',
     forceBottomSheet && styles.forceBottomSheet,
-    isDelegatingToNative && styles.delegatingToNative,
+    isInAppLock && styles.inAppLock,
   );
 
   const backdropFullClass = buildClassName(styles.backdrop, noBackdrop && styles.noBackdrop);
@@ -257,7 +240,7 @@ function Modal({
 
 export default freezeWhenClosed(Modal);
 
-function getCanCloseModal(lastScrollRef: { current: number | null }, el?: HTMLElement) {
+function getCanCloseModal(lastScrollRef: RefObject<number | undefined>, el?: HTMLElement) {
   if (windowSize.getIsKeyboardVisible() || getIsSwipeToCloseDisabled()) {
     return false;
   }

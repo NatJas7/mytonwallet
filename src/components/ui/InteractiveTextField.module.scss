@@ -4,6 +4,7 @@
   min-height: 3rem;
   /* Account for border width */
   padding: calc(1rem - 1px) calc(0.75rem - 1px);
+  border-radius: var(--border-radius-default);
 
   font-size: 1rem;
   font-weight: 600;
@@ -13,12 +14,10 @@
   word-break: break-all;
 
   background: var(--color-background-first);
-  border-radius: var(--border-radius-default);
 }
 
 .button {
   cursor: var(--custom-cursor, pointer);
-
   text-decoration: none !important;
 
   &_spoiler {
@@ -36,6 +35,10 @@
       color: var(--color-accent);
     }
   }
+}
+
+.iconCaretDown {
+  display: inline !important;
 }
 
 .icon {
@@ -61,15 +64,20 @@
   font-size: 1.0625rem;
 }
 
+.iconShare {
+  margin-right: -0.0625rem;
+  margin-left: -0.125rem;
+  font-size: 1.25rem;
+  vertical-align: -0.3125rem;
+}
+
 .nameInput {
   margin-bottom: 1.5rem;
 }
 
 .shortAddress {
   position: relative;
-
   margin-left: 0.75rem;
-
   color: var(--color-gray-3);
 
   &::before {
@@ -81,9 +89,9 @@
 
     width: 0.125rem;
     height: 0.125rem;
+    border-radius: 50%;
 
     background-color: var(--color-gray-3);
-    border-radius: 50%;
   }
 
   &.scam {
@@ -93,9 +101,7 @@
 
 .revealSpoiler {
   cursor: var(--custom-cursor, pointer);
-
   margin-left: 0.1875rem;
-
   color: var(--color-accent);
 
   &:hover {
@@ -111,10 +117,78 @@
   width: 2.75rem;
   height: 1.0625rem;
   margin-right: 0.25rem;
-
   vertical-align: bottom;
 }
 
 .chainIcon {
+  color: var(--color-gray-3);
   vertical-align: -0.125rem;
+  transition: color 200ms;
+
+  :global(html.animation-level-0) & {
+    transition: none !important;
+  }
+}
+
+.meaningfulPart {
+  color: var(--color-black);
+}
+
+.menuAvatar {
+  width: 1.75rem !important;
+  height: 1.75rem !important;
+  margin-inline-end: 0.5rem;
+  font-size: 0.75rem !important;
+}
+
+.menuIcon {
+  &:global(.icon-star),
+  &:global(.icon-star-filled) {
+    margin-top: -0.125rem;
+  }
+}
+
+.menuIconChevronRight {
+  order: 5;
+  margin: 0 -0.5rem 0 auto;
+  padding-left: 0.5rem;
+  font-size: 1rem !important;
+}
+
+.menuIcon,
+.dimmedPart {
+  color: var(--color-gray-3);
+  transition: color 200ms;
+
+  :global(html.animation-level-0) & {
+    transition: none !important;
+  }
+}
+
+.menu {
+  padding: 0 !important;
+}
+
+.menuItem {
+  border-radius: 0;
+
+  &:first-child {
+    border-top-left-radius: var(--border-radius-default);
+    border-top-right-radius: var(--border-radius-default);
+  }
+
+  &:last-child {
+    border-bottom-right-radius: var(--border-radius-default);
+    border-bottom-left-radius: var(--border-radius-default);
+  }
+
+  &::before {
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+
+  :global(.menuItemName) {
+    font-size: 1rem;
+  }
 }

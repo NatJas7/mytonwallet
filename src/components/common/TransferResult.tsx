@@ -8,6 +8,7 @@ import { ANIMATED_STICKERS_PATHS } from '../ui/helpers/animatedAssets';
 
 import AnimatedIconWithPreview from '../ui/AnimatedIconWithPreview';
 import Button from '../ui/Button';
+import SensitiveData from '../ui/SensitiveData';
 
 import styles from './TransferResult.module.scss';
 
@@ -20,11 +21,13 @@ interface OwnProps {
   decimals?: number;
   firstButtonText?: string;
   secondButtonText?: string;
+  isSensitiveDataHidden?: true;
   onFirstButtonClick?: NoneToVoidFunction;
   onSecondButtonClick?: NoneToVoidFunction;
 }
 
 function TransferResult({
+  isSensitiveDataHidden,
   playAnimation,
   amount = 0n,
   tokenSymbol = TONCOIN.symbol,
@@ -67,11 +70,21 @@ function TransferResult({
         previewUrl={ANIMATED_STICKERS_PATHS.thumbUpPreview}
       />
 
-      <div className={buildClassName(styles.amount, color && styles[`amount_${color}`], 'rounded-font')}>
+      <SensitiveData
+        isActive={isSensitiveDataHidden}
+        min={5}
+        max={13}
+        seed={tokenSymbol}
+        rows={3}
+        cellSize={18}
+        align="center"
+        maskSkin="green"
+        className={buildClassName(styles.amount, color && styles[`amount_${color}`], 'rounded-font')}
+      >
         {wholePart.trim().replace('\u202F', '').replace('-', '−')}
         {fractionPart && <span className={styles.amountFraction}>.{fractionPart.trim()}</span>}
         <span className={styles.amountSymbol}>{tokenSymbol}</span>
-      </div>
+      </SensitiveData>
 
       {renderButtons()}
     </>

@@ -1,13 +1,17 @@
 import type { Connector } from '../../../util/PostMessageConnector';
 import type { ApiInitArgs, OnApiUpdate } from '../../types';
-import type { AllMethodArgs, AllMethodResponse, AllMethods } from '../../types/methods';
+import type {
+  AllMethods,
+  MethodArgsWithMaybePrefix,
+  MethodResponseWithMaybePrefix,
+} from '../../types/methods';
 
-import { IS_CAPACITOR } from '../../../config';
-import { createWindowProvider } from '../../../util/capacitorStorageProxy';
 import { logDebugApi, logDebugError } from '../../../util/logs';
-import { createConnector } from '../../../util/PostMessageConnector';
+import { createConnector, createExtensionConnector } from '../../../util/PostMessageConnector';
 import { pause } from '../../../util/schedulers';
 import { IS_IOS } from '../../../util/windowEnvironment';
+import { createWindowProvider, createWindowProviderForExtension } from '../../../util/windowProvider';
+import { POPUP_PORT } from '../extension/config';
 
 const HEALTH_CHECK_TIMEOUT = 150;
 const HEALTH_CHECK_MIN_DELAY = 5000; // 5 sec
@@ -16,18 +20,28 @@ let updateCallback: OnApiUpdate;
 let worker: Worker | undefined;
 let connector: Connector | undefined;
 let isInitialized = false;
+let initPromise: Promise<void> | undefined;
 
-export function initApi(onUpdate: OnApiUpdate, initArgs: ApiInitArgs | (() => ApiInitArgs)) {
+export function initApi(onUpdate: OnApiUpdate, initArgs: ApiInitArgs) {
   updateCallback = onUpdate;
 
   if (!connector) {
-    worker = new Worker(
-      /* webpackChunkName: "worker" */ new URL('./provider.ts', import.meta.url),
-    );
-    connector = createConnector(worker, onUpdate);
+    // We use process.env.IS_EXTENSION instead of IS_EXTENSION in order to remove the irrelevant code during bundling
+    if (process.env.IS_EXTENSION) {
+      const onReconnect = () => {
+        initPromise = connector!.init(initArgs);
+      };
 
-    if (IS_CAPACITOR) {
-      createWindowProvider(worker!);
+      connector = createExtensionConnector(POPUP_PORT, onUpdate, undefined, onReconnect);
+
+      createWindowProviderForExtension();
+    } else {
+      worker = new Worker(
+        /* webpackChunkName: "worker" */ new URL('./provider.ts', import.meta.url),
+      );
+      connector = createConnector(worker, onUpdate);
+
+      createWindowProvider(worker);
     }
   }
 
@@ -38,21 +52,25 @@ export function initApi(onUpdate: OnApiUpdate, initArgs: ApiInitArgs | (() => Ap
     isInitialized = true;
   }
 
-  const args = typeof initArgs === 'function' ? initArgs() : initArgs;
-  return connector.init(args);
+  initPromise = connector.init(initArgs);
 }
 
-export async function callApi<T extends keyof AllMethods>(fnName: T, ...args: AllMethodArgs<T>) {
+export async function callApi<T extends keyof AllMethods>(
+  fnName: T,
+  ...args: MethodArgsWithMaybePrefix<T>
+) {
   if (!connector) {
-    logDebugError('API is not initialized');
+    logDebugError('API is not initialized when calling', fnName);
     return undefined;
   }
+
+  await initPromise!;
 
   try {
     const result = await (connector.request({
       name: fnName,
       args,
-    }) as AllMethodResponse<T>);
+    }) as Promise<MethodResponseWithMaybePrefix<T>>);
 
     logDebugApi(`callApi: ${fnName}`, args, result);
 
@@ -62,11 +80,16 @@ export async function callApi<T extends keyof AllMethods>(fnName: T, ...args: Al
   }
 }
 
-export function callApiWithThrow<T extends keyof AllMethods>(fnName: T, ...args: AllMethodArgs<T>) {
+export async function callApiWithThrow<T extends keyof AllMethods>(
+  fnName: T,
+  ...args: MethodArgsWithMaybePrefix<T>
+) {
+  await initPromise!;
+
   return (connector!.request({
     name: fnName,
     args,
-  }) as AllMethodResponse<T>);
+  }) as MethodResponseWithMaybePrefix<T>);
 }
 
 const startedAt = Date.now();
@@ -96,6 +119,7 @@ async function ensureWorkerPing() {
       worker?.terminate();
       worker = undefined;
       connector = undefined;
+      initPromise = undefined;
       updateCallback({ type: 'requestReconnectApi' });
     }
   } finally {

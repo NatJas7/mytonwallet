@@ -1,40 +1,24 @@
+import type { AccountChain } from '../../global/types';
 import type { StorageKey } from '../storages/types';
 import type {
   ApiAccountAny,
+  ApiAccountWithChain,
   ApiAccountWithMnemonic,
-  ApiAccountWithTon,
-  ApiAccountWithTron,
-  ApiBip39Account,
   ApiChain,
   ApiNetwork,
-  ApiTonWallet,
-  ApiTronWallet,
+  ApiWalletByChain,
 } from '../types';
 
 import { buildAccountId, parseAccountId } from '../../util/account';
+import { mapValues } from '../../util/iteratees';
 import { storage } from '../storages';
 
 const MIN_ACCOUNT_NUMBER = 0;
 
-// eslint-disable-next-line import/no-mutable-exports
 export let loginResolve: AnyFunction;
 const loginPromise = new Promise<void>((resolve) => {
   loginResolve = resolve;
 });
-
-let activeAccountId: string | undefined;
-
-export function getActiveAccountId() {
-  return activeAccountId;
-}
-
-export function setActiveAccountId(accountId?: string) {
-  activeAccountId = accountId;
-}
-
-export function isAccountActive(accountId: string) {
-  return activeAccountId === accountId;
-}
 
 export async function getAccountIds(): Promise<string[]> {
   return Object.keys(await storage.getItem('accounts') || {});
@@ -43,33 +27,53 @@ export async function getAccountIds(): Promise<string[]> {
 export async function getAccountWithMnemonic() {
   const byId = await fetchStoredAccounts();
 
-  return Object.entries(byId).find(([, { type }]) => type !== 'ledger') as [string, ApiAccountWithMnemonic] | undefined;
+  return Object.entries(byId)
+    .find(([, { type }]) => type !== 'ledger' && type !== 'view') as [string, ApiAccountWithMnemonic] | undefined;
 }
 
-export async function getNewAccountId(network: ApiNetwork) {
+export async function getNewAccountId(network: ApiNetwork, preferredId?: number) {
   const ids = (await getAccountIds()).map((accountId) => parseAccountId(accountId).id);
-  const id = ids.length === 0 ? MIN_ACCOUNT_NUMBER : Math.max(...ids) + 1;
+  const id = preferredId !== undefined && !ids.includes(preferredId)
+    ? preferredId
+    : ids.length === 0 ? MIN_ACCOUNT_NUMBER : Math.max(...ids) + 1;
   return buildAccountId({ id, network });
 }
 
 export async function fetchStoredAddress(accountId: string, chain: ApiChain): Promise<string> {
-  return (await fetchStoredAccount<ApiBip39Account>(accountId))[chain].address;
+  return (await fetchStoredChainAccount(accountId, chain)).byChain[chain].address;
 }
 
-export async function fetchStoredTonWallet(accountId: string): Promise<ApiTonWallet> {
-  return (await fetchStoredAccount<ApiAccountWithTon>(accountId)).ton;
+export async function fetchStoredWallet<T extends ApiChain>(accountId: string, chain: T) {
+  return (await fetchStoredChainAccount(accountId, chain)).byChain[chain] as ApiWalletByChain[T];
 }
 
-export async function fetchStoredTronWallet(accountId: string): Promise<ApiTronWallet> {
-  return (await fetchStoredAccount<ApiAccountWithTron>(accountId)).tron;
-}
-
-export function fetchStoredAccount<T extends ApiAccountAny>(accountId: string): Promise<T> {
+export function fetchMaybeStoredAccount<T extends ApiAccountAny>(accountId: string): Promise<T | undefined> {
   return getAccountValue(accountId, 'accounts');
 }
 
-export function fetchStoredAccounts(): Promise<Record<string, ApiAccountAny>> {
-  return storage.getItem('accounts');
+export async function fetchStoredAccount<T extends ApiAccountAny>(accountId: string): Promise<T> {
+  const account = await fetchMaybeStoredAccount<T>(accountId);
+  if (account) return account;
+  throw new Error(`Account ${accountId} doesn't exist`);
+}
+
+export async function fetchStoredChainAccount<T extends ApiChain>(accountId: string, chain: T) {
+  const account = await fetchStoredAccount(accountId);
+  if (account.byChain[chain]) return account as ApiAccountWithChain<T>;
+  throw new Error(`${chain} wallet missing in account ${accountId}`);
+}
+
+export async function getAccountIdByAddress<T extends ApiChain>(address: string, chain: T) {
+  const accounts = await fetchStoredAccounts();
+  const found = Object.entries(accounts).find((e) => e[1].byChain[chain]?.address === address && e[1].type !== 'view');
+  if (!found) {
+    throw new Error(`${chain} account missing by address ${address}`);
+  }
+  return found[0];
+}
+
+export async function fetchStoredAccounts(): Promise<Record<string, ApiAccountAny>> {
+  return (await storage.getItem('accounts')) ?? {};
 }
 
 export async function updateStoredAccount<T extends ApiAccountAny>(
@@ -83,12 +87,19 @@ export async function updateStoredAccount<T extends ApiAccountAny>(
   });
 }
 
-export async function updateStoredTonWallet(accountId: string, partial: Partial<ApiTonWallet>): Promise<void> {
-  const tonWallet = await fetchStoredTonWallet(accountId);
+export async function updateStoredWallet<T extends ApiChain>(
+  accountId: string,
+  chain: T,
+  partial: Partial<ApiWalletByChain[T]>,
+): Promise<void> {
+  const account = await fetchStoredChainAccount(accountId, chain);
   return updateStoredAccount(accountId, {
-    ton: {
-      ...tonWallet,
-      ...partial,
+    byChain: {
+      ...account.byChain,
+      [chain]: {
+        ...account.byChain[chain],
+        ...partial,
+      },
     },
   });
 }
@@ -143,4 +154,17 @@ export function getCurrentAccountId(): Promise<string | undefined> {
 
 export function waitLogin() {
   return loginPromise;
+}
+
+export function getAccountChains(account: ApiAccountAny): Partial<Record<ApiChain, AccountChain>> {
+  return mapValues(account.byChain, (wallet) => ({
+    address: wallet.address,
+  }));
+}
+
+export function doesAccountHaveChain<T extends ApiChain>(
+  account: ApiAccountAny,
+  chain: T,
+): account is ApiAccountWithChain<T> {
+  return !!account.byChain[chain];
 }

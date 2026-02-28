@@ -5,9 +5,10 @@ import { getActions, withGlobal } from '../../../global';
 
 import { IS_CAPACITOR, MNEMONIC_COUNT } from '../../../config';
 import { selectMnemonicForCheck } from '../../../global/actions/api/auth';
-import { selectCurrentAccountState } from '../../../global/selectors';
+import { selectCurrentAccountId, selectCurrentAccountState } from '../../../global/selectors';
+import { getDoesUsePinPad } from '../../../util/biometrics';
 import buildClassName from '../../../util/buildClassName';
-import { vibrateOnError, vibrateOnSuccess } from '../../../util/capacitor';
+import { vibrateOnError, vibrateOnSuccess } from '../../../util/haptics';
 import isMnemonicPrivateKey from '../../../util/isMnemonicPrivateKey';
 import resolveSlideTransitionName from '../../../util/resolveSlideTransitionName';
 import { callApi } from '../../../api';
@@ -50,16 +51,14 @@ function BackupModal({
   const { setIsBackupRequired, setIsPinAccepted, clearIsPinAccepted } = getActions();
 
   const lang = useLang();
-  const [currentSlide, setCurrentSlide] = useState<number>(SLIDES.confirm);
-  const [nextKey, setNextKey] = useState<number | undefined>(SLIDES.password);
+  const [currentSlide, setCurrentSlide] = useState<SLIDES>(SLIDES.confirm);
+  const [nextKey, setNextKey] = useState<SLIDES | undefined>(SLIDES.password);
   const [checkIndexes, setCheckIndexes] = useState<number[]>([]);
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
   const mnemonicRef = useRef<string[] | undefined>(undefined);
-  const noResetFullNativeOnBlur = currentSlide === SLIDES.confirm || currentSlide === SLIDES.password;
-
   useEffect(() => {
     mnemonicRef.current = undefined;
   }, [isOpen]);
@@ -74,15 +73,13 @@ function BackupModal({
     mnemonicRef.current = await callApi('fetchMnemonic', currentAccountId!, password);
 
     if (!mnemonicRef.current) {
-      setError('Wrong password, please try again.');
-      if (IS_CAPACITOR) {
-        void vibrateOnError();
-      }
-
+      const error = getDoesUsePinPad() ? 'Wrong passcode, please try again.' : 'Wrong password, please try again.';
+      setError(error);
       setIsLoading(false);
+      void vibrateOnError();
       return;
     }
-    if (IS_CAPACITOR) {
+    if (getDoesUsePinPad()) {
       setIsPinAccepted();
       await vibrateOnSuccess(true);
       clearIsPinAccepted();
@@ -120,8 +117,7 @@ function BackupModal({
     onClose();
   });
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: SLIDES) {
     const mnemonic = mnemonicRef.current;
 
     switch (currentKey) {
@@ -137,7 +133,9 @@ function BackupModal({
       case SLIDES.password:
         return (
           <>
-            {!IS_CAPACITOR && <ModalHeader title={lang('Enter Password')} onClose={onClose} />}
+            {!getDoesUsePinPad() && (
+              <ModalHeader title={lang('Enter Password')} onClose={onClose} />
+            )}
             <PasswordForm
               isActive={isActive}
               isLoading={isLoading}
@@ -145,6 +143,7 @@ function BackupModal({
               withCloseButton={IS_CAPACITOR}
               submitLabel={lang('$back_up_auth')}
               cancelLabel={lang('Cancel')}
+              noAutoConfirm
               onSubmit={handlePasswordSubmit}
               onCancel={onClose}
               onUpdate={handleBackupErrorUpdate}
@@ -155,11 +154,12 @@ function BackupModal({
       case SLIDES.mnemonic:
         return mnemonic && isMnemonicPrivateKey(mnemonic) ? (
           <MnemonicPrivateKey
-            privateKeyHex={mnemonic![0]}
+            privateKeyHex={mnemonic[0]}
             onClose={onClose}
           />
         ) : (
           <MnemonicList
+            isActive={isActive}
             mnemonic={mnemonic}
             onNext={isBackupRequired ? handleCheckMnemonic : undefined}
             onClose={onClose}
@@ -170,7 +170,6 @@ function BackupModal({
         return (
           <MnemonicCheck
             isActive={isActive}
-            isInModal
             mnemonic={mnemonicRef.current as string[]}
             checkIndexes={checkIndexes}
             buttonLabel={lang('Done')}
@@ -187,9 +186,6 @@ function BackupModal({
       isOpen={isOpen}
       hasCloseButton
       dialogClassName={styles.modalDialog}
-      nativeBottomSheetKey="backup"
-      forceFullNative={currentSlide === SLIDES.password}
-      noResetFullNativeOnBlur={noResetFullNativeOnBlur}
       onClose={onClose}
       onCloseAnimationEnd={handleModalClose}
     >
@@ -208,5 +204,5 @@ function BackupModal({
 
 export default memo(withGlobal<OwnProps>((global): StateProps => {
   const { isBackupRequired } = selectCurrentAccountState(global) || {};
-  return { currentAccountId: global.currentAccountId, isBackupRequired };
+  return { currentAccountId: selectCurrentAccountId(global), isBackupRequired };
 })(BackupModal));

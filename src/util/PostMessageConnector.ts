@@ -1,4 +1,4 @@
-import { bigintReviver } from './bigint';
+import { decodeError, decodeExtensionMessage, encodeExtensionMessage } from './extensionMessageSerializer';
 import generateUniqueId from './generateUniqueId';
 import { logDebugError } from './logs';
 
@@ -15,8 +15,7 @@ type InitData = {
   channel?: string;
   type: 'init';
   messageId?: string;
-  name: 'init';
-  args: any;
+  args: any[];
 };
 
 type CallMethodData = {
@@ -34,13 +33,18 @@ export type OriginMessageData = InitData | CallMethodData | {
   messageId: string;
 };
 
-export interface OriginMessageEvent {
+export interface OriginMessageEvent extends MessageEvent {
   data: OriginMessageData;
 }
 
-export type ApiUpdate =
-  { type: string }
-  & any;
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type ApiUpdate = { type: string } & any;
+
+export type WorkerMessageError = {
+  name: string;
+  message: string;
+  stack?: string;
+};
 
 export type WorkerMessageData = {
   channel?: string;
@@ -51,7 +55,7 @@ export type WorkerMessageData = {
   type: 'methodResponse';
   messageId: string;
   response?: any;
-  error?: { message: string };
+  error?: WorkerMessageError;
 } | {
   channel?: string;
   type: 'methodCallback';
@@ -60,7 +64,7 @@ export type WorkerMessageData = {
 } | {
   channel?: string;
   type: 'unhandledError';
-  error?: { message: string; stack?: string };
+  error: WorkerMessageError;
 };
 
 export interface WorkerMessageEvent {
@@ -69,8 +73,8 @@ export interface WorkerMessageEvent {
 
 interface RequestStates {
   messageId: string;
-  resolve: Function;
-  reject: Function;
+  resolve: AnyToVoidFunction;
+  reject: AnyToVoidFunction;
   callback: AnyToVoidFunction;
 }
 
@@ -98,15 +102,35 @@ class ConnectorClass<T extends InputRequestTypes> {
   ) {
   }
 
-  // eslint-disable-next-line class-methods-use-this
   public destroy() {
   }
 
   init(...args: any[]) {
-    this.postMessage({
+    const { requestStates } = this;
+
+    const messageId = generateUniqueId();
+    const payload: InitData = {
       type: 'init',
+      messageId,
       args,
+    };
+
+    const requestState = { messageId } as RequestStates;
+
+    const promise = new Promise<void>((resolve, reject) => {
+      Object.assign(requestState, { resolve, reject });
     });
+
+    requestStates.set(messageId, requestState);
+    promise
+      .catch(() => undefined)
+      .finally(() => {
+        requestStates.delete(messageId);
+      });
+
+    this.postMessage(payload);
+
+    return promise;
   }
 
   request(messageData: RequestTypes<T>) {
@@ -122,7 +146,7 @@ class ConnectorClass<T extends InputRequestTypes> {
     const requestState = { messageId } as RequestStates;
 
     // Re-wrap type because of `postMessage`
-    const promise: Promise<any> = new Promise((resolve, reject) => {
+    const promise = new Promise<any>((resolve, reject) => {
       Object.assign(requestState, { resolve, reject });
     });
 
@@ -165,13 +189,11 @@ class ConnectorClass<T extends InputRequestTypes> {
   }
 
   onMessage(data: WorkerMessageData | string) {
-    if (typeof data === 'string') {
-      try {
-        data = JSON.parse(data, bigintReviver) as WorkerMessageData;
-      } catch (err: any) {
-        logDebugError('PostMessageConnector: Failed to parse message', err);
-        return;
-      }
+    try {
+      data = decodeExtensionMessage(data);
+    } catch (err: any) {
+      logDebugError('PostMessageConnector: Failed to parse message', err);
+      return;
     }
 
     const { requestStates, channel } = this;
@@ -186,7 +208,7 @@ class ConnectorClass<T extends InputRequestTypes> {
       const requestState = requestStates.get(data.messageId);
       if (requestState) {
         if (data.error) {
-          requestState.reject(data.error);
+          requestState.reject(decodeError(data.error));
         } else {
           requestState.resolve(data.response);
         }
@@ -195,20 +217,16 @@ class ConnectorClass<T extends InputRequestTypes> {
       const requestState = requestStates.get(data.messageId);
       requestState?.callback?.(...data.callbackArgs);
     } else if (data.type === 'unhandledError') {
-      const error = new Error(data.error?.message);
-      if (data.error?.stack) {
-        error.stack = data.error.stack;
-      }
-      throw error;
+      throw decodeError(data.error);
     }
   }
 
-  private postMessage(data: AnyLiteral) {
+  private postMessage(data: OriginMessageData) {
     data.channel = this.channel;
 
-    let rawData: AnyLiteral | string = data;
+    let rawData: OriginMessageData | string = data;
     if (this.shouldUseJson) {
-      rawData = JSON.stringify(data);
+      rawData = encodeExtensionMessage(data);
     }
 
     if ('open' in this.target) { // Is Window
@@ -219,6 +237,10 @@ class ConnectorClass<T extends InputRequestTypes> {
   }
 }
 
+/**
+ * Allows to call functions, provided by another messenger (a window, a worker), in this messenger.
+ * The other messenger must provide the functions using `createPostMessageInterface`.
+ */
 export function createConnector<T extends InputRequestTypes>(
   worker: Worker | Window | DedicatedWorkerGlobalScope,
   onUpdate?: (update: ApiUpdate) => void,
@@ -240,16 +262,19 @@ export function createConnector<T extends InputRequestTypes>(
   return connector;
 }
 
+/**
+ * Allows to call functions, provided by the extension service worker, in this window.
+ * The service worker must provide the functions using `createExtensionInterface`.
+ */
 export function createExtensionConnector(
   name: string,
   onUpdate?: (update: ApiUpdate) => void,
-  getInitArgs?: () => any,
   channel?: string,
+  onReconnect?: () => void,
 ) {
   const connector = new ConnectorClass(connect(), onUpdate, channel, true);
 
   function connect() {
-    // eslint-disable-next-line no-restricted-globals
     const port = self.chrome.runtime.connect({ name });
 
     port.onMessage.addListener((data: string | WorkerMessageData) => {
@@ -259,13 +284,45 @@ export function createExtensionConnector(
     // For some reason port can suddenly get disconnected
     port.onDisconnect.addListener(() => {
       connector.target = connect();
-      connector.init(getInitArgs?.());
+      onReconnect?.();
     });
 
     return port;
   }
 
-  connector.init(getInitArgs?.());
+  return connector;
+}
+
+/**
+ * Allows to call functions, provided by a window, in this service worker.
+ * The window must provide the functions using `createReverseExtensionInterface`.
+ *
+ * Warning: the connector is able to send messages only when the popup window is open.
+ */
+export function createReverseExtensionConnector(portName: string) {
+  const nullWorker = {
+    postMessage() {
+      throw new Error('The popup window is not connected');
+    },
+  } as Pick<Worker, 'postMessage'> as Worker;
+
+  const connector = new ConnectorClass(nullWorker, undefined, undefined, true);
+
+  chrome.runtime.onConnect.addListener((port) => {
+    if (port.name !== portName) {
+      return;
+    }
+
+    connector.target = port;
+
+    port.onMessage.addListener((data: string | WorkerMessageData) => {
+      connector.onMessage(data);
+    });
+
+    port.onDisconnect.addListener(() => {
+      connector.target = nullWorker;
+    });
+  });
 
   return connector;
 }

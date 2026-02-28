@@ -1,50 +1,54 @@
+import type { TeactNode } from '../../lib/teact/teact';
 import React, { memo, useMemo } from '../../lib/teact/teact';
 
 import buildClassName from '../../util/buildClassName';
 
 import useFlag from '../../hooks/useFlag';
-import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 
+import DropdownItemContent from './DropdownItemContent';
 import DropdownMenu from './DropdownMenu';
 import Spinner from './Spinner';
 
 import styles from './Dropdown.module.scss';
 
-export interface DropdownItem {
-  value: string;
+export interface DropdownItem<T extends string = string> {
+  value: T;
   name: string;
   selectedName?: string;
-  description?: string;
-  icon?: string;
+  description?: string | TeactNode;
+  icon?: string | TeactNode;
   overlayIcon?: string;
   fontIcon?: string;
+  fontIconClassName?: string;
   isDisabled?: boolean;
   isDangerous?: boolean;
-  withSeparator?: boolean;
+  withDelimiter?: boolean;
+  withDelimiterAfter?: boolean;
 }
 
-interface OwnProps {
+interface OwnProps<T extends string> {
   label?: string;
-  selectedValue?: string;
-  items: DropdownItem[];
+  selectedValue?: T;
+  items: DropdownItem<T>[];
   className?: string;
   itemClassName?: string;
   menuClassName?: string;
-  theme?: 'light';
+  theme?: 'light' | 'inherit';
   arrow?: 'caret' | 'chevron';
-  menuPosition?: 'top' | 'bottom';
-  menuPositionHorizontal?: 'right' | 'left';
+  menuPositionX?: 'right' | 'left';
+  menuPositionY?: 'top' | 'bottom';
   disabled?: boolean;
   shouldTranslateOptions?: boolean;
-  onChange?: (value: string) => void;
+  onChange?: (value: T) => void;
   isLoading?: boolean;
+  buttonPrefix?: TeactNode;
 }
 
 const DEFAULT_ARROW = 'caret';
-const DEFAULT_MENU_POSITION_HORIZONTAL = 'right';
+const DEFAULT_MENU_POSITION_X = 'right';
 
-function Dropdown({
+function Dropdown<T extends string>({
   label,
   items,
   selectedValue,
@@ -53,23 +57,28 @@ function Dropdown({
   menuClassName,
   theme,
   arrow = DEFAULT_ARROW,
-  menuPosition,
-  menuPositionHorizontal = DEFAULT_MENU_POSITION_HORIZONTAL,
+  menuPositionX = DEFAULT_MENU_POSITION_X,
+  menuPositionY,
   disabled,
   shouldTranslateOptions,
   onChange,
   isLoading = false,
-}: OwnProps): TeactJsx {
-  const lang = useLang();
+  buttonPrefix,
+}: OwnProps<T>): TeactJsx {
   const [isMenuOpen, openMenu, closeMenu] = useFlag();
+  const withMenu = items.length > 1;
+  const isFullyInteractive = Boolean(label);
 
-  const [selectedItem, selectedItemName] = useMemo(() => {
-    const item = items.find((i) => selectedValue !== undefined && i.value === selectedValue);
-    const selectedName = item?.selectedName ?? item?.name ?? '';
-    return [item, selectedName];
-  }, [items, selectedValue]);
+  const selectedItem = useMemo<DropdownItem<T>>(() => {
+    let item = selectedValue !== undefined && items.find((i) => i.value === selectedValue);
+    item ||= { value: '' as T, name: '' };
+    return {
+      ...item,
+      isDisabled: !isFullyInteractive && disabled,
+    };
+  }, [items, selectedValue, isFullyInteractive, disabled]);
 
-  const handleSelect = useLastCallback((value: string) => {
+  const handleSelect = useLastCallback((value: T) => {
     if (value !== selectedValue) {
       onChange?.(value);
     }
@@ -79,16 +88,8 @@ function Dropdown({
     return undefined;
   }
 
-  const buttonArrowIcon = buildClassName(
-    styles.buttonIcon,
-    arrow === 'chevron' ? 'icon-chevron-down' : 'icon-caret-down',
-  );
-
-  const withMenu = items.length > 1;
-  const isFullyInteractive = Boolean(label);
   const fullClassName = buildClassName(
     className,
-    theme && styles[theme],
     withMenu && styles.interactive,
     isFullyInteractive && styles.wide,
     isFullyInteractive && disabled && styles.disabled,
@@ -96,10 +97,22 @@ function Dropdown({
   const buttonFullClassName = buildClassName(
     styles.button,
     withMenu && styles.interactive,
-    !isFullyInteractive && disabled && styles.disabled,
     withMenu && menuClassName,
+    theme && styles[theme],
     itemClassName,
   );
+
+  const buttonSuffix = useMemo(() => {
+    return withMenu && (
+      <i
+        className={buildClassName(
+          styles.buttonIcon,
+          arrow === 'chevron' ? 'icon-chevron-down' : 'icon-caret-down',
+        )}
+        aria-hidden
+      />
+    );
+  }, [withMenu, arrow]);
 
   return (
     <div
@@ -111,38 +124,23 @@ function Dropdown({
       {isLoading ? (
         <Spinner className={styles.spinner} />
       ) : (
-        <button
-          type="button"
+        <DropdownItemContent
+          item={selectedItem}
+          prefix={buttonPrefix}
+          suffix={buttonSuffix}
+          shouldTranslate={shouldTranslateOptions}
+          shouldUseSelectedName
           className={buttonFullClassName}
+          itemClassName={buildClassName('itemName', itemClassName)}
           onClick={!isFullyInteractive && withMenu ? openMenu : undefined}
-          disabled={disabled}
-        >
-          {selectedItem?.icon && <img src={selectedItem.icon} alt="" className={styles.itemIcon} />}
-          {selectedItem?.overlayIcon && (
-            <img
-              src={selectedItem?.overlayIcon}
-              alt=""
-              className={buildClassName('icon', styles.itemOverlayIcon, styles.insideButton)}
-            />
-          )}
-          {selectedItem?.fontIcon && (
-            <i
-              className={buildClassName(`icon-${selectedItem.fontIcon}`, styles.fontIcon)}
-              aria-hidden
-            />
-          )}
-          <span className={buildClassName(styles.itemName, 'itemName', itemClassName)}>
-            {shouldTranslateOptions ? lang(selectedItemName) : selectedItemName}
-          </span>
-          {withMenu && <i className={buttonArrowIcon} aria-hidden />}
-        </button>
+        />
       )}
 
       {withMenu && (
         <DropdownMenu
           isOpen={isMenuOpen && !isLoading}
-          menuPositionHorizontal={menuPositionHorizontal}
-          menuPosition={menuPosition}
+          menuPositionX={menuPositionX}
+          menuPositionY={menuPositionY}
           items={items}
           shouldTranslateOptions={shouldTranslateOptions}
           selectedValue={selectedValue}

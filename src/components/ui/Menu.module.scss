@@ -1,6 +1,5 @@
 .wrapper {
   user-select: none;
-
   position: relative;
 
   &.inPortal {
@@ -17,21 +16,18 @@
   z-index: var(--z-menu-bubble);
   transform: scale(0.5);
 
-  overflow: hidden;
   overscroll-behavior: contain;
   display: block;
 
   margin: 0;
+  border-radius: var(--border-radius-default);
 
   list-style: none;
 
   background-color: var(--color-background-drop-down);
-  border-radius: var(--border-radius-default);
   box-shadow: var(--default-shadow);
 
   transition: var(--dropdown-transition) !important;
-
-  scrollbar-width: none !important;
 
   &:global(.open) {
     transform: scale(1);
@@ -50,7 +46,7 @@
   }
 
   &.bottom {
-    bottom: var(--offset-y-value, var(--offset-y));
+    bottom: var(--offset-y-bottom-value, var(--offset-y));
   }
 
   &.left {
@@ -65,8 +61,12 @@
     transition: var(--no-animation-transition) !important;
   }
 
-  &::-webkit-scrollbar {
-    display: none !important;
+  :global(html:not(.is-ios):not(.is-android)) & {
+    scrollbar-width: none !important;
+
+    &::-webkit-scrollbar {
+      display: none !important;
+    }
   }
 }
 
@@ -81,21 +81,19 @@
 
 .menu {
   min-width: 13.5rem;
-  padding: 0.25rem;
 }
 
 .suggestion {
   --offset-x: 0;
   --offset-y: calc(100% - 0.5rem);
 
-  transform: scaleY(0.5) !important;
   transform-origin: top !important;
+  transform: scaleY(0.5) !important;
 
   overflow: auto;
 
   width: 100%;
   max-height: min(60vh, 17rem);
-  padding: 0.375rem;
 
   &:global(.open) {
     transform: scaleY(1) !important;
@@ -111,8 +109,7 @@
   overflow-y: scroll;
 
   min-width: auto;
-  max-height: min(60vh, 17rem);
-  padding: 0.5rem;
+  max-height: min(60vh, 22rem);
 
   :global(html.animation-level-0) &,
   &:global(.open) {
@@ -130,5 +127,9 @@
     &:global(.open) {
       transform: translate(var(--translate-x, 0), 0) !important;
     }
+  }
+
+  :global(html:not(.is-ios):not(.is-android)) & {
+    overflow-y: auto;
   }
 }

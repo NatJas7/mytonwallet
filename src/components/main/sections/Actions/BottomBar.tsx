@@ -3,14 +3,14 @@ import { getActions, withGlobal } from '../../../../global';
 
 import { ContentTab } from '../../../../global/types';
 
+import { IS_CORE_WALLET } from '../../../../config';
 import { selectCurrentAccountState } from '../../../../global/selectors';
 import buildClassName from '../../../../util/buildClassName';
-import { createSignal } from '../../../../util/signals';
 
 import useEffectOnce from '../../../../hooks/useEffectOnce';
+import { getIsBottomBarHidden, subscribeToBottomBarVisibility } from '../../../../hooks/useHideBottomBar';
 import useHistoryBack from '../../../../hooks/useHistoryBack';
 import useLang from '../../../../hooks/useLang';
-import useLastCallback from '../../../../hooks/useLastCallback';
 
 import Button from '../../../ui/Button';
 
@@ -22,71 +22,22 @@ interface StateProps {
   isExploreOpen?: boolean;
 }
 
-const [getHideCounter, setHideCounter] = createSignal(0);
-
-export function hideBottomBar() {
-  const currentCounter = getHideCounter();
-  setHideCounter(currentCounter + 1);
-}
-
-export function showBottomBar() {
-  const currentCounter = getHideCounter();
-  setHideCounter(Math.max(0, currentCounter - 1));
-}
-
-function getIsBottomBarHidden() {
-  return getHideCounter() > 0;
-}
-
 function BottomBar({ areSettingsOpen, areAssetsActive, isExploreOpen }: StateProps) {
-  const {
-    openSettings, closeSettings, setActiveContentTab, closeSiteCategory, selectToken,
-  } = getActions();
+  const { switchToWallet, switchToExplore, switchToSettings } = getActions();
+
   const lang = useLang();
   const [isHidden, setIsHidden] = useState(getIsBottomBarHidden());
   const isWalletTabActive = !isExploreOpen && !areSettingsOpen;
 
   useEffectOnce(() => {
-    return getHideCounter.subscribe(() => {
+    return subscribeToBottomBarVisibility(() => {
       setIsHidden(getIsBottomBarHidden());
     });
   });
 
-  const openExplore = useLastCallback(() => {
-    setActiveContentTab({ tab: ContentTab.Explore }, { forceOnHeavyAnimation: true });
-  });
-
-  const closeExplore = useLastCallback(() => {
-    setActiveContentTab({ tab: ContentTab.Assets }, { forceOnHeavyAnimation: true });
-  });
-
-  const handleWalletClick = useLastCallback(() => {
-    closeExplore();
-    closeSettings();
-
-    if (!areAssetsActive && isWalletTabActive) {
-      selectToken({ slug: undefined });
-      setActiveContentTab({ tab: ContentTab.Assets }, { forceOnHeavyAnimation: true });
-    }
-  });
-
-  const handleExploreClick = useLastCallback(() => {
-    if (isExploreOpen) {
-      closeSiteCategory();
-    }
-
-    openExplore();
-    closeSettings();
-  });
-
-  const handleSettingsClick = useLastCallback(() => {
-    openSettings(undefined, { forceOnHeavyAnimation: true });
-    closeExplore();
-  });
-
   useHistoryBack({
-    isActive: areSettingsOpen || isExploreOpen,
-    onBack: handleWalletClick,
+    isActive: isExploreOpen,
+    onBack: switchToWallet,
   });
 
   return (
@@ -94,23 +45,25 @@ function BottomBar({ areSettingsOpen, areAssetsActive, isExploreOpen }: StatePro
       <Button
         isSimple
         className={buildClassName(styles.button, isWalletTabActive && styles.active)}
-        onClick={handleWalletClick}
+        onClick={switchToWallet}
       >
         <i className={buildClassName(styles.icon, 'icon-wallet')} />
         <span className={styles.label}>{lang('Wallet')}</span>
       </Button>
-      <Button
-        isSimple
-        className={buildClassName(styles.button, isExploreOpen && styles.active)}
-        onClick={handleExploreClick}
-      >
-        <i className={buildClassName(styles.icon, 'icon-explore')} />
-        <span className={styles.label}>{lang('Explore')}</span>
-      </Button>
+      {!IS_CORE_WALLET && (
+        <Button
+          isSimple
+          className={buildClassName(styles.button, isExploreOpen && styles.active)}
+          onClick={switchToExplore}
+        >
+          <i className={buildClassName(styles.icon, 'icon-explore')} />
+          <span className={styles.label}>{lang('Explore')}</span>
+        </Button>
+      )}
       <Button
         isSimple
         className={buildClassName(styles.button, areSettingsOpen && styles.active)}
-        onClick={handleSettingsClick}
+        onClick={switchToSettings}
       >
         <i className={buildClassName(styles.icon, 'icon-settings')} />
         <span className={styles.label}>{lang('Settings')}</span>
@@ -120,12 +73,12 @@ function BottomBar({ areSettingsOpen, areAssetsActive, isExploreOpen }: StatePro
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const { areSettingsOpen } = global;
+  const { areSettingsOpen, isExploreOpen } = global;
   const { activeContentTab } = selectCurrentAccountState(global) ?? {};
 
   return {
     areSettingsOpen,
     areAssetsActive: activeContentTab === ContentTab.Assets,
-    isExploreOpen: !areSettingsOpen && activeContentTab === ContentTab.Explore,
+    isExploreOpen,
   };
 })(BottomBar));

@@ -1,47 +1,65 @@
 import type { ApiInitArgs, OnApiUpdate } from '../types';
 
-import { IS_CAPACITOR } from '../../config';
-import { initWindowConnector } from '../../util/capacitorStorageProxy/connector';
-import chains from '../chains';
-import { connectUpdater, startStorageMigration } from '../common/helpers';
+import { initWindowConnector } from '../../util/windowProvider/connector';
+import * as ton from '../chains/ton';
+import { fetchBackendReferrer } from '../common/backend';
+import { connectUpdater, disconnectUpdater, tryMigrateStorage } from '../common/helpers';
+import { initClientId } from '../common/other';
+import { getProtocolManager, initProtocolManager } from '../dappProtocols';
 import { setEnvironment } from '../environment';
 import { addHooks } from '../hooks';
-import * as tonConnect from '../tonConnect';
-import * as tonConnectSse from '../tonConnect/sse';
+import { storage } from '../storages';
+import { destroyPolling } from './polling';
 import * as methods from '.';
 
-addHooks({
-  onDappDisconnected: tonConnectSse.sendSseDisconnect,
-  onDappsChanged: tonConnectSse.resetupSseConnection,
-});
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default async function init(onUpdate: OnApiUpdate, args: ApiInitArgs) {
   connectUpdater(onUpdate);
-  const environment = setEnvironment(args);
 
-  if (IS_CAPACITOR) {
-    initWindowConnector();
-  }
+  const environment = setEnvironment(args);
+  initWindowConnector();
+
+  await initClientId();
+  await tryMigrateStorage(onUpdate, ton, args.accountIds);
 
   methods.initAccounts(onUpdate);
+  methods.initAuth(onUpdate);
   methods.initPolling(onUpdate);
-  methods.initTransactions(onUpdate);
+  methods.initTransfer(onUpdate);
+  methods.initTokens(onUpdate);
   methods.initStaking();
   methods.initSwap(onUpdate);
+  methods.initNfts(onUpdate);
+
+  await initProtocolManager(onUpdate, environment);
 
   if (environment.isDappSupported) {
     methods.initDapps(onUpdate);
-    tonConnect.initTonConnect(onUpdate);
   }
 
-  if (environment.isSseSupported) {
-    tonConnectSse.initSse(onUpdate);
+  const protocolManager = getProtocolManager();
+
+  addHooks({
+    onDappDisconnected: protocolManager.closeRemoteConnection.bind(protocolManager),
+    onDappsChanged: protocolManager.resetupRemoteConnection.bind(protocolManager),
+  });
+
+  if (args.langCode) {
+    void storage.setItem('langCode', args.langCode);
   }
 
-  await startStorageMigration(onUpdate, chains.ton);
+  void saveReferrer(args);
+}
 
-  if (environment.isSseSupported) {
-    void tonConnectSse.resetupSseConnection();
+export function destroy() {
+  void destroyPolling();
+  disconnectUpdater();
+}
+
+async function saveReferrer(args: ApiInitArgs) {
+  const referrer = args.referrer ?? await fetchBackendReferrer();
+
+  if (referrer) {
+    await storage.setItem('referrer', referrer);
+    await initClientId();
   }
 }

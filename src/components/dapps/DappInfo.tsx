@@ -1,4 +1,6 @@
-import React, { memo } from '../../lib/teact/teact';
+import React, { memo, useMemo } from '../../lib/teact/teact';
+
+import type { StoredDappConnection } from '../../api/dappProtocols/storage';
 
 import buildClassName from '../../util/buildClassName';
 
@@ -6,32 +8,30 @@ import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 
 import Button from '../ui/Button';
+import DappHostWarning from './DappHostWarning';
 
 import styles from './Dapp.module.scss';
 
 interface OwnProps {
-  iconUrl?: string;
-  name?: string;
-  url?: string;
-  origin?: string;
+  dapp?: StoredDappConnection;
+  variant: 'settings' | 'transfer';
   onDisconnect?: (origin: string) => void;
-  className?: string;
 }
 
 function DappInfo({
-  iconUrl,
-  name,
-  url,
-  origin,
+  dapp,
+  variant,
   onDisconnect,
-  className,
 }: OwnProps) {
   const lang = useLang();
 
-  const shouldShowDisconnect = Boolean(onDisconnect && origin);
+  const { name, iconUrl, url, isUrlEnsured } = dapp || {};
+  const host = useMemo(() => url ? new URL(url).host : undefined, [url]);
+
+  const shouldShowDisconnect = Boolean(onDisconnect && url);
 
   const handleDisconnect = useLastCallback(() => {
-    onDisconnect!(origin!);
+    onDisconnect!(url!);
   });
 
   function renderIcon() {
@@ -48,13 +48,22 @@ function DappInfo({
     );
   }
 
+  const warningIconJsx = !isUrlEnsured && (
+    <DappHostWarning url={url} iconClassName={styles.dappHostWarningIcon} />
+  );
+
   return (
-    <div className={buildClassName(styles.dapp, className)}>
-      {renderIcon()}
+    <div className={buildClassName(styles.dapp, variant === 'transfer' && styles.dapp_transfer)}>
+      {variant === 'settings' && renderIcon()}
       <div className={styles.dappInfo}>
         <span className={styles.dappName}>{name}</span>
-        <span className={styles.dappUrl}>{url && new URL(url).host}</span>
+        <span className={styles.dappHost}>
+          {variant === 'settings' && warningIconJsx}
+          <span className={styles.dappHostText}>{host}</span>
+          {variant === 'transfer' && warningIconJsx}
+        </span>
       </div>
+      {variant === 'transfer' && renderIcon()}
       {shouldShowDisconnect && (
         <Button
           isSmall

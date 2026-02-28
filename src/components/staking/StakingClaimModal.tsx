@@ -1,23 +1,21 @@
 import React, { memo, useMemo } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiJettonStakingState } from '../../api/types';
-import type { HardwareConnectState, UserToken } from '../../global/types';
+import type { ApiEthenaStakingState, ApiJettonStakingState } from '../../api/types';
+import type { UserToken } from '../../global/types';
 import { StakingState } from '../../global/types';
 
-import {
-  IS_CAPACITOR,
-  SHORT_FRACTION_DIGITS,
-  TONCOIN,
-} from '../../config';
+import { SHORT_FRACTION_DIGITS, TONCOIN } from '../../config';
 import renderText from '../../global/helpers/renderText';
 import {
   selectAccount,
   selectAccountStakingState,
+  selectCurrentAccountId,
   selectCurrentAccountTokens,
   selectIsHardwareAccount,
   selectIsMultichainAccount,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import { toDecimal } from '../../util/decimals';
 import { getTonStakingFees } from '../../util/fee/getTonOperationFees';
@@ -30,8 +28,10 @@ import useLastCallback from '../../hooks/useLastCallback';
 import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
 
 import TransactionBanner from '../common/TransactionBanner';
+import TransferResult from '../common/TransferResult';
 import LedgerConfirmOperation from '../ledger/LedgerConfirmOperation';
 import LedgerConnect from '../ledger/LedgerConnect';
+import Button from '../ui/Button';
 import Fee from '../ui/Fee';
 import Modal from '../ui/Modal';
 import PasswordForm from '../ui/PasswordForm';
@@ -41,24 +41,23 @@ import modalStyles from '../ui/Modal.module.scss';
 import styles from './StakingClaimModal.module.scss';
 
 interface StateProps {
-  stakingState?: ApiJettonStakingState;
+  stakingState?: ApiJettonStakingState | ApiEthenaStakingState;
   isOpen?: boolean;
   tokens?: UserToken[];
   isLoading?: boolean;
   address?: string;
   error?: string;
   state?: StakingState;
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
   isHardwareAccount?: boolean;
   isMultichainAccount: boolean;
+  isSensitiveDataHidden?: true;
 }
 
 const IS_OPEN_STATES = new Set([
   StakingState.ClaimPassword,
   StakingState.ClaimConfirmHardware,
   StakingState.ClaimConnectHardware,
+  StakingState.ClaimComplete,
 ]);
 
 function StakingClaimModal({
@@ -69,23 +68,19 @@ function StakingClaimModal({
   address,
   error,
   state = StakingState.ClaimPassword,
-  hardwareState,
-  isLedgerConnected,
-  isTonAppConnected,
   isHardwareAccount,
   isMultichainAccount,
+  isSensitiveDataHidden,
 }: StateProps) {
-  const {
-    submitStakingClaim,
-    submitStakingClaimHardware,
-    cancelStakingClaim,
-    clearStakingError,
-  } = getActions();
+  const { submitStakingClaim, cancelStakingClaim, clearStakingError } = getActions();
 
   const {
     tokenSlug,
-    unclaimedRewards = 0n,
   } = stakingState ?? {};
+
+  const rewardAmount = stakingState && 'unclaimedRewards' in stakingState
+    ? stakingState.unclaimedRewards
+    : stakingState?.unstakeRequestAmount ?? 0n;
 
   const lang = useLang();
 
@@ -93,10 +88,17 @@ function StakingClaimModal({
   const nativeToken = useMemo(() => tokens?.find(({ slug }) => slug === TONCOIN.slug), [tokens]);
   const nativeBalance = nativeToken?.amount ?? 0n;
 
-  const { gas: networkFee, real: realNetworkFee } = getTonStakingFees('jetton').claim!;
+  const { gas: networkFee, real: realNetworkFee } = getTonStakingFees(stakingState?.type).claim!;
   const isNativeEnough = nativeBalance > networkFee;
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, Boolean(isOpen));
-  const withModalHeader = !isHardwareAccount && !IS_CAPACITOR;
+  const withModalHeader = state === StakingState.ClaimComplete || (!isHardwareAccount && !getDoesUsePinPad());
+  const modalTitle = withModalHeader
+    ? lang(state === StakingState.ClaimComplete
+      ? 'Coins have been unstaked!'
+      : stakingState?.type === 'ethena'
+        ? 'Confirm Unstaking'
+        : 'Confirm Rewards Claim')
+    : undefined;
 
   const handleSubmit = useLastCallback((password: string) => {
     if (!isNativeEnough) return;
@@ -105,20 +107,28 @@ function StakingClaimModal({
 
   const handleHardwareSubmit = useLastCallback(() => {
     if (!isNativeEnough) return;
-    submitStakingClaimHardware();
+    submitStakingClaim();
   });
 
   function renderInfo() {
+    const feeClassName = buildClassName(
+      styles.operationInfoFee,
+      !getDoesUsePinPad() && styles.operationInfoFeeWithGap,
+    );
+    const content = isSensitiveDataHidden
+      ? `*** ${token!.symbol}`
+      : formatCurrency(toDecimal(rewardAmount, token!.decimals), token!.symbol, SHORT_FRACTION_DIGITS);
+
     return (
       <>
         <TransactionBanner
           tokenIn={token}
           withChainIcon={isMultichainAccount}
-          text={formatCurrency(toDecimal(unclaimedRewards, token!.decimals), token!.symbol, SHORT_FRACTION_DIGITS)}
-          className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
-          secondText={shortenAddress(address!)}
+          text={content}
+          className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
+          secondText={address && shortenAddress(address)}
         />
-        <div className={buildClassName(styles.operationInfoFee, !IS_CAPACITOR && styles.operationInfoFeeWithGap)}>
+        <div className={feeClassName}>
           {token && renderText(lang('$fee_value_bold', {
             fee: (
               <Fee
@@ -133,16 +143,12 @@ function StakingClaimModal({
     );
   }
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: StakingState) {
     switch (currentKey) {
       case StakingState.ClaimConnectHardware:
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isLedgerConnected={isLedgerConnected}
-            isTonAppConnected={isTonAppConnected}
             onConnected={handleHardwareSubmit}
             onClose={cancelStakingClaim}
           />
@@ -151,7 +157,7 @@ function StakingClaimModal({
       case StakingState.ClaimConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm transaction on your Ledger')}
+            text={lang('Please confirm action on your Ledger')}
             error={error}
             onClose={cancelStakingClaim}
             onTryAgain={handleHardwareSubmit}
@@ -174,16 +180,37 @@ function StakingClaimModal({
             {renderInfo()}
           </PasswordForm>
         );
+
+      case StakingState.ClaimComplete:
+        return (
+          <div className={modalStyles.transitionContent}>
+            <TransferResult
+              isSensitiveDataHidden={isSensitiveDataHidden}
+              color="green"
+              playAnimation={isActive}
+              amount={rewardAmount}
+              tokenSymbol={token?.symbol}
+              decimals={token?.decimals}
+              noSign
+            />
+
+            <div className={styles.unstakeInfo}>
+              {lang('$unstake_information_instantly')}
+            </div>
+
+            <div className={modalStyles.buttons}>
+              <Button onClick={cancelStakingClaim} isPrimary>{lang('Close')}</Button>
+            </div>
+          </div>
+        );
     }
   }
 
   return (
     <Modal
       isOpen={isOpen}
-      title={withModalHeader ? lang('Confirm Rewards Claim') : undefined}
+      title={modalTitle}
       hasCloseButton={withModalHeader}
-      forceFullNative
-      nativeBottomSheetKey="staking-claim"
       contentClassName={styles.passwordModalDialog}
       onClose={cancelStakingClaim}
     >
@@ -202,8 +229,8 @@ function StakingClaimModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
-  const accountId = global.currentAccountId;
-  const { addressByChain } = selectAccount(global, accountId!) || {};
+  const accountId = selectCurrentAccountId(global);
+  const { byChain } = selectAccount(global, accountId!) || {};
   const isHardwareAccount = selectIsHardwareAccount(global);
 
   const {
@@ -214,25 +241,18 @@ export default memo(withGlobal((global): StateProps => {
 
   const stakingState = accountId ? selectAccountStakingState(global, accountId) : undefined;
   const tokens = selectCurrentAccountTokens(global);
-
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
+  const canBeClaimed = stakingState?.type === 'jetton' || stakingState?.type === 'ethena';
 
   return {
-    stakingState: stakingState?.type === 'jetton' ? stakingState : undefined,
+    stakingState: canBeClaimed ? stakingState : undefined,
     isOpen: IS_OPEN_STATES.has(state),
     state,
     tokens,
     isLoading,
     error,
-    address: addressByChain?.ton,
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
+    address: byChain?.ton?.address,
     isHardwareAccount,
     isMultichainAccount: selectIsMultichainAccount(global, accountId!),
+    isSensitiveDataHidden: global.settings.isSensitiveDataHidden,
   };
 })(StakingClaimModal));

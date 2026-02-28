@@ -3,51 +3,63 @@ import React, {
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type { ApiStakingState } from '../../api/types';
-import { ActiveTab, ContentTab, type Theme } from '../../global/types';
+import type { ApiStakingState, ApiTokenWithPrice } from '../../api/types';
+import { ActiveTab, ContentTab, type Theme, type TokenChartMode } from '../../global/types';
 
-import { IS_CAPACITOR } from '../../config';
-import { getStakingStateStatus } from '../../global/helpers/staking';
+import { IS_CORE_WALLET, IS_EXPLORER } from '../../config';
 import {
   selectAccountStakingState,
-  selectCurrentAccount,
+  selectCurrentAccountId,
   selectCurrentAccountSettings,
   selectCurrentAccountState,
+  selectIsCurrentAccountViewMode,
+  selectIsHardwareAccount,
+  selectIsOffRampAllowed,
+  selectIsStakingDisabled,
+  selectIsSwapDisabled,
+  selectToken,
 } from '../../global/selectors';
 import { useAccentColor } from '../../util/accentColor';
+import { isNetWorthChartAvailable } from '../../util/assets/netWorth';
 import buildClassName from '../../util/buildClassName';
-import { getStatusBarHeight } from '../../util/capacitor';
 import { captureEvents, SwipeDirection } from '../../util/captureEvents';
-import { setStatusBarStyle } from '../../util/switchTheme';
+import { getStakingStateStatus } from '../../util/staking';
 import {
-  IS_DELEGATED_BOTTOM_SHEET, IS_ELECTRON, IS_TOUCH_ENV, STICKY_CARD_INTERSECTION_THRESHOLD,
+  IS_ELECTRON, IS_TOUCH_ENV, REM,
 } from '../../util/windowEnvironment';
-import windowSize from '../../util/windowSize';
+import { calcSafeAreaTop } from './helpers/calcSafeAreaTop';
 
 import useAppTheme from '../../hooks/useAppTheme';
 import useBackgroundMode, { isBackgroundModeActive } from '../../hooks/useBackgroundMode';
-import { useOpenFromMainBottomSheet } from '../../hooks/useDelegatedBottomSheet';
 import { useDeviceScreen } from '../../hooks/useDeviceScreen';
 import useEffectOnce from '../../hooks/useEffectOnce';
+import useElementVisibility from '../../hooks/useElementVisibility';
 import useFlag from '../../hooks/useFlag';
 import useInterval from '../../hooks/useInterval';
+import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import usePreventPinchZoomGesture from '../../hooks/usePreventPinchZoomGesture';
-import useShowTransition from '../../hooks/useShowTransition';
 
+import LinkingDomainModal from '../domain/LinkingDomainModal';
+import RenewDomainModal from '../domain/RenewDomainModal';
 import InvoiceModal from '../receive/InvoiceModal';
 import ReceiveModal from '../receive/ReceiveModal';
 import StakeModal from '../staking/StakeModal';
 import StakingClaimModal from '../staking/StakingClaimModal';
 import StakingInfoModal from '../staking/StakingInfoModal';
 import UnstakeModal from '../staking/UnstakeModal';
+import Transition from '../ui/Transition';
 import UpdateAvailable from '../ui/UpdateAvailable';
 import VestingModal from '../vesting/VestingModal';
 import VestingPasswordModal from '../vesting/VestingPasswordModal';
+import MainSkeleton from './MainSkeleton';
+import AccountSelectorModal from './modals/accountSelector/AccountSelectorModal';
+import PromotionModal from './modals/PromotionModal';
 import { LandscapeActions, PortraitActions } from './sections/Actions';
+import PromoteWallet from './sections/Actions/PromoteWallet';
 import Card from './sections/Card';
-import StickyCard from './sections/Card/StickyCard';
 import Content from './sections/Content';
+import Header, { HEADER_HEIGHT_REM } from './sections/Header/Header';
 import Warnings from './sections/Warnings';
 
 import styles from './Main.module.scss';
@@ -58,13 +70,18 @@ interface OwnProps {
 
 type StateProps = {
   currentTokenSlug?: string;
+  currentToken?: ApiTokenWithPrice;
   stakingState?: ApiStakingState;
   isTestnet?: boolean;
   isLedger?: boolean;
+  isViewMode: boolean;
   isStakingInfoModalOpen?: boolean;
   isSwapDisabled?: boolean;
+  isStakingDisabled?: boolean;
   isOnRampDisabled?: boolean;
+  isOffRampAllowed?: boolean;
   isMediaViewerOpen?: boolean;
+  isAppReady?: boolean;
   theme: Theme;
   accentColorIndex?: number;
 };
@@ -77,13 +94,18 @@ function Main({
   currentTokenSlug,
   stakingState,
   isTestnet,
+  isViewMode,
   isLedger,
   isStakingInfoModalOpen,
   isSwapDisabled,
+  isStakingDisabled,
   isOnRampDisabled,
+  isOffRampAllowed,
   isMediaViewerOpen,
+  isAppReady,
   theme,
   accentColorIndex,
+  currentToken,
 }: OwnProps & StateProps) {
   const {
     selectToken,
@@ -94,81 +116,65 @@ function Main({
     changeCurrentStaking,
     setLandscapeActionsActiveTabIndex,
     loadExploreSites,
-    openReceiveModal,
     updatePendingSwaps,
   } = getActions();
 
-  // eslint-disable-next-line no-null/no-null
-  const cardRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const portraitContainerRef = useRef<HTMLDivElement>(null);
-  // eslint-disable-next-line no-null/no-null
-  const landscapeContainerRef = useRef<HTMLDivElement>(null);
-  const [canRenderStickyCard, setCanRenderStickyCard] = useState(false);
-  const [shouldRenderDarkStatusBar, setShouldRenderDarkStatusBar] = useState(false);
-  const safeAreaTop = IS_CAPACITOR ? getStatusBarHeight() : windowSize.get().safeAreaTop;
+  const lang = useLang();
+  const cardRef = useRef<HTMLDivElement>();
+  const portraitContainerRef = useRef<HTMLDivElement>();
+  const landscapeContainerRef = useRef<HTMLDivElement>();
+
+  const safeAreaTop = calcSafeAreaTop();
   const [isFocused, markIsFocused, unmarkIsFocused] = useFlag(!isBackgroundModeActive());
+  const [areTabsStuck, setAreTabsStuck] = useState(false);
+  const [tokenChartMode, setTokenChartMode] = useState<TokenChartMode>('price');
+  const intersectionRootMarginTop = HEADER_HEIGHT_REM * REM + safeAreaTop;
 
   const stakingStatus = stakingState ? getStakingStateStatus(stakingState) : 'inactive';
 
   useBackgroundMode(unmarkIsFocused, markIsFocused);
 
-  useOpenFromMainBottomSheet('receive', openReceiveModal);
   usePreventPinchZoomGesture(isMediaViewerOpen);
 
   const { isPortrait, isLandscape } = useDeviceScreen();
-  const {
-    shouldRender: shouldRenderStickyCard,
-    transitionClassNames: stickyCardTransitionClassNames,
-  } = useShowTransition(canRenderStickyCard);
 
   useEffectOnce(() => {
-    loadExploreSites({ isLandscape });
-  });
+    if (IS_CORE_WALLET) return;
 
-  useEffect(() => {
-    setStatusBarStyle({
-      forceDarkBackground: shouldRenderDarkStatusBar,
-    });
-  }, [shouldRenderDarkStatusBar]);
+    loadExploreSites({ isLandscape, langCode: lang.code });
+  });
 
   useInterval(updatePendingSwaps, isFocused ? UPDATE_SWAPS_INTERVAL : UPDATE_SWAPS_INTERVAL_NOT_FOCUSED);
 
-  useEffect(() => {
-    if (!isPortrait || !isActive) {
-      setCanRenderStickyCard(false);
-      return undefined;
-    }
+  // Use scroll detection for portrait mode
+  const { isVisible: isPageAtTop } = useElementVisibility({
+    isDisabled: !isPortrait || !isActive,
+    targetRef: cardRef,
+    rootMargin: `-${intersectionRootMarginTop}px 0px 0px 0px`,
+    threshold: [1],
+  });
 
-    const rootMarginTop = STICKY_CARD_INTERSECTION_THRESHOLD - safeAreaTop;
-    const observer = new IntersectionObserver((entries) => {
-      const { isIntersecting, boundingClientRect: { left, width } } = entries[0];
-      setCanRenderStickyCard(entries.length > 0 && !isIntersecting && left < width);
-    }, { rootMargin: `${rootMarginTop}px 0px 0px` });
+  const { isVisible: shouldHideBalanceInHeader } = useElementVisibility({
+    isDisabled: !isPortrait || !isActive,
+    targetRef: cardRef,
+    rootMargin: `-${intersectionRootMarginTop}px 0px 0px 0px`,
+  });
 
-    const cardTopSideObserver = new IntersectionObserver((entries) => {
-      const { isIntersecting } = entries[0];
-
-      setShouldRenderDarkStatusBar(!isIntersecting);
-    }, { rootMargin: `-${safeAreaTop}px 0px 0px`, threshold: [1] });
-    const cardElement = cardRef.current;
-
-    if (cardElement) {
-      observer.observe(cardElement);
-      cardTopSideObserver.observe(cardElement);
-    }
-
-    return () => {
-      if (cardElement) {
-        observer.unobserve(cardElement);
-        cardTopSideObserver.unobserve(cardElement);
-      }
-    };
-  }, [isActive, isPortrait, safeAreaTop]);
-
-  const handleTokenCardClose = useLastCallback(() => {
+  const handleChartCardClose = useLastCallback(() => {
     selectToken({ slug: undefined });
     setActiveContentTab({ tab: ContentTab.Assets });
+  });
+
+  const isNetWorthChartSupported = isNetWorthChartAvailable(currentToken);
+
+  useEffect(() => {
+    if (!currentTokenSlug || !isNetWorthChartSupported) {
+      setTokenChartMode('price');
+    }
+  }, [currentTokenSlug, isNetWorthChartSupported]);
+
+  const handleTokenChartModeChange = useLastCallback((mode: TokenChartMode) => {
+    setTokenChartMode(mode);
   });
 
   useEffect(() => {
@@ -176,18 +182,18 @@ function Main({
       return undefined;
     }
 
-    return captureEvents(portraitContainerRef.current!, {
-      excludedClosestSelector: '.token-card',
+    return captureEvents(portraitContainerRef.current, {
+      excludedClosestSelector: '.chart-card',
       onSwipe: (e, direction) => {
         if (direction === SwipeDirection.Right) {
-          handleTokenCardClose();
+          handleChartCardClose();
           return true;
         }
 
         return false;
       },
     });
-  }, [currentTokenSlug, handleTokenCardClose, isPortrait]);
+  }, [currentTokenSlug, handleChartCardClose, isPortrait]);
 
   const appTheme = useAppTheme(theme);
   useAccentColor(isPortrait ? portraitContainerRef : landscapeContainerRef, appTheme, accentColorIndex);
@@ -195,7 +201,7 @@ function Main({
   const handleEarnClick = useLastCallback((stakingId?: string) => {
     if (stakingId) changeCurrentStaking({ stakingId });
 
-    if (isPortrait) {
+    if (isPortrait || isViewMode) {
       openStakingInfoOrStart();
     } else {
       setLandscapeActionsActiveTabIndex({ index: ActiveTab.Stake });
@@ -207,28 +213,44 @@ function Main({
       <div ref={portraitContainerRef} className={styles.portraitContainer}>
         <div className={styles.head}>
           <Warnings onOpenBackupWallet={openBackupWalletModal} />
+
+          <Header
+            withBalance={!shouldHideBalanceInHeader}
+            areTabsStuck={areTabsStuck}
+            isScrolled={!isPageAtTop}
+            isChartCardOpen={Boolean(currentTokenSlug)}
+            tokenChartMode={tokenChartMode}
+            isNetWorthChartAvailable={isNetWorthChartSupported}
+            onChartCardBack={handleChartCardClose}
+            onTokenChartModeChange={handleTokenChartModeChange}
+          />
+
           <Card
             ref={cardRef}
-            forceCloseAccountSelector={shouldRenderStickyCard}
-            onTokenCardClose={handleTokenCardClose}
+            onChartCardClose={handleChartCardClose}
+            tokenChartMode={tokenChartMode}
             onYieldClick={handleEarnClick}
           />
-          {shouldRenderStickyCard && (
-            <StickyCard
-              classNames={stickyCardTransitionClassNames}
+
+          {!isViewMode && (
+            <PortraitActions
+              containerRef={portraitContainerRef}
+              isTestnet={isTestnet}
+              stakingStatus={stakingStatus}
+              isStakingDisabled={isStakingDisabled}
+              isSwapDisabled={isSwapDisabled}
+              isOnRampDisabled={isOnRampDisabled}
+              isOffRampDisabled={!isOffRampAllowed}
+              onEarnClick={handleEarnClick}
             />
           )}
-          <PortraitActions
-            isTestnet={isTestnet}
-            stakingStatus={stakingStatus}
-            isLedger={isLedger}
-            isSwapDisabled={isSwapDisabled}
-            isOnRampDisabled={isOnRampDisabled}
-            onEarnClick={handleEarnClick}
-          />
         </div>
 
-        <Content onStakedTokenClick={handleEarnClick} />
+        <Content
+          isActive={isActive}
+          onStakedTokenClick={handleEarnClick}
+          onTabsStuck={setAreTabsStuck}
+        />
       </div>
     );
   }
@@ -238,8 +260,33 @@ function Main({
       <div ref={landscapeContainerRef} className={styles.landscapeContainer}>
         <div className={buildClassName(styles.sidebar, 'custom-scroll')}>
           <Warnings onOpenBackupWallet={openBackupWalletModal} />
-          <Card onTokenCardClose={handleTokenCardClose} onYieldClick={handleEarnClick} />
-          <LandscapeActions stakingStatus={stakingStatus} isLedger={isLedger} theme={theme} />
+
+          <Header
+            isChartCardOpen={Boolean(currentTokenSlug)}
+            tokenChartMode={tokenChartMode}
+            isNetWorthChartAvailable={isNetWorthChartSupported}
+            onChartCardBack={handleChartCardClose}
+            onTokenChartModeChange={handleTokenChartModeChange}
+          />
+
+          <Card
+            onChartCardClose={handleChartCardClose}
+            tokenChartMode={tokenChartMode}
+            onYieldClick={handleEarnClick}
+          />
+          {!isViewMode && (
+            <LandscapeActions
+              containerRef={landscapeContainerRef}
+              stakingStatus={stakingStatus}
+              isLedger={isLedger}
+              isOffRampDisabled={!isOffRampAllowed}
+              theme={theme}
+            />
+          )}
+
+          {IS_EXPLORER && (
+            <PromoteWallet />
+          )}
         </div>
         <div className={styles.main}>
           <Content onStakedTokenClick={handleEarnClick} />
@@ -248,9 +295,23 @@ function Main({
     );
   }
 
+  function renderContent() {
+    if (IS_EXPLORER) {
+      return (
+        <Transition name="semiFade" activeKey={isAppReady ? 1 : 0}>
+          {isAppReady
+            ? (isPortrait ? renderPortraitLayout() : renderLandscapeLayout())
+            : <MainSkeleton isViewMode={isViewMode} />}
+        </Transition>
+      );
+    }
+
+    return isPortrait ? renderPortraitLayout() : renderLandscapeLayout();
+  }
+
   return (
     <>
-      {!IS_DELEGATED_BOTTOM_SHEET && (isPortrait ? renderPortraitLayout() : renderLandscapeLayout())}
+      {renderContent()}
 
       <StakeModal />
       <StakingInfoModal isOpen={isStakingInfoModalOpen} onClose={closeStakingInfo} />
@@ -260,7 +321,11 @@ function Main({
       <StakingClaimModal />
       <VestingModal />
       <VestingPasswordModal />
-      {!IS_ELECTRON && !IS_DELEGATED_BOTTOM_SHEET && <UpdateAvailable />}
+      <RenewDomainModal />
+      <LinkingDomainModal />
+      <PromotionModal />
+      {!IS_ELECTRON && <UpdateAvailable />}
+      {!IS_CORE_WALLET && <AccountSelectorModal />}
     </>
   );
 }
@@ -268,29 +333,36 @@ function Main({
 export default memo(
   withGlobal<OwnProps>(
     (global): StateProps => {
-      const { ledger } = selectCurrentAccount(global) || {};
+      const isLedger = selectIsHardwareAccount(global);
+      const currentAccountId = selectCurrentAccountId(global);
       const accountState = selectCurrentAccountState(global);
-      const { currentTokenSlug } = accountState ?? {};
+      const { currentTokenSlug, isAppReady } = accountState ?? {};
+      const currentToken = currentTokenSlug ? selectToken(global, currentTokenSlug) : undefined;
 
-      const { isSwapDisabled, isOnRampDisabled } = global.restrictions;
+      const { isOnRampDisabled } = global.restrictions;
 
-      const stakingState = global.currentAccountId
-        ? selectAccountStakingState(global, global.currentAccountId)
+      const stakingState = currentAccountId
+        ? selectAccountStakingState(global, currentAccountId)
         : undefined;
 
       return {
         stakingState,
         currentTokenSlug,
+        currentToken,
         isTestnet: global.settings.isTestnet,
-        isLedger: Boolean(ledger),
+        isLedger,
+        isViewMode: selectIsCurrentAccountViewMode(global),
         isStakingInfoModalOpen: global.isStakingInfoModalOpen,
         isMediaViewerOpen: Boolean(global.mediaViewer?.mediaId),
-        isSwapDisabled,
+        isSwapDisabled: selectIsSwapDisabled(global),
+        isStakingDisabled: selectIsStakingDisabled(global),
         isOnRampDisabled,
+        isOffRampAllowed: selectIsOffRampAllowed(global),
+        isAppReady,
         theme: global.settings.theme,
         accentColorIndex: selectCurrentAccountSettings(global)?.accentColorIndex,
       };
     },
-    (global, _, stickToFirst) => stickToFirst(global.currentAccountId),
+    (global, _, stickToFirst) => stickToFirst(selectCurrentAccountId(global)),
   )(Main),
 );

@@ -3,17 +3,17 @@ import React, {
 } from '../../lib/teact/teact';
 import { getActions, withGlobal } from '../../global';
 
-import type {
-  GlobalState, HardwareConnectState, SavedAddress, UserToken,
-} from '../../global/types';
+import type { GlobalState, SavedAddress, UserToken } from '../../global/types';
 import { TransferState } from '../../global/types';
 
-import { BURN_ADDRESS, IS_CAPACITOR, NFT_BATCH_SIZE } from '../../config';
+import { BURN_ADDRESS, NFT_BATCH_SIZE } from '../../config';
 import {
+  selectCurrentAccountId,
   selectCurrentAccountState,
   selectCurrentAccountTokens,
   selectIsMultichainAccount,
 } from '../../global/selectors';
+import { getDoesUsePinPad } from '../../util/biometrics';
 import buildClassName from '../../util/buildClassName';
 import captureKeyboardListeners from '../../util/captureKeyboardListeners';
 import { toDecimal } from '../../util/decimals';
@@ -26,13 +26,11 @@ import useLang from '../../hooks/useLang';
 import useLastCallback from '../../hooks/useLastCallback';
 import useModalTransitionKeys from '../../hooks/useModalTransitionKeys';
 import usePrevious from '../../hooks/usePrevious';
-import useWindowSize from '../../hooks/useWindowSize';
 
 import TransactionBanner from '../common/TransactionBanner';
 import LedgerConfirmOperation from '../ledger/LedgerConfirmOperation';
 import LedgerConnect from '../ledger/LedgerConnect';
 import Modal from '../ui/Modal';
-import ModalHeader from '../ui/ModalHeader';
 import Transition from '../ui/Transition';
 import TransferComplete from './TransferComplete';
 import TransferConfirm from './TransferConfirm';
@@ -47,14 +45,9 @@ interface StateProps {
   currentTransfer: GlobalState['currentTransfer'];
   tokens?: UserToken[];
   savedAddresses?: SavedAddress[];
-  hardwareState?: HardwareConnectState;
-  isLedgerConnected?: boolean;
-  isTonAppConnected?: boolean;
   isMediaViewerOpen?: boolean;
   isMultichainAccount: boolean;
 }
-
-const SCREEN_HEIGHT_FOR_FORCE_FULLSIZE_NBS = 762; // Computed empirically
 
 function TransferModal({
   currentTransfer: {
@@ -69,13 +62,16 @@ function TransferModal({
     nfts,
     sentNftsCount,
     diesel,
+    isNftBurn,
   },
-  tokens, savedAddresses, hardwareState, isLedgerConnected, isTonAppConnected, isMediaViewerOpen, isMultichainAccount,
+  tokens,
+  savedAddresses,
+  isMediaViewerOpen,
+  isMultichainAccount,
 }: StateProps) {
   const {
     submitTransferConfirm,
-    submitTransferPassword,
-    submitTransferHardware,
+    submitTransfer,
     setTransferScreen,
     cancelTransfer,
     showActivityInfo,
@@ -85,13 +81,14 @@ function TransferModal({
   const { isPortrait } = useDeviceScreen();
   const isOpen = state !== TransferState.None;
 
-  const { screenHeight } = useWindowSize();
   const selectedToken = useMemo(() => tokens?.find((token) => token.slug === tokenSlug), [tokenSlug, tokens]);
   const decimals = selectedToken?.decimals;
   const renderedTransactionAmount = usePrevious(amount, true);
   const symbol = selectedToken?.symbol || '';
   const isNftTransfer = Boolean(nfts?.length);
-  const isBurning = toAddress === BURN_ADDRESS;
+  const isBurning = toAddress === BURN_ADDRESS || isNftBurn;
+  // After confirming the transaction, `toAddress` is set to empty string, so we need to use the previous value
+  const renderedToAddress = usePrevious(toAddress || undefined, true);
 
   const { renderingKey, nextKey, updateNextKey } = useModalTransitionKeys(state, isOpen);
 
@@ -102,7 +99,7 @@ function TransferModal({
   ), [state, submitTransferConfirm]);
 
   const handleTransferSubmit = useLastCallback((password: string) => {
-    submitTransferPassword({ password });
+    submitTransfer({ password });
   });
 
   const handleBackClick = useLastCallback(() => {
@@ -129,18 +126,14 @@ function TransferModal({
   });
 
   const handleLedgerConnect = useLastCallback(() => {
-    submitTransferHardware();
+    submitTransfer();
   });
 
-  // eslint-disable-next-line consistent-return
-  function renderContent(isActive: boolean, isFrom: boolean, currentKey: number) {
+  function renderContent(isActive: boolean, isFrom: boolean, currentKey: TransferState) {
     switch (currentKey) {
       case TransferState.Initial:
         return (
-          <>
-            <ModalHeader title={lang(isNftTransfer ? 'Send NFT' : 'Send')} onClose={handleModalCloseWithReset} />
-            <TransferInitial />
-          </>
+          <TransferInitial />
         );
       case TransferState.Confirm:
         return (
@@ -168,10 +161,11 @@ function TransferModal({
               imageUrl={nfts?.[0]?.thumbnail}
               withChainIcon={isMultichainAccount}
               text={isNftTransfer
-                ? (nfts!.length > 1 ? lang('%amount% NFTs', { amount: nfts!.length }) : nfts![0]?.name || 'NFT')
+                ? (nfts.length > 1 ? lang('%amount% NFTs', { amount: nfts.length }) : nfts[0]?.name || 'NFT')
                 : formatCurrency(toDecimal(amount!, decimals), symbol)}
-              className={!IS_CAPACITOR ? styles.transactionBanner : undefined}
+              className={!getDoesUsePinPad() ? styles.transactionBanner : undefined}
               secondText={shortenAddress(toAddress!)}
+              isTextHidden={isBurning}
             />
           </TransferPassword>
         );
@@ -179,9 +173,6 @@ function TransferModal({
         return (
           <LedgerConnect
             isActive={isActive}
-            state={hardwareState}
-            isLedgerConnected={isLedgerConnected}
-            isTonAppConnected={isTonAppConnected}
             onConnected={handleLedgerConnect}
             onClose={handleModalCloseWithReset}
           />
@@ -189,10 +180,10 @@ function TransferModal({
       case TransferState.ConfirmHardware:
         return (
           <LedgerConfirmOperation
-            text={lang('Please confirm transaction on your Ledger')}
+            text={lang('Please confirm transfer on your Ledger')}
             error={error}
             onClose={handleModalCloseWithReset}
-            onTryAgain={submitTransferHardware}
+            onTryAgain={handleLedgerConnect}
           />
         );
       case TransferState.Complete:
@@ -204,7 +195,7 @@ function TransferModal({
             symbol={symbol}
             txId={txId}
             tokenSlug={tokenSlug}
-            toAddress={toAddress}
+            toAddress={renderedToAddress}
             comment={comment}
             onInfoClick={handleTransactionInfoClick}
             onClose={handleModalCloseWithReset}
@@ -214,7 +205,7 @@ function TransferModal({
           <TransferMultiNftProcess
             nfts={nfts!}
             sentNftsCount={sentNftsCount}
-            toAddress={toAddress}
+            toAddress={renderedToAddress}
             onClose={handleModalCloseWithReset}
           />
         );
@@ -226,8 +217,6 @@ function TransferModal({
       isOpen={isOpen && !isMediaViewerOpen}
       noBackdropClose
       dialogClassName={styles.modalDialog}
-      nativeBottomSheetKey="transfer"
-      forceFullNative={screenHeight <= SCREEN_HEIGHT_FOR_FORCE_FULLSIZE_NBS || renderingKey === TransferState.Password}
       onClose={handleModalCloseWithReset}
       onCloseAnimationEnd={handleModalClose}
     >
@@ -246,22 +235,14 @@ function TransferModal({
 }
 
 export default memo(withGlobal((global): StateProps => {
+  const currentAccountId = selectCurrentAccountId(global);
   const accountState = selectCurrentAccountState(global);
-
-  const {
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
-  } = global.hardware;
 
   return {
     currentTransfer: global.currentTransfer,
     tokens: selectCurrentAccountTokens(global),
     savedAddresses: accountState?.savedAddresses,
-    hardwareState,
-    isLedgerConnected,
-    isTonAppConnected,
     isMediaViewerOpen: Boolean(global.mediaViewer.mediaId),
-    isMultichainAccount: selectIsMultichainAccount(global, global.currentAccountId!),
+    isMultichainAccount: selectIsMultichainAccount(global, currentAccountId!),
   };
 })(TransferModal));

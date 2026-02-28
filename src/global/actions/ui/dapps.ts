@@ -1,19 +1,24 @@
-import { TransferState } from '../../types';
+import { SignDataState, TransferState } from '../../types';
 
 import { BROWSER_HISTORY_LIMIT } from '../../../config';
+import { getInMemoryPassword } from '../../../util/authApi/inMemoryPasswordStore';
 import { unique } from '../../../util/iteratees';
 import { addActionHandler, getGlobal, setGlobal } from '../../index';
 import {
-  clearDappConnectRequestError, updateCurrentAccountState, updateCurrentDappTransfer,
+  clearDappConnectRequestError,
+  resetHardware,
+  updateCurrentAccountState,
+  updateCurrentDappSignData,
+  updateCurrentDappTransfer,
 } from '../../reducers';
-import { selectAccount, selectCurrentAccountState } from '../../selectors';
+import { selectCurrentAccountState, selectIsHardwareAccount } from '../../selectors';
 
 addActionHandler('clearDappConnectRequestError', (global) => {
   global = clearDappConnectRequestError(global);
   setGlobal(global);
 });
 
-addActionHandler('showDappTransfer', (global, actions, payload) => {
+addActionHandler('showDappTransferTransaction', (global, actions, payload) => {
   const { transactionIdx } = payload;
 
   global = updateCurrentDappTransfer(global, {
@@ -30,18 +35,23 @@ addActionHandler('setDappTransferScreen', (global, actions, payload) => {
   setGlobal(global);
 });
 
-addActionHandler('submitDappTransferConfirm', (global, actions) => {
-  const accountId = global.currentAccountId!;
-  const account = selectAccount(global, accountId)!;
+addActionHandler('submitDappTransferConfirm', async (global, actions) => {
+  const inMemoryPassword = await getInMemoryPassword();
 
-  if (account.isHardware) {
-    actions.resetHardwareWalletConnect();
-    global = updateCurrentDappTransfer(getGlobal(), { state: TransferState.ConnectHardware });
+  global = getGlobal();
+
+  if (selectIsHardwareAccount(global)) {
+    global = resetHardware(global, 'ton');
+    global = updateCurrentDappTransfer(global, { state: TransferState.ConnectHardware });
+    setGlobal(global);
+  } else if (inMemoryPassword) {
+    global = updateCurrentDappTransfer(global, { isLoading: true });
+    setGlobal(global);
+    actions.submitDappTransfer({ password: inMemoryPassword });
   } else {
     global = updateCurrentDappTransfer(global, { state: TransferState.Password });
+    setGlobal(global);
   }
-
-  setGlobal(global);
 });
 
 addActionHandler('clearDappTransferError', (global) => {
@@ -51,8 +61,15 @@ addActionHandler('clearDappTransferError', (global) => {
   setGlobal(global);
 });
 
-addActionHandler('openBrowser', (global, actions, { url, title, subtitle }) => {
-  global = { ...global, currentBrowserOptions: { url, title, subtitle } };
+addActionHandler('openBrowser', (global, actions, {
+  url, title, subtitle,
+}) => {
+  global = {
+    ...global,
+    currentBrowserOptions: {
+      url, title, subtitle,
+    },
+  };
   setGlobal(global);
 });
 
@@ -86,24 +103,56 @@ addActionHandler('removeSiteFromBrowserHistory', (global, actions, { url }) => {
   setGlobal(global);
 });
 
-addActionHandler('updateDappLastOpenedAt', (global, actions, { origin }) => {
-  const { dappLastOpenedDatesByOrigin } = selectCurrentAccountState(global)!;
+addActionHandler('updateDappLastOpenedAt', (global, actions, { url }) => {
+  const { dappLastOpenedDatesByUrl } = selectCurrentAccountState(global)!;
 
   const newDates = {
-    ...dappLastOpenedDatesByOrigin,
-    [origin]: Date.now(),
+    ...dappLastOpenedDatesByUrl,
+    [url]: Date.now(),
   };
 
-  global = updateCurrentAccountState(global, { dappLastOpenedDatesByOrigin: newDates });
+  global = updateCurrentAccountState(global, { dappLastOpenedDatesByUrl: newDates });
   setGlobal(global);
 });
 
 addActionHandler('openSiteCategory', (global, actions, { id }) => {
-  global = updateCurrentAccountState(global, { currentSiteCategoryId: id });
-  setGlobal(global);
+  return updateCurrentAccountState(global, { currentSiteCategoryId: id });
 });
 
 addActionHandler('closeSiteCategory', (global) => {
-  global = updateCurrentAccountState(global, { currentSiteCategoryId: undefined });
+  return updateCurrentAccountState(global, { currentSiteCategoryId: undefined });
+});
+
+addActionHandler('closeDappTransfer', (global) => {
+  global = updateCurrentDappTransfer(global, { state: TransferState.None });
   setGlobal(global);
+});
+
+addActionHandler('setDappSignDataScreen', (global, actions, payload) => {
+  const { state } = payload;
+
+  return updateCurrentDappSignData(global, { state });
+});
+
+addActionHandler('submitDappSignDataConfirm', async (global, actions) => {
+  const inMemoryPassword = await getInMemoryPassword();
+
+  global = getGlobal();
+
+  if (inMemoryPassword) {
+    global = updateCurrentDappSignData(global, { isLoading: true });
+    setGlobal(global);
+    actions.submitDappSignData({ password: inMemoryPassword });
+  } else {
+    global = updateCurrentDappSignData(global, { state: SignDataState.Password });
+    setGlobal(global);
+  }
+});
+
+addActionHandler('clearDappSignDataError', (global) => {
+  return updateCurrentDappSignData(global, { error: undefined });
+});
+
+addActionHandler('closeDappSignData', (global) => {
+  return updateCurrentDappSignData(global, { state: SignDataState.None });
 });

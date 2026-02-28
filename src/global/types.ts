@@ -1,46 +1,56 @@
-import type { ApiFetchEstimateDieselResult, ApiTonWalletVersion } from '../api/chains/ton/types';
-import type { ApiTonConnectProof } from '../api/tonConnect/types';
+import type { SignDataPayload } from '@tonconnect/protocol';
+import type { TeactNode } from '../lib/teact/teact';
+
+import type { ApiTonWalletVersion } from '../api/chains/ton/types';
+import type { TonConnectProof } from '../api/dappProtocols/adapters';
+import type { StoredDappConnection } from '../api/dappProtocols/storage';
 import type {
+  ApiAccountConfig,
   ApiActivity,
   ApiAnyDisplayError,
+  ApiBackendConfig,
   ApiBalanceBySlug,
   ApiBaseCurrency,
   ApiChain,
   ApiCountryCode,
-  ApiDapp,
+  ApiCurrencyRates,
   ApiDappPermissions,
   ApiDappTransfer,
+  ApiEmulationResult,
+  ApiFetchEstimateDieselResult,
   ApiHistoryList,
+  ApiImportAddressByChain,
   ApiLedgerDriver,
+  ApiLedgerWalletInfo,
+  ApiMtwCardType,
   ApiNetwork,
   ApiNft,
-  ApiNotificationsAccountValue,
-  ApiParsedPayload,
+  ApiNftCollection,
   ApiPriceHistoryPeriod,
-  ApiSignedTransfer,
   ApiSite,
   ApiSiteCategory,
-  ApiStakingCommonData,
   ApiStakingHistory,
   ApiStakingState,
   ApiSwapAsset,
   ApiSwapDexLabel,
   ApiSwapEstimateVariant,
+  ApiSwapVersion,
+  ApiTokenType,
   ApiTokenWithPrice,
-  ApiTransaction,
-  ApiTransactionActivity,
   ApiUpdate,
+  ApiUpdateDappCloseLoading,
   ApiUpdateDappConnect,
   ApiUpdateDappLoading,
   ApiUpdateDappSendTransactions,
+  ApiUpdateDappSignData,
   ApiUpdateWalletVersions,
   ApiVestingInfo,
-  ApiWalletInfo,
+  ApiWalletWithVersionInfo,
 } from '../api/types';
 import type { AUTOLOCK_OPTIONS_LIST } from '../config';
 import type { AuthConfig } from '../util/authApi/types';
 import type { CapacitorPlatform } from '../util/capacitor/platform';
-import type { LedgerTransport, LedgerWalletInfo } from '../util/ledger/types';
+import type { LedgerTransport } from '../util/ledger/types';
 
 export type IAnchorPosition = {
   x: number;
@@ -50,14 +60,39 @@ export type IAnchorPosition = {
 export type AnimationLevel = 0 | 1 | 2;
 export type Theme = 'light' | 'dark' | 'system';
 export type AppTheme = 'dark' | 'light';
+export type AppLayout = 'portrait' | 'landscape';
+export type DialogAction = 'openBluetoothSettings' | 'signOutAll';
 
-export type NotificationType = {
+export type DeveloperSettingsUndefinedOverride = '__undefined';
+export type DeveloperSettingsOverrideValue<Value> = Exclude<Value, undefined> | DeveloperSettingsUndefinedOverride;
+
+export interface DeveloperSettingsOverrides {
+  seasonalTheme?: DeveloperSettingsOverrideValue<ApiBackendConfig['seasonalTheme']>;
+}
+
+export type DeveloperSettingsOverrideKey = keyof DeveloperSettingsOverrides;
+export type DeveloperSettingsOverridePayload = {
+  [Key in DeveloperSettingsOverrideKey]: {
+    key: Key;
+    value?: DeveloperSettingsOverrides[Key];
+  };
+}[DeveloperSettingsOverrideKey];
+
+export type ToastType = {
   icon?: string;
   message: string;
 };
+
 export type DialogType = {
   title?: string;
-  message: string;
+  message: string | TeactNode;
+  entities?: Record<string, any>;
+  noBackdropClose?: boolean;
+  isInAppLock?: boolean;
+  buttons?: {
+    confirm: { title?: string; action?: DialogAction; isDestructive?: boolean };
+    cancel?: { title?: string };
+  };
 };
 
 export type LangCode = 'en' | 'es' | 'ru' | 'zh-Hant' | 'zh-Hans' | 'tr' | 'de' | 'th' | 'uk' | 'pl';
@@ -84,6 +119,14 @@ export type StakingStatus = 'active' | 'unstakeRequested';
 
 export type AuthMethod = 'createAccount' | 'importMnemonic' | 'importHardwareWallet';
 
+interface AuthAccount {
+  accountId: string;
+  byChain: Partial<Record<ApiChain, AccountChain>>;
+  network?: ApiNetwork;
+}
+
+type SignOutLevel = 'account' | 'network' | 'all';
+
 export enum AppState {
   Auth,
   Main,
@@ -103,7 +146,6 @@ export enum AuthState {
   confirmBiometrics,
   createNativeBiometrics,
   createPassword,
-  createBackup,
   disclaimerAndBackup,
   importWalletCheckPassword,
   importWallet,
@@ -114,11 +156,25 @@ export enum AuthState {
   importWalletConfirmBiometrics,
   importWalletCreatePassword,
   disclaimer,
-  ready,
   about,
-  saferyRules,
+  safetyRules,
   mnemonicPage,
   checkWords,
+  importViewAccount,
+  congratulations,
+  importCongratulations,
+  ready,
+}
+
+export enum AccountSelectorState {
+  Cards,
+  List,
+  Reorder,
+  AddAccountInitial,
+  AddAccountPassword,
+  AddAccountConnectHardware,
+  AddAccountSelectHardware,
+  AddAccountViewMode,
 }
 
 export enum BiometricsState {
@@ -135,9 +191,45 @@ export enum BiometricsState {
 
 export enum TransferState {
   None,
-  WarningHardware,
   Initial,
   Confirm,
+  Password,
+  ConnectHardware,
+  ConfirmHardware,
+  Complete,
+}
+
+export const enum TransactionInfoState {
+  None,
+  Loading,
+  ActivityList,
+  ActivityDetail,
+}
+
+export const enum ScamWarningType {
+  SeedPhrase = 1,
+  DomainLike,
+}
+
+export enum SignDataState {
+  None,
+  Initial,
+  Password,
+  Complete,
+}
+
+export enum DomainRenewalState {
+  None,
+  Initial,
+  Password,
+  ConnectHardware,
+  ConfirmHardware,
+  Complete,
+}
+
+export enum DomainLinkingState {
+  None,
+  Initial,
   Password,
   ConnectHardware,
   ConfirmHardware,
@@ -150,8 +242,6 @@ export enum SwapState {
   Blockchain,
   Password,
   WaitTokens,
-  ConnectHardware,
-  ConfirmHardware,
   Complete,
   SelectTokenFrom,
   SelectTokenTo,
@@ -174,13 +264,22 @@ export enum SwapErrorType {
 }
 
 export enum SwapType {
+  /** The swap is on-chain, i.e. performed via a DEX */
   OnChain,
+  /** The swap is crosschain (Changelly CEX) and happens within a single account */
+  CrosschainInsideWallet,
+  /** The swap is crosschain (Changelly CEX), the "in" token is sent from the app, and the "out" token is sent outside */
   CrosschainFromWallet,
+  /**
+   * The swap is crosschain (Changelly CEX), the "in" token is sent manually by the user from another source, and the
+   * "out" token is sent to the user account.
+   */
   CrosschainToWallet,
 }
 
 export enum DappConnectState {
   Info,
+  SelectAccount,
   Password,
   ConnectHardware,
   ConfirmHardware,
@@ -190,9 +289,8 @@ export enum HardwareConnectState {
   Connect,
   Connecting,
   Failed,
-  ConnectedWithSeveralWallets,
-  ConnectedWithSingleWallet,
-  WaitingForBrowser,
+  Connected,
+  WaitingForRemoteTab,
 }
 
 export enum StakingState {
@@ -213,6 +311,7 @@ export enum StakingState {
   ClaimPassword,
   ClaimConnectHardware,
   ClaimConfirmHardware,
+  ClaimComplete,
 }
 
 export enum VestingUnfreezeState {
@@ -240,6 +339,14 @@ export enum SettingsState {
   BackupWallet,
 }
 
+export enum MintCardState {
+  Initial,
+  Password,
+  ConnectHardware,
+  ConfirmHardware,
+  Done,
+}
+
 export enum ActiveTab {
   Receive,
   Transfer,
@@ -252,7 +359,6 @@ export enum ContentTab {
   Activity,
   Explore,
   Nft,
-  NotcoinVouchers,
 }
 
 export enum MediaType {
@@ -276,60 +382,84 @@ export type UserToken = {
   keywords?: string[];
   cmcSlug?: string;
   totalValue: string;
+  type?: ApiTokenType;
   color?: string;
   codeHash?: string;
+  /** A small dim label to show in the UI right after the token name */
+  label?: string;
+  /** True if this is a staking token (created from ApiStakingState) */
+  isStaking?: boolean;
+  stakingId?: string;
 };
 
 export type UserSwapToken = Omit<UserToken, 'change24h' | 'chain'> & {
-  chain: ApiChain | string;
+  chain: ApiChain | (string & {});
   isPopular: boolean;
 };
 
 export type TokenPeriod = '1D' | '7D' | '1M' | '3M' | '1Y' | 'ALL';
 
+export type TokenChartMode = 'price' | 'netWorth';
+
 export type PriceHistoryPeriods = Partial<Record<ApiPriceHistoryPeriod, ApiHistoryList>>;
 
 export type DieselStatus = 'not-available' | 'not-authorized' | 'pending-previous' | 'available' | 'stars-fee';
 
-export interface Account {
-  title?: string;
-  addressByChain: Record<ApiChain, string>;
-  isHardware?: boolean;
-  ledger?: {
-    index: number;
-    driver: ApiLedgerDriver;
-  };
+export type AccountType = 'mnemonic' | 'hardware' | 'view';
+
+export interface AccountChain {
+  address: string;
+  domain?: string;
+  isMultisig?: true;
 }
 
-export interface AssetPairs {
-  [slug: string]: {
-    isReverseProhibited?: boolean;
-    isMultichain?: boolean;
-  };
+export interface Account {
+  title?: string;
+  type: AccountType;
+  byChain: Partial<Record<ApiChain, AccountChain>>;
+  isTemporary?: true;
 }
+
+export type AssetPairs = Record<string, {
+  isReverseProhibited?: boolean;
+}>;
 
 export interface AccountState {
   balances?: {
     bySlug: ApiBalanceBySlug;
   };
   activities?: {
-    isLoading?: boolean;
     byId: Record<string, ApiActivity>;
-    idsBySlug?: Record<string, string[]>;
+    /**
+     * The array values are sorted by the activity type (newest to oldest).
+     * Undefined means that the activities haven't been loaded, [] means that there are no activities.
+     */
     idsMain?: string[];
-    newestTransactionsBySlug?: Record<string, ApiTransaction>;
+    /** The record values follow the same rules as `idsMain` */
+    idsBySlug?: Record<string, string[]>;
+    newestActivitiesBySlug?: Record<string, ApiActivity>;
     isMainHistoryEndReached?: boolean;
     isHistoryEndReachedBySlug?: Record<string, boolean>;
-    localTransactions?: ApiTransactionActivity[];
-  };
-  byChain?: {
-    [chain in ApiChain]?: { isFirstTransactionsLoaded?: boolean };
+    localActivityIds?: string[];
+    /** Doesn't include the local activities */
+    pendingActivityIds?: Partial<Record<ApiChain, string[]>>;
+    /**
+     * May be false when the actual activities are actually loaded (when the app has been loaded from the cache).
+     * The initial activities should be considered loaded if `idsMain` is not undefined.
+     */
+    areInitialActivitiesLoaded?: Partial<Record<ApiChain, boolean>>;
   };
   nfts?: {
-    byAddress: Record<string, ApiNft>;
+    byAddress?: Record<string, ApiNft>;
     orderedAddresses?: string[];
-    currentCollectionAddress?: string;
-    selectedAddresses?: string[];
+    currentCollection?: ApiNftCollection;
+    selectedNfts?: ApiNft[];
+    dnsExpiration?: Record<string, number>;
+    linkedAddressByAddress?: Record<string, string>;
+    collectionTabs?: ApiNftCollection[];
+    wasTelegramGiftsAutoAdded?: boolean;
+    isLoadedByAddress?: Record<string, true>;
+    isFullLoadingByChain?: Partial<Record<ApiChain, boolean>>;
   };
   blacklistedNftAddresses?: string[];
   whitelistedNftAddresses?: string[];
@@ -342,15 +472,19 @@ export interface AccountState {
     address: ApiNft['address'];
     name: ApiNft['name'];
   };
-  dappLastOpenedDatesByOrigin?: Record<string, number>;
+  currentNftForAttributes?: ApiNft;
+  shouldShowOwnerInNftAttributes?: true;
+  dappLastOpenedDatesByUrl?: Record<string, number>;
   isBackupRequired?: boolean;
-  activeDappOrigin?: string;
   currentTokenSlug?: string;
   currentActivityId?: string;
   currentTokenPeriod?: TokenPeriod;
+  tokenNetWorthHistory?: Record<string, PriceHistoryPeriods>;
   savedAddresses?: SavedAddress[];
   activeContentTab?: ContentTab;
   landscapeActionsActiveTabIndex?: ActiveTab;
+  activitiesUpdateStartedAt?: number;
+  balanceUpdateStartedAt?: number;
 
   // Staking
   staking?: {
@@ -374,13 +508,19 @@ export interface AccountState {
 
   isDieselAuthorizationStarted?: boolean;
   isLongUnstakeRequested?: boolean;
+  isCardMinting?: boolean;
+  receiveModalChain?: ApiChain;
+  invoiceTokenSlug?: string;
 
-  dapps?: ApiDapp[];
+  dapps?: StoredDappConnection[];
   currentSiteCategoryId?: number;
+
+  config?: ApiAccountConfig;
+  isAppReady?: boolean;
 }
 
 export interface AccountSettings {
-  orderedSlugs?: string[];
+  pinnedSlugs?: string[];
   alwaysShownSlugs?: string[];
   alwaysHiddenSlugs?: string[];
   deletedSlugs?: string[];
@@ -390,12 +530,22 @@ export interface AccountSettings {
   cardBackgroundNft?: ApiNft;
   accentColorNft?: ApiNft;
   accentColorIndex?: number;
+  isAllowSuspiciousActions?: boolean;
 }
 
 export interface SavedAddress {
   name: string;
   address: string;
   chain: ApiChain;
+}
+
+export interface AddressBookItemData {
+  name: string;
+  address: string;
+  chain: ApiChain | undefined;
+  domain?: string;
+  isHardware?: boolean;
+  isSavedAddress?: boolean;
 }
 
 export interface NftTransfer {
@@ -406,7 +556,7 @@ export interface NftTransfer {
 }
 
 export type GlobalState = {
-  DEBUG_capturedId?: number;
+  DEBUG_randomId?: number;
 
   appState: AppState;
 
@@ -417,11 +567,14 @@ export type GlobalState = {
     isLoading?: boolean;
     mnemonic?: string[];
     mnemonicCheckIndexes?: number[];
-    accountId?: string;
-    addressByChain?: Record<ApiChain, string>;
+    hardwareSelectedIndices?: number[];
     error?: string;
     password?: string;
-    isBackupModalOpen?: boolean;
+    isImportModalOpen?: boolean;
+    accounts?: AuthAccount[];
+    forceAddingTonOnlyAccount?: boolean;
+    initialAddAccountState?: AccountSelectorState; // Initial rendering state for the `AddAccountModal` component
+    shouldHideAddAccountBackButton?: boolean;
   };
 
   biometrics: {
@@ -433,14 +586,21 @@ export type GlobalState = {
   nativeBiometricsError?: string;
 
   hardware: {
-    hardwareState?: HardwareConnectState;
-    hardwareWallets?: LedgerWalletInfo[];
-    hardwareSelectedIndices?: number[];
-    isRemoteTab?: boolean;
+    hardwareState: HardwareConnectState;
+    chain: ApiChain;
+    /**
+     * If true, `hardwareWallets` will be populated before the `hardwareState` switches to `Connected`.
+     * This is slow, so use it only when necessary.
+     */
+    shouldLoadWallets?: true;
+    /** All the wallets belong to `chain` */
+    hardwareWallets?: ApiLedgerWalletInfo[];
     isLedgerConnected?: boolean;
-    isTonAppConnected?: boolean;
+    isChainAppConnected?: boolean;
     availableTransports?: LedgerTransport[];
     lastUsedTransport?: LedgerTransport;
+    /** Loading flag for paginated wallet fetch (Show More) */
+    isLoading?: boolean;
   };
 
   currentTransfer: {
@@ -462,7 +622,6 @@ export type GlobalState = {
     promiseId?: string;
     txId?: string;
     rawPayload?: string;
-    parsedPayload?: ApiParsedPayload;
     stateInit?: string;
     shouldEncrypt?: boolean;
     isToNewAddress?: boolean;
@@ -472,8 +631,12 @@ export type GlobalState = {
     isMemoRequired?: boolean;
     // Every time this field value changes, the `amount` value should be actualized using `preserveMaxTransferAmount`
     diesel?: ApiFetchEstimateDieselResult;
-    withDiesel?: boolean;
+    isGasless?: boolean;
     isGaslessWithStars?: boolean;
+    scamWarningType?: ScamWarningType;
+    isTransferReadonly?: boolean;
+    isOfframp?: boolean;
+    isNftBurn?: boolean;
   };
 
   currentSwap: {
@@ -492,17 +655,17 @@ export type GlobalState = {
     errorType?: SwapErrorType;
     shouldResetOnClose?: boolean;
     isLoading?: boolean;
-    shouldEstimate?: boolean;
+    /**
+     * When is `true`, does several things: shows the estimating indicator in the UI, blocks the form submission, and
+     * instructs the UI and the actions to perform an estimation regardless.
+     */
     isEstimating?: boolean;
     inputSource?: SwapInputSource;
-    swapType?: SwapType;
+    /** The address to send the "out" tokens to. Used only when the swap type is `CrosschainFromWallet`. */
     toAddress?: string;
     payinAddress?: string;
     payoutAddress?: string;
     payinExtraId?: string;
-    pairs?: {
-      bySlug: Record<string, AssetPairs>;
-    };
     limits?: {
       fromMin?: string;
       fromMax?: string;
@@ -514,6 +677,7 @@ export type GlobalState = {
     isDexLabelChanged?: true;
     currentDexLabel?: ApiSwapDexLabel;
     bestRateDexLabel?: ApiSwapDexLabel;
+    maxAmountFromBackend?: string;
     // Fees. Undefined values mean that these fields are unknown.
     networkFee?: string;
     realNetworkFee?: string;
@@ -532,6 +696,7 @@ export type GlobalState = {
   };
 
   exploreData?: {
+    featuredTitle?: string;
     categories: ApiSiteCategory[];
     sites: ApiSite[];
   };
@@ -542,11 +707,51 @@ export type GlobalState = {
     promiseId?: string;
     isLoading?: boolean;
     transactions?: ApiDappTransfer[];
+    /** What else should happen after submitting the transactions (in addition to the transactions) */
+    emulation?: Pick<ApiEmulationResult, 'activities' | 'realFee'>;
+    /** Unix seconds */
+    validUntil?: number;
     vestingAddress?: string;
     viewTransactionOnIdx?: number;
-    fee?: bigint;
-    dapp?: ApiDapp;
+    dapp?: StoredDappConnection;
+    operationChain?: ApiChain;
     error?: string;
+    shouldHideTransfers?: boolean;
+    // Deal with solana b58/b64 issues based on requested method
+    isLegacyOutput?: boolean;
+  };
+
+  currentDappSignData: {
+    state: SignDataState;
+    isSse?: boolean;
+    promiseId?: string;
+    isLoading?: boolean;
+    dapp?: StoredDappConnection;
+    operationChain?: ApiChain;
+    payloadToSign?: SignDataPayload;
+    error?: string;
+  };
+
+  currentDomainRenewal: {
+    addresses?: string[];
+    state: DomainRenewalState;
+    isLoading?: boolean;
+    error?: string;
+    // There's only one commission because the transaction has no change
+    realFee?: bigint;
+    txId?: string;
+  };
+
+  currentDomainLinking: {
+    address?: string;
+    state: DomainLinkingState;
+    isLoading?: boolean;
+    error?: string;
+    realFee?: bigint;
+    walletAddress?: string;
+    walletAddressName?: string;
+    resolvedWalletAddress?: string;
+    txId?: string;
   };
 
   dappConnectRequest?: {
@@ -554,9 +759,9 @@ export type GlobalState = {
     isSse?: boolean;
     promiseId?: string;
     accountId?: string;
-    dapp: ApiDapp;
+    dapp: StoredDappConnection;
     permissions?: ApiDappPermissions;
-    proof?: ApiTonConnectProof;
+    proof?: TonConnectProof;
     error?: string;
   };
 
@@ -570,7 +775,6 @@ export type GlobalState = {
     error?: string;
   };
 
-  stakingInfo?: ApiStakingCommonData;
   stakingDefault: ApiStakingState;
 
   accounts?: {
@@ -583,8 +787,18 @@ export type GlobalState = {
     bySlug: Record<string, ApiTokenWithPrice>;
   };
 
+  currencyRates: ApiCurrencyRates;
+
   swapTokenInfo: {
     bySlug: Record<string, ApiSwapAsset>;
+    /** Whether the API has loaded and provided the tokens */
+    isLoaded?: true;
+  };
+
+  swapVersion: ApiSwapVersion;
+
+  swapPairs?: {
+    bySlug: Record<string, AssetPairs>;
   };
 
   tokenPriceHistory: {
@@ -595,55 +809,68 @@ export type GlobalState = {
 
   walletVersions?: {
     currentVersion: ApiTonWalletVersion;
-    byId: Record<string, ApiWalletInfo[]>;
+    byId: Record<string, ApiWalletWithVersionInfo[]>;
   };
 
   settings: {
     state: SettingsState;
     theme: Theme;
     animationLevel: AnimationLevel;
+    isSeasonalThemingDisabled?: boolean;
+    developerSettingsOverrides?: DeveloperSettingsOverrides;
     langCode: LangCode;
     byAccountId: Record<string, AccountSettings>;
     areTinyTransfersHidden?: boolean;
     canPlaySounds?: boolean;
     isInvestorViewEnabled?: boolean;
     isTonProxyEnabled?: boolean;
-    isTonMagicEnabled?: boolean;
     isDeeplinkHookEnabled?: boolean;
     isPasswordNumeric?: boolean; // Backwards compatibility for non-numeric passwords from older versions
     isTestnet?: boolean;
     isSecurityWarningHidden?: boolean;
     areTokensWithNoCostHidden: boolean;
-    isSortByValueEnabled?: boolean;
     importToken?: {
       isLoading?: boolean;
       token?: UserToken | UserSwapToken;
+      error?: string;
     };
     authConfig?: AuthConfig;
-    baseCurrency?: ApiBaseCurrency;
+    baseCurrency: ApiBaseCurrency;
     isAppLockEnabled?: boolean;
     autolockValue?: AutolockValueType;
+    isAutoConfirmEnabled?: boolean;
+    isSensitiveDataHidden?: true;
+    orderedAccountIds?: string[];
+    selectedExplorerIds?: Partial<Record<ApiChain, string>>;
   };
 
   dialogs: DialogType[];
-  notifications: NotificationType[];
+  toasts: ToastType[];
   currentAccountId?: string;
-  isAddAccountModalOpen?: boolean;
+  currentTemporaryViewAccountId?: string;
+  isAccountSelectorOpen?: boolean;
+  accountSelectorActiveTab?: number;
+  accountSelectorViewMode?: 'cards' | 'list';
   isBackupWalletModalOpen?: boolean;
   isHardwareModalOpen?: boolean;
   isStakingInfoModalOpen?: boolean;
   isQrScannerOpen?: boolean;
+  isCustomizeWalletModalOpen?: boolean;
+  customizeWalletReturnTo?: 'accountSelector' | 'settings';
   areSettingsOpen?: boolean;
+  isExploreOpen?: boolean;
   isAppUpdateAvailable?: boolean;
   // Force show the "Update MyTonWallet" pop-up on all platforms
   isAppUpdateRequired?: boolean;
+  seasonalTheme?: ApiBackendConfig['seasonalTheme'];
+  isPromotionModalOpen?: boolean;
   confettiRequestedAt?: number;
   isPinAccepted?: boolean;
   chainForOnRampWidgetModal?: ApiChain;
+  chainForOffRampWidgetModal?: ApiChain;
   isInvoiceModalOpen?: boolean;
   isReceiveModalOpen?: boolean;
   isVestingModalOpen?: boolean;
-  shouldForceAccountEdit?: boolean;
   isIncorrectTimeNotificationReceived?: boolean;
   currentBrowserOptions?: {
     url: string;
@@ -651,9 +878,17 @@ export type GlobalState = {
     subtitle?: string;
   };
 
+  currentMintCard?: {
+    type?: ApiMtwCardType;
+    state?: MintCardState;
+    error?: string;
+    isLoading?: boolean;
+  };
+
   currentQrScan?: {
     currentTransfer?: GlobalState['currentTransfer'];
     currentSwap?: GlobalState['currentSwap'];
+    currentDomainLinking?: GlobalState['currentDomainLinking'];
   };
 
   latestAppVersion?: string;
@@ -662,6 +897,7 @@ export type GlobalState = {
     isLimitedRegion: boolean;
     isSwapDisabled: boolean;
     isOnRampDisabled: boolean;
+    isOffRampDisabled: boolean;
     isNftBuyingDisabled: boolean;
     isCopyStorageEnabled?: boolean;
     supportAccountsCount?: number;
@@ -676,19 +912,29 @@ export type GlobalState = {
     noGhostAnimation?: boolean;
   };
 
+  currentTransactionInfo: {
+    state: TransactionInfoState;
+    txId?: string;
+    chain?: ApiChain;
+    activities?: ApiActivity[];
+    selectedActivityIndex?: number;
+    error?: string;
+  };
+
   isLoadingOverlayOpen?: boolean;
-  activitiesUpdateStartedAt?: number;
-  balanceUpdateStartedAt?: number;
 
   pushNotifications: {
     isAvailable?: boolean;
     userToken?: string;
     platform?: CapacitorPlatform;
-    enabledAccounts: Record<string, Partial<ApiNotificationsAccountValue>>;
+    enabledAccounts: string[]; // Values - account ids
   };
 
+  isAppLockActive?: boolean;
   isManualLockActive?: boolean;
   appLockHideBiometrics?: boolean;
+  // The app is open in fullscreen mode in Telegram MiniApp on mobile
+  isFullscreen?: boolean;
 };
 
 export interface ActionPayloads {
@@ -700,19 +946,23 @@ export interface ActionPayloads {
   resetAuth: undefined;
   startCreatingWallet: undefined;
   afterCheckMnemonic: undefined;
+  afterCongratulations: { isImporting?: boolean };
   skipCheckMnemonic: undefined;
-  restartCheckMnemonicIndexes: { worldsCount: number };
-  cancelDisclaimer: undefined;
+  restartCheckMnemonicIndexes: {
+    wordsCount: number;
+    preserveIndexes?: number[];
+  };
   afterCreatePassword: { password: string; isPasswordNumeric?: boolean };
   startCreatingBiometrics: undefined;
   afterCreateBiometrics: undefined;
-  skipCreateBiometrics: undefined;
+  skipCreateBiometrics: { isImporting: boolean };
   cancelCreateBiometrics: undefined;
   afterCreateNativeBiometrics: undefined;
   skipCreateNativeBiometrics: undefined;
   createPin: { pin: string; isImporting: boolean };
   confirmPin: { isImporting: boolean };
   cancelConfirmPin: { isImporting: boolean };
+  cancelCheckPassword: undefined;
   startImportingWallet: undefined;
   afterImportMnemonic: { mnemonic: string[] };
   startImportingHardwareWallet: { driver: ApiLedgerDriver };
@@ -721,32 +971,39 @@ export interface ActionPayloads {
   cleanAuthError: undefined;
   openAbout: undefined;
   closeAbout: undefined;
+  openDisclaimer: undefined;
+  closeDisclaimer: undefined;
+  startImportViewAccount: undefined;
+  closeImportViewAccount: undefined;
+  openAuthImportWalletModal: undefined;
+  closeAuthImportWalletModal: undefined;
   openAuthBackupWalletModal: undefined;
   openMnemonicPage: undefined;
-  openCreateBackUpPage: undefined;
   openCheckWordsPage: undefined;
   closeCheckWordsPage: { isBackupCreated?: boolean } | undefined;
-  initializeHardwareWalletModal: { shouldDelegateToNative?: boolean };
-  initializeHardwareWalletConnection: { transport: LedgerTransport; shouldDelegateToNative?: boolean };
-  connectHardwareWallet: { transport?: LedgerTransport; noRetry?: boolean };
+  initializeHardwareWalletModal: undefined;
+  initializeHardwareWalletConnection: { transport: LedgerTransport };
   createHardwareAccounts: undefined;
-  addHardwareAccounts: {
-    wallets: ({ accountId: string; address: string; walletInfo: LedgerWalletInfo } | undefined)[];
-  };
-  loadMoreHardwareWallets: { lastIndex: number };
-  createAccount: { password: string; isImporting: boolean; isPasswordNumeric?: boolean; version?: ApiTonWalletVersion };
+  addHardwareAccounts: { accounts: { accountId: string; byChain: Account['byChain'] }[] };
+  loadMoreHardwareWallets: undefined;
+  createAccount: { password: string; isImporting: boolean; isPasswordNumeric?: boolean };
   afterSelectHardwareWallets: { hardwareSelectedIndices: number[] };
   resetApiSettings: { areAllDisabled?: boolean } | undefined;
   checkAppVersion: undefined;
-  importAccountByVersion: { version: ApiTonWalletVersion };
+  importAccountByVersion: { version: ApiTonWalletVersion; isTestnetSubwalletId?: boolean };
+  importViewAccount: { addressByChain: ApiImportAddressByChain };
+  openTemporaryViewAccount: { addressByChain: Partial<Record<ApiChain, string>> };
+  saveTemporaryAccount: undefined;
 
   selectToken: { slug?: string } | undefined;
   openBackupWalletModal: undefined;
   closeBackupWalletModal: undefined;
   setIsBackupRequired: { isMnemonicChecked: boolean };
-  openHardwareWalletModal: undefined;
+  openHardwareWalletModal: { chain: ApiChain };
   closeHardwareWalletModal: undefined;
-  resetHardwareWalletConnect: undefined;
+  openCustomizeWalletModal: { returnTo?: 'accountSelector' | 'settings' };
+  closeCustomizeWalletModal: undefined;
+  resetHardwareWalletConnect: { chain: ApiChain; shouldLoadWallets?: boolean };
   setTransferScreen: { state: TransferState };
   setTransferAmount: { amount?: bigint };
   setTransferToAddress: { toAddress?: string };
@@ -761,11 +1018,14 @@ export interface ActionPayloads {
     nfts?: ApiNft[];
     binPayload?: string;
     stateInit?: string;
+    isTransferReadonly?: boolean;
+    isOfframp?: boolean;
   } | undefined;
   changeTransferToken: { tokenSlug: string; withResetAmount?: boolean };
   fetchTransferFee: {
     tokenSlug: string;
     toAddress: string;
+    amount?: bigint;
     comment?: string;
     shouldEncrypt?: boolean;
     binPayload?: string;
@@ -783,53 +1043,64 @@ export interface ActionPayloads {
     comment?: string;
     shouldEncrypt?: boolean;
     nfts?: ApiNft[];
-    withDiesel?: boolean;
+    isGasless?: boolean;
     isBase64Data?: boolean;
     binPayload?: string;
     isGaslessWithStars?: boolean;
     stateInit?: string;
+    isNftBurn?: boolean;
   };
   submitTransferConfirm: undefined;
-  submitTransferPassword: { password: string };
-  submitTransferHardware: undefined;
+  submitTransfer: { password?: string } | undefined;
   clearTransferError: undefined;
   cancelTransfer: { shouldReset?: boolean } | undefined;
-  showDialog: { title?: string; message: string };
+  showTransferScamWarning: { type: ScamWarningType };
+  dismissTransferScamWarning: undefined;
+  showDialog: DialogType;
   dismissDialog: undefined;
-  showError: { error?: ApiAnyDisplayError | string };
-  showNotification: { message: string; icon?: string };
-  dismissNotification: undefined;
+  showError: { error?: ApiAnyDisplayError | TeactNode | string };
+  showToast: { message: string; icon?: string };
+  dismissToast: undefined;
   initLedgerPage: undefined;
   afterSignIn: undefined;
-  signOut: { isFromAllAccounts?: boolean } | undefined;
+  signOut: { level: SignOutLevel; accountId?: string };
   cancelCaching: undefined;
-  afterSignOut: { isFromAllAccounts?: boolean } | undefined;
+  afterSignOut: { shouldReset?: boolean } | undefined;
   addAccount: { method: AuthMethod; password: string; isAuthFlow?: boolean };
   addAccount2: { method: AuthMethod; password: string };
   switchAccount: { accountId: string; newNetwork?: ApiNetwork };
   renameAccount: { accountId: string; title: string };
   clearAccountError: undefined;
   clearAccountLoading: undefined;
-  verifyHardwareAddress: undefined;
+  setIsAccountLoading: { isLoading: true | undefined };
+  verifyHardwareAddress: { chain: ApiChain };
   authorizeDiesel: undefined;
   fetchTransferDieselState: { tokenSlug: string };
-  setIsAuthLoading: { isLoading?: boolean };
+  setIsAuthLoading: { isLoading: true | undefined };
 
-  fetchTokenTransactions: { limit: number; slug: string; shouldLoadWithBudget?: boolean };
-  fetchAllTransactions: { limit: number; shouldLoadWithBudget?: boolean };
-  resetIsHistoryEndReached: { slug: string } | undefined;
-  fetchNfts: undefined;
+  fetchPastActivities: { slug?: string; shouldLoadWithBudget?: boolean };
   showActivityInfo: { id: string };
-  showAnyAccountTx: { txId: string; accountId: string; network: ApiNetwork };
-  showAnyAccountTokenActivity: { slug: string; accountId: string; network: ApiNetwork };
+  showAnyAccountTx: { txId: string; accountId: string; network: ApiNetwork; chain: ApiChain };
   showTokenActivity: { slug: string };
   closeActivityInfo: { id: string };
-  openNftCollection: { address: string };
+  fetchActivityDetails: { id: string };
+
+  // External transaction info (deeplink)
+  openTransactionInfo:
+    | { txId: string; chain: ApiChain; activities?: ApiActivity[] }
+    | { txHash: string; chain: ApiChain; activities?: ApiActivity[] };
+  closeTransactionInfo: undefined;
+  selectTransactionInfoActivity: { index: number };
+  fetchNftsFromCollection: { collection: ApiNftCollection };
+  clearNftCollectionLoading: { collection: ApiNftCollection };
+  openNftCollection: { chain: ApiChain; address: string };
   closeNftCollection: undefined;
-  selectNfts: { addresses: string[] };
+  selectNfts: { nfts: ApiNft[] };
   selectAllNfts: { collectionAddress?: string };
   clearNftSelection: { address: string };
   clearNftsSelection: undefined;
+  addCollectionTab: { collection: ApiNftCollection; isAuto?: boolean };
+  removeCollectionTab: { collection: ApiNftCollection };
   burnNfts: { nfts: ApiNft[] };
   addNftsToBlacklist: { addresses: ApiNft['address'][] };
   addNftsToWhitelist: { addresses: ApiNft['address'][] };
@@ -844,22 +1115,40 @@ export interface ActionPayloads {
     isCollection: boolean;
   };
   closeHideNftModal: undefined;
+  openNftAttributesModal: { nft: ApiNft; withOwner?: true };
+  closeNftAttributesModal: undefined;
+
+  openExplore: undefined;
+  closeExplore: undefined;
 
   closeAnyModal: undefined;
-  closeAllOverlays: undefined;
   submitSignature: { password: string };
   clearSignatureError: undefined;
   cancelSignature: undefined;
 
   addSavedAddress: { address: string; name: string; chain: ApiChain };
   removeFromSavedAddress: { address: string; chain: ApiChain };
+  checkTransferAddress: { address?: string; chain?: ApiChain };
 
+  openAccountSelector: undefined;
+  closeAccountSelector: undefined;
+  setAccountSelectorTab: { tab: number };
+  setAccountSelectorViewMode: { mode: 'cards' | 'list' };
   setCurrentTokenPeriod: { period: TokenPeriod };
-  openAddAccountModal: undefined;
+  openAddAccountModal: {
+    forceAddingTonOnlyAccount?: boolean;
+    initialState?: AccountSelectorState;
+    shouldHideBackButton?: boolean;
+  } | undefined;
   closeAddAccountModal: undefined;
 
   setLandscapeActionsActiveTabIndex: { index: ActiveTab };
   setActiveContentTab: { tab: ContentTab };
+
+  // BottomBar actions
+  switchToWallet: undefined;
+  switchToExplore: undefined;
+  switchToSettings: undefined;
 
   requestConfetti: undefined;
   setIsPinAccepted: undefined;
@@ -870,23 +1159,21 @@ export interface ActionPayloads {
   handleQrCode: { data: string };
 
   // Staking
-  startStaking: undefined;
-  startUnstaking: undefined;
+  startStaking: { tokenSlug: string } | undefined;
+  startUnstaking: { stakingId: string } | undefined;
   setStakingScreen: { state: StakingState };
   submitStakingInitial: { amount?: bigint; isUnstaking?: boolean } | undefined;
-  submitStakingPassword: { password: string; isUnstaking?: boolean };
-  submitStakingHardware: { isUnstaking?: boolean } | undefined;
+  submitStaking: { password?: string; isUnstaking?: boolean } | undefined;
   clearStakingError: undefined;
   cancelStaking: undefined;
-  fetchStakingHistory: { limit?: number; offset?: number } | undefined;
+  fetchStakingHistory: undefined;
   fetchStakingFee: { amount: bigint };
   openStakingInfo: undefined;
   openAnyAccountStakingInfo: { accountId: string; network: ApiNetwork; stakingId: string };
   closeStakingInfo: undefined;
   changeCurrentStaking: { stakingId: string; shouldReopenModal?: boolean };
-  startStakingClaim: undefined;
-  submitStakingClaim: { password: string };
-  submitStakingClaimHardware: undefined;
+  startStakingClaim: { stakingId: string } | undefined;
+  submitStakingClaim: { password?: string } | undefined;
   cancelStakingClaim: undefined;
   openStakingInfoOrStart: undefined;
 
@@ -897,24 +1184,27 @@ export interface ActionPayloads {
   closeSettings: undefined;
   setTheme: { theme: Theme };
   setAnimationLevel: { level: AnimationLevel };
+  toggleSeasonalTheming: { isEnabled?: boolean };
+  setDeveloperSettingsOverride: DeveloperSettingsOverridePayload;
   toggleTinyTransfersHidden: { isEnabled?: boolean } | undefined;
   toggleInvestorView: { isEnabled?: boolean } | undefined;
   toggleCanPlaySounds: { isEnabled?: boolean } | undefined;
   toggleTonProxy: { isEnabled: boolean };
-  toggleTonMagic: { isEnabled: boolean };
   toggleDeeplinkHook: { isEnabled: boolean };
   startChangingNetwork: { network: ApiNetwork };
   changeNetwork: { network: ApiNetwork };
   changeLanguage: { langCode: LangCode };
+  setSelectedExplorerId: { chain: ApiChain; explorerId: string };
   closeSecurityWarning: undefined;
   toggleTokensWithNoCost: { isEnabled: boolean };
-  toggleSortByValue: { isEnabled: boolean };
-  updateOrderedSlugs: { orderedSlugs: string[] };
-  rebuildOrderedSlugs: undefined;
+  pinToken: { slug: string };
+  unpinToken: { slug: string };
   toggleTokenVisibility: { slug: string; shouldShow: boolean };
   addToken: { token: UserToken };
   deleteToken: { slug: string };
-  importToken: { address: string; isSwap?: boolean };
+  importToken: { chain: ApiChain; address: string };
+  updateOrderedAccountIds: { orderedAccountIds: string[] };
+  rebuildOrderedAccountIds: undefined;
   resetImportToken: undefined;
   closeBiometricSettings: undefined;
   openBiometricsTurnOn: undefined;
@@ -929,7 +1219,11 @@ export interface ActionPayloads {
   copyStorageData: undefined;
   setAppLockValue: { value?: AutolockValueType; isEnabled: boolean };
   setIsManualLockActive: { isActive?: boolean; shouldHideBiometrics?: boolean };
+  setIsAutoConfirmEnabled: { isEnabled: boolean };
+  setIsAllowSuspiciousActions: { isEnabled: boolean };
+  setInMemoryPassword: { password?: string; force?: boolean };
   openSettingsHardwareWallet: undefined;
+  apiUpdateWalletVersions: ApiUpdateWalletVersions;
 
   // Account Settings
   setCardBackgroundNft: { nft: ApiNft };
@@ -938,28 +1232,41 @@ export interface ActionPayloads {
   installAccentColorFromNft: { nft: ApiNft };
   clearAccentColorFromNft: undefined;
 
-  // TON Connect
+  // TON Connect common
+  apiUpdateDappLoading: ApiUpdateDappLoading;
+  apiUpdateDappCloseLoading: ApiUpdateDappCloseLoading;
+
+  // TON Connect connection
   submitDappConnectRequestConfirm: { accountId: string; password?: string };
-  submitDappConnectRequestConfirmHardware: { accountId: string };
-  submitDappConnectHardware: { accountId: string; signature: string };
   clearDappConnectRequestError: undefined;
   cancelDappConnectRequestConfirm: undefined;
   setDappConnectRequestState: { state: DappConnectState };
-  showDappTransfer: { transactionIdx: number };
+  apiUpdateDappConnect: ApiUpdateDappConnect;
+
+  // TON Connect transfer
   setDappTransferScreen: { state: TransferState };
-  clearDappTransferError: undefined;
+  showDappTransferTransaction: { transactionIdx: number };
   submitDappTransferConfirm: undefined;
-  submitDappTransferPassword: { password: string };
-  submitDappTransferHardware: undefined;
-  submitDappTransferHardware2: { signedMessages: ApiSignedTransfer[] };
+  submitDappTransfer: { password?: string } | undefined;
+  clearDappTransferError: undefined;
   cancelDappTransfer: undefined;
   closeDappTransfer: undefined;
+  apiUpdateDappSendTransaction: ApiUpdateDappSendTransactions;
+
+  // TON Connect SignData
+  setDappSignDataScreen: { state: SignDataState };
+  submitDappSignDataConfirm: undefined;
+  submitDappSignData: { password?: string } | undefined;
+  clearDappSignDataError: undefined;
+  cancelDappSignData: undefined;
+  closeDappSignData: undefined;
+  apiUpdateDappSignData: ApiUpdateDappSignData;
 
   getDapps: undefined;
   deleteAllDapps: undefined;
-  deleteDapp: { origin: string };
-  loadExploreSites: { isLandscape: boolean };
-  updateDappLastOpenedAt: { origin: string };
+  deleteDapp: { url: string; uniqueId: string };
+  loadExploreSites: { isLandscape: boolean; langCode: LangCode | undefined };
+  updateDappLastOpenedAt: { url: string };
 
   addSiteToBrowserHistory: { url: string };
   removeSiteFromBrowserHistory: { url: string };
@@ -967,12 +1274,14 @@ export interface ActionPayloads {
   closeBrowser: undefined;
   openSiteCategory: { id: number };
   closeSiteCategory: undefined;
-
-  apiUpdateDappConnect: ApiUpdateDappConnect;
-  apiUpdateDappSendTransaction: ApiUpdateDappSendTransactions;
-  apiUpdateDappLoading: ApiUpdateDappLoading;
-  apiUpdateDappCloseLoading: undefined;
-  apiUpdateWalletVersions: ApiUpdateWalletVersions;
+  switchAccountAndOpenUrl: {
+    accountId?: string;
+    network?: ApiNetwork;
+    url: string;
+    isExternal?: boolean;
+    title?: string;
+    subtitle?: string;
+  };
 
   // Swap
   submitSwap: { password: string };
@@ -988,18 +1297,13 @@ export interface ActionPayloads {
   switchSwapTokens: undefined;
   setSwapTokenIn: { tokenSlug: string };
   setSwapTokenOut: { tokenSlug: string };
-  setSwapAmountIn: { amount?: string };
-  setSwapIsMaxAmount: { isMaxAmount?: boolean };
+  setSwapAmountIn: { amount?: string; isMaxAmount?: boolean };
   setSwapAmountOut: { amount?: string };
   setSlippage: { slippage: number };
-  loadSwapPairs: { tokenSlug: string; shouldForceUpdate?: boolean };
-  clearSwapPairsCache: undefined;
-  estimateSwap: { shouldBlock: boolean; toncoinBalance: bigint; isEnoughToncoin?: boolean };
+  estimateSwap: undefined;
   setSwapScreen: { state: SwapState };
   clearSwapError: undefined;
-  estimateSwapCex: { shouldBlock: boolean };
   submitSwapCex: { password: string };
-  setSwapType: { type: SwapType };
   setSwapCexAddress: { toAddress: string };
   addSwapToken: { token: UserSwapToken };
   toggleSwapSettingsModal: { isOpen: boolean };
@@ -1008,6 +1312,9 @@ export interface ActionPayloads {
 
   openOnRampWidgetModal: { chain: ApiChain };
   closeOnRampWidgetModal: undefined;
+
+  openOffRampWidgetModal: undefined;
+  closeOffRampWidgetModal: undefined;
 
   // MediaViewer
   openMediaViewer: {
@@ -1019,12 +1326,19 @@ export interface ActionPayloads {
   };
   closeMediaViewer: undefined;
 
-  openReceiveModal: undefined;
+  openReceiveModal: { chain: ApiChain } | undefined;
   closeReceiveModal: undefined;
-  openInvoiceModal: undefined;
+  setReceiveActiveTab: { chain: ApiChain };
+  openInvoiceModal: { tokenSlug: string } | undefined;
+  changeInvoiceToken: { tokenSlug: string };
   closeInvoiceModal: undefined;
 
   loadPriceHistory: { slug: string; period: ApiPriceHistoryPeriod; currency?: ApiBaseCurrency };
+  loadTokenNetWorthHistory: {
+    slug: string;
+    period: ApiPriceHistoryPeriod;
+    currency?: ApiBaseCurrency;
+  };
 
   showIncorrectTimeError: undefined;
 
@@ -1035,12 +1349,17 @@ export interface ActionPayloads {
   openVestingModal: undefined;
   closeVestingModal: undefined;
   startClaimingVesting: undefined;
-  submitClaimingVesting: { password: string };
-  submitClaimingVestingHardware: undefined;
+  submitClaimingVesting: { password?: string } | undefined;
   clearVestingError: undefined;
   cancelClaimingVesting: undefined;
 
-  submitAppLockActivityEvent: undefined;
+  openMintCardModal: undefined;
+  closeMintCardModal: undefined;
+  openPromotionModal: undefined;
+  closePromotionModal: undefined;
+  startCardMinting: { type: ApiMtwCardType };
+  submitMintCard: { password?: string } | undefined;
+  clearMintCardError: undefined;
 
   toggleNotifications: { isEnabled: boolean };
   renameNotificationAccount: { accountId: string };
@@ -1050,6 +1369,30 @@ export interface ActionPayloads {
   deleteNotificationAccount: { accountId: string; withAbort?: boolean };
   deleteAllNotificationAccounts: undefined | { accountIds: string[] };
   registerNotifications: { userToken: string; platform: CapacitorPlatform };
+
+  openFullscreen: undefined;
+  closeFullscreen: undefined;
+  setAppLayout: { layout: AppLayout };
+
+  setIsSensitiveDataHidden: { isHidden: boolean };
+
+  openDomainRenewalModal: { accountId?: string; network?: ApiNetwork; addresses: string[] };
+  startDomainsRenewal: undefined;
+  checkDomainsRenewalDraft: { nfts: ApiNft[] };
+  submitDomainsRenewal: { password?: string } | undefined;
+  clearDomainsRenewalError: undefined;
+  cancelDomainsRenewal: undefined;
+
+  openDomainLinkingModal: { address: string };
+  startDomainLinking: undefined;
+  checkDomainLinkingDraft: { nft: ApiNft };
+  submitDomainLinking: { password?: string } | undefined;
+  clearDomainLinkingError: undefined;
+  cancelDomainLinking: undefined;
+
+  checkLinkingAddress: { address?: string };
+  setDomainLinkingWalletAddress: { address?: string };
+  setIsAppLockActive: { isActive: boolean };
 }
 
 export enum LoadMoreDirection {

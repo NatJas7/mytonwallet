@@ -1,16 +1,17 @@
 import type { TeactNode } from '../../lib/teact/teact';
-import React, {
-  memo, useLayoutEffect, useRef,
-} from '../../lib/teact/teact';
+import React, { memo, useLayoutEffect, useRef } from '../../lib/teact/teact';
+
+import type { SensitiveDataMaskSkin } from '../common/SensitiveDataMask';
 
 import { FRACTION_DIGITS } from '../../config';
 import { getNumberRegex } from '../../global/helpers/number';
 import buildClassName from '../../util/buildClassName';
+import { buildContentHtml } from './helpers/buildContentHtml';
 
 import useFontScale from '../../hooks/useFontScale';
 import useLastCallback from '../../hooks/useLastCallback';
 
-import { buildContentHtml } from './RichNumberInput';
+import SensitiveData from './SensitiveData';
 
 import styles from './Input.module.scss';
 
@@ -19,10 +20,15 @@ type OwnProps = {
   labelText?: string;
   value?: string;
   error?: string;
+  prefix?: string;
   suffix?: string;
   zeroValue?: string;
   decimals?: number;
   className?: string;
+  isSensitiveData?: true;
+  isSensitiveDataHidden?: true;
+  sensitiveDataMaskSkin?: SensitiveDataMaskSkin;
+  isStatic?: boolean;
   inputClassName?: string;
   labelClassName?: string;
   valueClassName?: string;
@@ -36,17 +42,21 @@ function RichNumberField({
   labelText,
   value,
   error,
+  prefix,
   suffix,
   zeroValue,
   decimals = FRACTION_DIGITS,
   className,
+  isSensitiveData,
+  isSensitiveDataHidden,
+  sensitiveDataMaskSkin,
+  isStatic,
   inputClassName,
   labelClassName,
   valueClassName,
   children,
 }: OwnProps) {
-  // eslint-disable-next-line no-null/no-null
-  const contentRef = useRef<HTMLInputElement | null>(null);
+  const contentRef = useRef<HTMLInputElement>();
   const prevValueRef = useRef<string>('');
   const { updateFontScale, isFontChangedRef } = useFontScale(contentRef, true);
 
@@ -54,7 +64,7 @@ function RichNumberField({
     const contentEl = contentRef.current!;
 
     const valueRegex = getNumberRegex(decimals);
-    const values = inputValue.toString().match(valueRegex);
+    const values = inputValue.match(valueRegex);
 
     // eslint-disable-next-line no-null/no-null
     if (values === null || values.length < 4 || values[0] === '') {
@@ -70,13 +80,10 @@ function RichNumberField({
     const textContent = values?.[0] || '';
     prevValueRef.current = inputValue;
 
-    const content = buildContentHtml({
-      values, suffix, decimals, withRadix: true,
-    });
-    contentEl.innerHTML = content;
+    contentEl.innerHTML = buildContentHtml(inputValue, prefix, suffix, decimals, true);
 
     if (textContent.length > MIN_LENGTH_FOR_SHRINK || isFontChangedRef.current) {
-      updateFontScale(content);
+      updateFontScale();
     }
   });
 
@@ -84,22 +91,23 @@ function RichNumberField({
     if (value) {
       renderValue(value);
     } else if (zeroValue) {
-      contentRef.current!.innerHTML = zeroValue;
+      contentRef.current!.textContent = zeroValue;
     }
-  }, [decimals, renderValue, value, zeroValue]);
+  }, [prefix, suffix, decimals, renderValue, value, zeroValue]);
 
   const inputWrapperFullClass = buildClassName(
     styles.input__wrapper,
+    isStatic && styles.inputWrapperStatic,
     inputClassName,
   );
   const inputFullClass = buildClassName(
+    styles.rich__value,
     styles.input,
-    styles.input_rich,
-    styles.input_large,
+    styles.large,
     styles.disabled,
     error && styles.error,
-    valueClassName,
     'rounded-font',
+    valueClassName,
   );
   const labelTextClassName = buildClassName(
     styles.label,
@@ -121,11 +129,25 @@ function RichNumberField({
         </label>
       )}
       <div className={inputWrapperFullClass}>
-        <div
-          ref={contentRef}
-          id={id}
-          className={inputFullClass}
-        />
+        {isSensitiveData ? (
+          <SensitiveData
+            isActive={isSensitiveDataHidden}
+            cols={8}
+            rows={3}
+            cellSize={16}
+            maskSkin={sensitiveDataMaskSkin}
+            // Adding `.large` to remove the excessive bottom padding created by SensitiveData (the `height` property does the job)
+            className={buildClassName(styles.rich, styles.large)}
+            contentClassName={styles.richContent}
+            maskClassName={styles.mask}
+          >
+            <div ref={contentRef} id={id} className={inputFullClass} />
+          </SensitiveData>
+        ) : (
+          <div className={styles.rich}>
+            <div ref={contentRef} id={id} className={inputFullClass} />
+          </div>
+        )}
         {children}
       </div>
     </div>

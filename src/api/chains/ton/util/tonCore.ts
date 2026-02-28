@@ -1,6 +1,6 @@
-import type { OpenedContract } from '@ton/core';
+import type { OpenedContract, StateInit } from '@ton/core';
 import {
-  Address, beginCell, Builder, Cell, Dictionary,
+  Address, beginCell, Builder, Cell, Dictionary, loadStateInit,
 } from '@ton/core';
 import { WalletContractV1R1 } from '@ton/ton/dist/wallets/WalletContractV1R1';
 import { WalletContractV1R2 } from '@ton/ton/dist/wallets/WalletContractV1R2';
@@ -12,18 +12,16 @@ import { WalletContractV3R2 } from '@ton/ton/dist/wallets/WalletContractV3R2';
 import { WalletContractV4 } from '@ton/ton/dist/wallets/WalletContractV4';
 import { WalletContractV5R1 } from '@ton/ton/dist/wallets/WalletContractV5R1';
 
-import type { ApiDnsZone, ApiNetwork } from '../../../types';
+import type { ApiNetwork } from '../../../types';
 import type { ApiTonWalletVersion, TokenTransferBodyParams } from '../types';
+import { ApiTokenImportError } from '../../../types';
+import { ApiCommonError } from '../../../types';
 
-import {
-  DEFAULT_TIMEOUT,
-  TONHTTPAPI_MAINNET_API_KEY,
-  TONHTTPAPI_MAINNET_URL,
-  TONHTTPAPI_TESTNET_API_KEY,
-  TONHTTPAPI_TESTNET_URL,
-} from '../../../../config';
+import { DEFAULT_TIMEOUT } from '../../../../config';
+import { getDnsZoneByCollection } from '../../../../util/dns';
 import { fromKeyValueArrays, mapValues } from '../../../../util/iteratees';
 import { logDebugError } from '../../../../util/logs';
+import withCache from '../../../../util/withCache';
 import withCacheAsync from '../../../../util/withCacheAsync';
 import { DnsItem } from '../contracts/DnsItem';
 import { JettonMinter } from '../contracts/JettonMaster';
@@ -33,41 +31,32 @@ import { StakingPool } from '../contracts/JettonStaking/StakingPool';
 import { JettonWallet } from '../contracts/JettonWallet';
 import { hexToBytes } from '../../../common/utils';
 import { getEnvironment } from '../../../environment';
-import {
-  DEFAULT_IS_BOUNCEABLE,
-  DNS_ZONES_MAP,
-  JettonOpCode,
-  LiquidStakingOpCode,
-  OpCode,
-  WORKCHAIN,
-} from '../constants';
+import { DEFAULT_IS_BOUNCEABLE, JettonOpCode, LiquidStakingOpCode, NETWORK_CONFIG, OpCode } from '../constants';
 import { generateQueryId } from './index';
 
 import { TonClient } from './TonClient';
 
-export type TonWalletType = typeof WalletContractV1R1
-| typeof WalletContractV1R2
-| typeof WalletContractV1R3
-| typeof WalletContractV2R1
-| typeof WalletContractV2R2
-| typeof WalletContractV3R1
-| typeof WalletContractV3R2
-| typeof WalletContractV4
-| typeof WalletContractV5R1;
+type TonWalletType = typeof WalletContractV1R1
+  | typeof WalletContractV1R2
+  | typeof WalletContractV1R3
+  | typeof WalletContractV2R1
+  | typeof WalletContractV2R2
+  | typeof WalletContractV3R1
+  | typeof WalletContractV3R2
+  | typeof WalletContractV4
+  | typeof WalletContractV5R1;
 
-export type TonWallet = OpenedContract<WalletContractV1R1
-| WalletContractV1R2
-| WalletContractV1R3
-| WalletContractV2R1
-| WalletContractV2R2
-| WalletContractV3R1
-| WalletContractV3R2
-| WalletContractV4
-| WalletContractV5R1>;
+export type TonWallet = WalletContractV1R1
+  | WalletContractV1R2
+  | WalletContractV1R3
+  | WalletContractV2R1
+  | WalletContractV2R2
+  | WalletContractV3R1
+  | WalletContractV3R2
+  | WalletContractV4
+  | WalletContractV5R1;
 
 const TON_MAX_COMMENT_BYTES = 127;
-
-let clientByNetwork: Record<ApiNetwork, TonClient> | undefined;
 
 export const walletClassMap: Record<ApiTonWalletVersion, TonWalletType> = {
   simpleR1: WalletContractV1R1,
@@ -81,36 +70,16 @@ export const walletClassMap: Record<ApiTonWalletVersion, TonWalletType> = {
   W5: WalletContractV5R1,
 };
 
-export function getTonClient(network: ApiNetwork = 'mainnet') {
-  if (!clientByNetwork) {
-    clientByNetwork = {
-      mainnet: new TonClient({
-        endpoint: TONHTTPAPI_MAINNET_URL,
-        timeout: DEFAULT_TIMEOUT,
-        apiKey: TONHTTPAPI_MAINNET_API_KEY,
-        headers: getEnvironment().apiHeaders,
-      }),
-      testnet: new TonClient({
-        endpoint: TONHTTPAPI_TESTNET_URL,
-        timeout: DEFAULT_TIMEOUT,
-        apiKey: TONHTTPAPI_TESTNET_API_KEY,
-        headers: getEnvironment().apiHeaders,
-      }),
-    };
-  }
+export const getTonClient = withCache((network: ApiNetwork) => {
+  const { apiHeaders, byNetwork } = getEnvironment();
 
-  return clientByNetwork[network];
-}
-
-export function getTonWalletContract(publicKeyHex: string, version: ApiTonWalletVersion) {
-  const walletClass = walletClassMap[version];
-  if (!walletClass) {
-    throw new Error('Unsupported wallet contract version');
-  }
-
-  const publicKey = Buffer.from(hexToBytes(publicKeyHex));
-  return walletClass.create({ workchain: WORKCHAIN, publicKey });
-}
+  return new TonClient({
+    endpoint: `${NETWORK_CONFIG[network].toncenterUrl}/api/v2/jsonRPC`,
+    timeout: DEFAULT_TIMEOUT,
+    apiKey: byNetwork[network].toncenterKey,
+    headers: apiHeaders,
+  });
+});
 
 export const resolveTokenWalletAddress = withCacheAsync(
   async (network: ApiNetwork, address: string, tokenAddress: string) => {
@@ -127,15 +96,14 @@ export const resolveTokenAddress = withCacheAsync(async (network: ApiNetwork, to
 });
 
 export const getWalletPublicKey = withCacheAsync(async (network: ApiNetwork, address: string) => {
-  try {
-    const res = await getTonClient(network).callGetMethod(Address.parse(address), 'get_public_key');
-    const bigintKey = res.stack.readBigNumber();
-    const hex = bigintKey.toString(16).padStart(64, '0');
-    return hexToBytes(hex);
-  } catch (err) {
-    logDebugError('getWalletPublicKey', err);
+  const res = await getTonClient(network).runMethodWithError(Address.parse(address), 'get_public_key');
+  if (res.exit_code !== 0) {
     return undefined;
   }
+
+  const bigintKey = res.stack.readBigNumber();
+  const hex = bigintKey.toString(16).padStart(64, '0');
+  return hexToBytes(hex);
 });
 
 export const getJettonPoolStakeWallet = withCacheAsync(async (
@@ -150,13 +118,29 @@ export const getJettonPoolStakeWallet = withCacheAsync(async (
   return tonClient.open(StakeWallet.createFromAddress(walletAddress));
 });
 
-export function getJettonMinterData(network: ApiNetwork, address: string) {
-  const contract = getTonClient(network).open(new JettonMinter(Address.parse(address)));
-  return contract.getJettonData();
-}
+export async function getJettonMinterData(network: ApiNetwork, address: string) {
+  let parsedAddress: Address;
+  try {
+    parsedAddress = Address.parse(address);
+  } catch {
+    return { error: ApiCommonError.InvalidAddress };
+  }
 
-export function oneCellFromBoc(bytes: Uint8Array) {
-  return Cell.fromBoc(Buffer.from(bytes));
+  const contract = getTonClient(network).open(new JettonMinter(parsedAddress));
+
+  try {
+    return await contract.getJettonData();
+  } catch (err) {
+    if (err instanceof Error) {
+      if (err.message.includes('exit_code: -13')) {
+        return { error: ApiTokenImportError.AddressDoesNotExist };
+      }
+      if (err.message.includes('exit_code: 11')) {
+        return { error: ApiTokenImportError.NotATokenAddress };
+      }
+    }
+    throw err;
+  }
 }
 
 export function toBase64Address(address: Address | string, isBounceable = DEFAULT_IS_BOUNCEABLE, network?: ApiNetwork) {
@@ -177,6 +161,17 @@ export function toRawAddress(address: Address | string) {
   return address.toRawString();
 }
 
+export function areAddressesEqual(address1: Address | string, address2: Address | string) {
+  if (address1 === address2) {
+    return true;
+  }
+
+  if (typeof address1 === 'string') address1 = Address.parse(address1);
+  if (typeof address2 === 'string') address2 = Address.parse(address2);
+
+  return address1.equals(address2);
+}
+
 export function buildTokenTransferBody(params: TokenTransferBodyParams) {
   const {
     queryId,
@@ -184,47 +179,31 @@ export function buildTokenTransferBody(params: TokenTransferBodyParams) {
     toAddress,
     responseAddress,
     forwardAmount,
+    forwardPayload,
+    noInlineForwardPayload,
     customPayload,
   } = params;
-  let forwardPayload = params.forwardPayload;
 
   let builder = new Builder()
     .storeUint(JettonOpCode.Transfer, 32)
-    .storeUint(queryId || generateQueryId(), 64)
+    .storeUint(queryId ?? generateQueryId(), 64)
     .storeCoins(tokenAmount)
     .storeAddress(Address.parse(toAddress))
     .storeAddress(Address.parse(responseAddress))
     .storeMaybeRef(customPayload)
     .storeCoins(forwardAmount ?? 0n);
 
-  if (forwardPayload instanceof Uint8Array) {
-    const freeBytes = Math.round(builder.availableBits / 8);
-    forwardPayload = packBytesAsSnake(forwardPayload, freeBytes);
-  }
-
-  if (!forwardPayload) {
-    builder.storeBit(false);
-  } else if (typeof forwardPayload === 'string') {
-    builder = builder.storeBit(false)
-      .storeUint(0, 32)
-      .storeBuffer(Buffer.from(forwardPayload));
-  } else if (forwardPayload instanceof Uint8Array) {
-    builder = builder.storeBit(false)
-      .storeBuffer(Buffer.from(forwardPayload));
-  } else {
-    builder = builder.storeBit(true)
-      .storeRef(forwardPayload);
-  }
+  builder = storeInlineOrRefCell(builder, forwardPayload, 0, noInlineForwardPayload);
 
   return builder.endCell();
 }
 
-export function parseBase64(base64: string) {
+export function parseBase64(base64: string): Cell {
   try {
     return Cell.fromBase64(base64);
   } catch (err) {
     logDebugError('parseBase64', err);
-    return Uint8Array.from(Buffer.from(base64, 'base64'));
+    return packBytesAsSnakeCell(Buffer.from(base64, 'base64'));
   }
 }
 
@@ -238,15 +217,6 @@ export function commentToBytes(comment: string): Uint8Array {
   bytes.set(buffer, 4);
 
   return bytes;
-}
-
-export function packBytesAsSnake(bytes: Uint8Array, maxBytes = TON_MAX_COMMENT_BYTES): Uint8Array | Cell {
-  const buffer = Buffer.from(bytes);
-  if (buffer.length <= maxBytes) {
-    return bytes;
-  }
-
-  return packBytesAsSnakeCell(bytes);
 }
 
 export function packBytesAsSnakeCell(bytes: Uint8Array): Cell {
@@ -269,7 +239,8 @@ export function packBytesAsSnakeCell(bytes: Uint8Array): Cell {
   return headCell ?? Cell.EMPTY;
 }
 
-export function packBytesAsSnakeForEncryptedData(data: Uint8Array): Uint8Array | Cell {
+export function packBytesAsSnakeForEncryptedData(data: Uint8Array): Cell {
+  // https://docs.ton.org/v3/documentation/smart-contracts/message-management/internal-messages#encryption-algorithm
   const ROOT_BUILDER_BYTES = 39;
   const MAX_CELLS_AMOUNT = 16;
 
@@ -366,14 +337,13 @@ export async function getDnsItemDomain(network: ApiNetwork, address: Address | s
   const nftData = await contract.getNftData();
   const collectionAddress = toBase64Address(nftData.collectionAddress, true);
 
-  const zone = Object.entries(DNS_ZONES_MAP)
-    .find(([, collection]) => collection === collectionAddress)?.[0] as ApiDnsZone | undefined;
+  const zone = getDnsZoneByCollection(collectionAddress);
 
-  const base = zone === '.t.me'
+  const base = zone?.isTelemint
     ? await contract.getTelemintDomain()
     : await contract.getDomain();
 
-  return `${base}${zone}`;
+  return `${base}.${zone?.suffixes[0]}`;
 }
 
 export function buildJettonUnstakePayload(jettonsToUnstake: bigint, forceUnstake?: boolean, queryId?: bigint) {
@@ -399,6 +369,7 @@ export function buildJettonClaimPayload(poolWallets: string[], queryId?: bigint)
     .endCell();
 }
 
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 export function unpackDicts(obj: Record<string, any | Dictionary<any, any>>): AnyLiteral {
   if (!isSimpleObject(obj)) {
     return obj;
@@ -420,4 +391,42 @@ function isSimpleObject(obj: any) {
   return obj !== null
     && typeof obj === 'object'
     && Object.getPrototypeOf(obj) === Object.prototype;
+}
+
+export function getOurFeePayload() {
+  return new Builder()
+    .storeUint(OpCode.OurFee, 32)
+    .endCell();
+}
+
+export function parseStateInitCell(stateInit: Cell | undefined): StateInit | undefined {
+  return stateInit && loadStateInit(stateInit.asSlice());
+}
+
+export function isSeqnoMismatchError(error: string) {
+  return error.match(/exitcode=(33|133)\D/);
+}
+
+export function isExpiredTransactionError(error: string) {
+  return error.match(/exitcode=(35|136)\D/);
+}
+
+/**
+ * Writes a cell to the builder in the `Either Cell ^Cell` TL-B format.
+ *
+ * @see https://docs.ton.org/v3/documentation/data-formats/tlb/types#either How Either is stored
+ */
+export function storeInlineOrRefCell(builder: Builder, cell?: Cell, marginBits = 0, noInline?: boolean) {
+  if (
+    cell
+    && !noInline
+    && cell.bits.length <= builder.availableBits - marginBits - 1 // 1 for `storeBit`
+    && cell.refs.length <= builder.availableRefs
+  ) {
+    return builder
+      .storeBit(0)
+      .storeSlice(cell.beginParse(true));
+  }
+
+  return builder.storeMaybeRef(cell);
 }
